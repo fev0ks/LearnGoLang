@@ -6,7 +6,7 @@ import (
 )
 
 type MyInterface interface {
-	SetDebug(debug bool) //TODO how does it work...
+	SetDebug(debug bool)
 	GetDebug() bool
 }
 

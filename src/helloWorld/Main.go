@@ -12,7 +12,22 @@ import (
 	"time"
 )
 
+const (
+	_ = iota
+	One
+	Two
+	Three = iota
+	Four
+)
+
 func main() {
+	//fmt.Printf("one = %v, two = %v, tree = %v, four = %v", One, Two, Three, Four)
+	fmt.Println(muFunc()) // = 1
+
+	//var i interface {}
+	//if i == nil { //true
+	//}
+
 	//funcs.ThrowPanic(12, 0)
 
 	//testVariables()
@@ -20,7 +35,7 @@ func main() {
 	//testArray()
 	//testLoops()
 	//testTrash()
-	testTypes()
+	//testTypes()
 	//testFunc()
 	//multithreading.StartThreads(5)
 	//multithreading.Chan()
@@ -30,6 +45,14 @@ func main() {
 	//testSwitch(0)
 	//testSwitch(99)
 
+}
+
+func muFunc() (i int) {
+	defer func() {
+		i++
+	}()
+	i = 2
+	return 0
 }
 
 func testVariables() {
@@ -75,6 +98,7 @@ func testFunc() {
 		result = a + b
 		return
 	}
+	//panic(1)
 	fmt.Printf("\nimSumFunc(3,5) = %v", imSumFunc(3, 5))
 	funcs.ThrowParsePanic("123", "12.4")
 	defer func() {
@@ -83,6 +107,7 @@ func testFunc() {
 			panic(err)
 		}
 	}()
+	//sort.Slice()
 }
 
 func testArray() {
