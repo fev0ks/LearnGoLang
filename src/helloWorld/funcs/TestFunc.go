@@ -61,6 +61,18 @@ func ThrowPanic(a, b int) {
 	fmt.Fprintf(os.Stdout, "%d / %d = %d\n", a, b, a/b)
 }
 
+//Error strconv.ParseInt: parsing "123": value out of range "strconv.ParseInt: parsing "123": value out of range"
+//0
+//2
+//3
+//4
+//1
+//1
+//2
+//4
+//3
+//0
+
 func ThrowParsePanic(a, b string) {
 	processErrorVar := processError
 	defer processErrorVar()
