@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"helloWorld/funcs"
 	"helloWorld/logging"
+	"helloWorld/multithreading"
 	_ "helloWorld/pkg/logging"
 	aliasForLogging "helloWorld/pkg/logging"
 	"helloWorld/types"
@@ -22,7 +23,7 @@ const (
 
 func main() {
 	//fmt.Printf("one = %v, two = %v, tree = %v, four = %v", One, Two, Three, Four)
-	fmt.Println(muFunc()) // = 1
+	//fmt.Println(muFunc()) // = 1
 
 	//var i interface {}
 	//if i == nil { //true
@@ -30,20 +31,20 @@ func main() {
 
 	//funcs.ThrowPanic(12, 0)
 
-	//testVariables()
-	//testLogger()
-	//testArray()
-	//testLoops()
-	//testTrash()
-	//testTypes()
-	//testFunc()
-	//multithreading.StartThreads(5)
-	//multithreading.Chan()
-	//multithreading.WaitGroup()
-	//testSwitch(2)
-	//testSwitch(1)
-	//testSwitch(0)
-	//testSwitch(99)
+	testVariables()
+	testLogger()
+	testArray()
+	testLoops()
+	testTrash()
+	testTypes()
+	testFunc()
+	multithreading.StartThreads(5)
+	multithreading.Chan()
+	multithreading.WaitGroup()
+	testSwitch(2)
+	testSwitch(1)
+	testSwitch(0)
+	testSwitch(99)
 
 }
 
@@ -55,34 +56,59 @@ func muFunc() (i int) {
 	return 0
 }
 
+//***
+//testVariables
+//v1 = 100
+//v2 = Hello!
+//v3 = [0 1 2 3 4 5 6 7 8 9]
+//v4 = [1000 2000 12334]
+//v5 = 50
+//v6 = 0xc00000a098
+//v66 = 100
+//v7[one] = 1
+//v7[zero] = 0
+//v8(10) = 11
+
 func testVariables() {
+	fmt.Printf("\n***\ntestVariables")
 	var v1 int = 100
 	fmt.Printf("\nv1 = %v ", v1)
 
 	var v2 string = "Hello!"
 	fmt.Printf("\nv2 = %v ", v2)
 
-	var v3 = [10]int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}
+	var v3 = [10]int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9} //[0 1 2 3 4 5 6 7 8 9]
 	fmt.Printf("\nv3 = %v ", v3)
 
 	var v4 = []int{1000, 2000, 12334}
-	fmt.Printf("\nv4 = %v ", v4)
+	fmt.Printf("\nv4 = %v ", v4) //[1000 2000 12334]
 
 	var v5 = struct{ f int }{50}
 	fmt.Printf("\nv5 = %v ", v5.f)
 
 	var v6 *int = &v1
-	fmt.Printf("\nv6 = %v ", v6)
+	fmt.Printf("\nv6 = %v ", v6) //0xc0000ac058
+
+	var v66 = *v6
+	fmt.Printf("\nv66 = %v ", v66) //100
 
 	var v7 = map[string]int{"one": 1, "two": 2, "three": 3}
-	fmt.Printf("\nv7[one] = %v ", v7["one"])
-	fmt.Printf("\nv7[zero] = %v ", v7["zero"])
+	fmt.Printf("\nv7[one] = %v ", v7["one"])   //v7[one] = 1
+	fmt.Printf("\nv7[zero] = %v ", v7["zero"]) //v7[zero] = 0
 
 	var v8 = func(a int) int { return a + 1 }
-	fmt.Printf("\nv8(10) = %v ", v8(10))
+	fmt.Printf("\nv8(10) = %v ", v8(10)) //v8(10) = 11
 }
 
+//***
+//testFunc
+//first = 2, second = 3, message = incremented by 1
+//result = 3, message = sum
+//fileName = , err = Ошибка при чтении файла ImNotFile: &{%!g(string=open) %!g(string=ImNotFile) %!g(syscall.Errno=2)}
+//imSumFunc(3,5) = 8
+//err is not nil PANIC!!!! Ошибка при чтении файла ImNotFile: &{%!g(string=open) %!g(string=ImNotFile) %!g(syscall.Errno=2)}
 func testFunc() {
+	fmt.Printf("\n***\ntestFunc")
 	first, second, message := funcs.IncTwo(1, 2)
 	fmt.Printf("\nfirst = %v, second = %v, message = %v", first, second, message)
 
@@ -100,19 +126,39 @@ func testFunc() {
 	}
 	//panic(1)
 	fmt.Printf("\nimSumFunc(3,5) = %v", imSumFunc(3, 5))
-	funcs.ThrowParsePanic("123", "12.4")
+	//funcs.ThrowParsePanic("123", "12.4")
 	defer func() {
 		if err != nil {
 			fmt.Printf("\nerr is not nil PANIC!!!! %v", err)
-			panic(err)
+			//panic(err)
+			//Error strconv.ParseInt: parsing "123": value out of range "strconv.ParseInt: parsing "123": value out of range"
+			//panic: Ошибка при чтении файла ImNotFile: &{%!g(string=open) %!g(string=ImNotFile) %!g(syscall.Errno=2)}
 		}
 	}()
 	//sort.Slice()
 }
 
+//***
+//testArray
+//updated myNumber: 123 123 123 123 123
+//not initiated myNumbers: [0 0 0 0 0]
+//notUpdated myNumber: 1 2 3 4 5
+//initiated myNumbers2: [1 2 3 4 5]
+//[123 123 ]
+//
+//slice: [1 2   ], slice.len: 5
+//slice: [1 2 3 4 ], slice.len: 5
+//slice: ['updated in slice 2' 2 3 4 ], slice2: ['updated in slice 2' 2 3 4 ]
+//im in slice...
+//im in slice...
+//im in slice...
+//im in slice...
+//im in slice...
+
 func testArray() {
+	fmt.Printf("\n***\ntestArray")
 	var myNumbers [5]int
-	fmt.Print("updated myNumber: ")
+	fmt.Print("\nupdated myNumber: ")
 	for _, myNumber := range myNumbers {
 		myNumber = 123
 		fmt.Printf("%v ", myNumber) // myNumber is a *copy* of myNumbers's element
@@ -143,13 +189,31 @@ func testArray() {
 	//slice[len(slice)+1] = "out of length" //runtime error: index out of range [11] with length 10
 	fmt.Printf("\nslice: %v, slice.len: %v", slice, len(slice))
 
+	var slice2 = slice
+	slice2[0] = "'updated in slice 2'"
+	fmt.Printf("\nslice: %v, slice2: %v", slice, slice2)
 	for range slice {
 		fmt.Printf("\nim in slice...")
 	}
-
 }
 
+//***
+//testSwitch value=2
+//>One 2
+//***
+//testSwitch value=1
+//One 1
+//Zero 1
+//***
+//testSwitch value=0
+//Zero 0
+//***
+//testSwitch value=99
+//default 99
+//99 - 'a' + 10 = 120
+
 func testSwitch(value int) {
+	fmt.Printf("\n***\ntestSwitch value=%v", value)
 	switch value {
 	case 2, 3, 4, 5, 6, 7, 8, 9:
 		fmt.Printf("\n>One %v", value)
@@ -173,8 +237,18 @@ func testSwitch(value int) {
 	}
 }
 
-func testLoops() {
+//***
+//testLoops
+//sumVar: 45
+//1 2 3 4 5 6 7 8 9 10 11 finish
+//m = map[one:1 three:3 two:2]
+//key = blabla, val = 123
+//key = blabla, val = 123
+//key = blabla, val = 123
+//m = map[one:1 three:3 two:2]
 
+func testLoops() {
+	fmt.Printf("\n***\ntestLoops")
 	var sumVar = 0
 	for i := 0; i < 10; i++ {
 		sumVar += i
@@ -202,32 +276,64 @@ func testLoops() {
 	fmt.Printf("\nm = %v ", m)
 }
 
+//***
+//testLogger
+//nilLogger = <nil>
+//copyOfNilLogger copy of nil as Interface is not nil but nil = <nil>
+//reflect.ValueOf(copyOfNilLogger).IsNil copyOfNilLogger = <nil>
+//defaultLogger = { false}[Info]  Debug is turned off; defaultLogger
+//
+//
+//bigNullLogger = {{ false} { false}}[Info]  Debug is turned off; bigNullLogger
+//[Info]  Debug is turned off; bigNullLogger
+//
+//[Info] 2021-04-26T11:42:57+03:00 loggerTurnOn - This is a Info statement...
+//[Debug] 2021-04-26T11:42:57+03:00 loggerTurnOn - This is a Debug statement...
+//[Error] 2021-04-26T11:42:57+03:00 loggerTurnOn - This is a Error statement...
+//[Warn] 2021-04-26T11:42:57+03:00 loggerTurnOn - This is a Warn statement...
+//
+//[Info] 2021-04-26T11:42:57+03:00 Debug is turned off; loggerTurnOff - This is a Info statement...
+//[Debug] 2021-04-26T11:42:57+03:00 Debug is turned off; loggerTurnOff - This is a Debug statement...
+//[Error] 2021-04-26T11:42:57+03:00 loggerTurnOff - This is a Error statement...
+//[Warn] 2021-04-26T11:42:57+03:00 loggerTurnOff - This is a Warn statement...
+//
+//[Info] 2021-04-26T11:42:57+03:00 Debug is turned off; newLoggerTurnOff - This is a Info statement...
+//[Error] 2021-04-26T11:42:57+03:00 newLoggerTurnOff - This is a Error statement...
+//[Info] 2021-04-26T11:42:57+03:00 Debug is turned off; loggerTurnOn.SwitchDebug(false) - This is a Info statement...
+//
+//[Info] 2021-04-26T11:42:57+03:00 loggerTurnOn.SwitchDebug(true) - This is a Info statement...
+//
+//2021-04-26T11:42:57+03:00 Im aliasForLogging
+//[Info] 2021-04-26T11:42:57+03:00 I'm logger[0] = &{2006-01-02T15:04:05Z07:00 true}
+//[Info] 2021-04-26T11:42:57+03:00 I'm logger[1] = &{2006-01-02T15:04:05Z07:00 true}
+
 func testLogger() {
+	fmt.Printf("\n***\ntestLogger")
 	//var newLogger = new (logging.Logger{new (logging.MyInterface), "123", true})
 	//logging.Info = logging.Debug //so sad...
 	var nilLogger *logging.Logger = nil
 	var copyOfNilLogger logging.MyInterface = nilLogger
 
 	if nilLogger == nil {
-		fmt.Printf("nilLogger = %v\n", nilLogger)
+		fmt.Printf("\nnilLogger = %v", nilLogger)
 	}
 	//nilLogger.SetDebug(true) // invalid memory address or nil pointer dereference
 
 	if copyOfNilLogger != nil {
-		fmt.Printf("copyOfNilLogger copy of nil as Interface is not nil but nil = %v\n", copyOfNilLogger)
+		fmt.Printf("\ncopyOfNilLogger copy of nil as Interface is not nil but nil = %v", copyOfNilLogger)
 	}
 
 	if reflect.ValueOf(copyOfNilLogger).IsNil() {
-		fmt.Printf("reflect.ValueOf(copyOfNilLogger).IsNil copyOfNilLogger = %v\n", copyOfNilLogger)
+		fmt.Printf("\nreflect.ValueOf(copyOfNilLogger).IsNil copyOfNilLogger = %v", copyOfNilLogger)
 	}
 
 	var defaultLogger logging.Logger
-	fmt.Printf("defaultLogger = %v\n", defaultLogger)
+	fmt.Printf("\ndefaultLogger = %v", defaultLogger)
 	defaultLogger.Log(logging.Info, "defaultLogger")
 
 	fmt.Println()
 	var bigNullLogger logging.BigLogger
-	fmt.Printf("bigNullLogger = %v\n", bigNullLogger)
+	fmt.Printf("\nbigNullLogger = %v", bigNullLogger)
 	bigNullLogger.Log(logging.Info, "bigNullLogger")
 	//bigNullLogger.SetDebug(true) //hmmmmm.....doesn't work when there are 2 interfaces with the same methods
 	//fmt.Printf("bigNullLogger.GetDebug() = %v\n", bigNullLogger.GetDebug()) //hmmmmm.....invalid memory address or nil pointer dereference - GetDebug is not implemented but available and compiled
@@ -274,41 +380,83 @@ func testLogger() {
 
 }
 
+//***
+//testTypes
+//cat: Animal{type = cat, name = 'Snow', weight = 7.5, height = 40}
+//cat.String(): Animal{type = cat, name = 'Snow', weight = 7.5, height = 40}Animal{type = cat, name = 'Snow', weight = 7.5, height = 40}
+//
+//nullCat: Animal{type = , name = '', weight = 0, height = 0}
+//dog: Animal{type = dog, name = 'Sharik', weight = 70.5, height = 80}
+//dog.GetType(): dog
+//Type of animal = dog
+//cat.GetType(): cat
+//Type of animal = cat
+//newCat: Animal{type = cat, name = 'Snow', weight = 7.5, height = 40}
+//newCat.String(): Animal{type = cat, name = 'Snow', weight = 7.5, height = 40}Animal{type = cat, name = 'Snow', weight = 7.5, height = 40}
+//
+//newDog: Animal{type = dog, name = 'Sharik', weight = 70.5, height = 80}
+//newDog.GetType(): dog
+//Type of animal = dog
+
 func testTypes() {
+	fmt.Printf("\n***\ntestTypes")
 	cat := types.Animal{AnimalType: "cat", Name: "Snow", Weight: 7.5, Height: 40}
-	fmt.Printf("cat: %v \n", cat)
-	fmt.Printf("cat.String(): %v \n", cat.String())
+	fmt.Printf("\ncat: %v", cat)
+	fmt.Printf("\ncat.String(): %v", cat.String())
 
 	types.Print(cat)
 
 	var nullCat types.Animal
-	fmt.Printf("nullCat: %v \n", nullCat)
+	fmt.Printf("\nnullCat: %v", nullCat)
 
 	dog := types.Dog{Animal: types.Animal{AnimalType: "dog", Name: "Sharik", Weight: 70.5, Height: 80}}
-	fmt.Printf("dog: %v \n", dog)
+	fmt.Printf("\ndog: %v", dog)
 	//types.Print(dog) //Type does not implement 'Stringer' as some methods are missing: String() string
 
-	fmt.Printf("dog.GetType(): %v \n", dog.GetType())
+	fmt.Printf("\ndog.GetType(): %v", dog.GetType())
 	types.PrintAnimalType(dog)
-	fmt.Printf("cat.GetType(): %v \n", cat.GetType())
+	fmt.Printf("\ncat.GetType(): %v", cat.GetType())
 	types.PrintAnimalType(cat)
 
 	newCat := types.NewCat("Snow", 7.5, 40)
-	fmt.Printf("newCat: %v \n", newCat)
-	fmt.Printf("newCat.String(): %v \n", newCat.String())
+	fmt.Printf("\nnewCat: %v", newCat)
+	fmt.Printf("\nnewCat.String(): %v", newCat.String())
 	types.Print(newCat)
 
 	newDog := types.NewDog("Sharik", 70.5, 80)
-	fmt.Printf("newDog: %v \n", newDog)
+	fmt.Printf("\nnewDog: %v", newDog)
 	//types.Print(dog) //Type does not implement 'Stringer' as some methods are missing: String() string
 
-	fmt.Printf("newDog.GetType(): %v \n", newDog.GetType())
+	fmt.Printf("\nnewDog.GetType(): %v", newDog.GetType())
 	types.PrintAnimalType(newDog)
 	//fmt.Printf("newCat.GetType(): %v \n", newCat.GetType()) //newCat is not Animal, (a Animal) GetType()
 	//types.PrintAnimalType(newCat)
 }
 
+//***
+//testTrash
+//Hello world
+//
+//defaultBool = false
+//sum(1, 2, 123) = 126
+//sum(1, 2, 3) = 6
+//sum(1, 2, 0) = 3
+//str1 = 123
+//
+//155 == 155 = truestr1 = 123, str2 = 123321
+//str1 = 123, str3 = 0xc00004a6f0
+//funcs.SumTreeNumbers(defaultInt, 2, 3) is less than 7
+//
+//maxInt = 127
+//maxInt8PlusOne = -128
+//Sin(1.0) 0.8414709848078965(4+6i)
+//(-2-2i)
+//(-5+10i)
+//-5
+//10
+
 func testTrash() {
+	fmt.Printf("\n***\ntestTrash")
 	a := 1
 	b := 2
 	c := 3
@@ -321,14 +469,14 @@ func testTrash() {
 	var defaultBool bool
 	var maxInt = MaxInt8
 
-	fmt.Println("Hello world")
-	fmt.Printf("defaultBool = %t\n", defaultBool)
-	fmt.Printf("sum(%v, %v, %v) = %v\n", a, b, variable, funcs.SumTreeNumbers(a, b, variable))
-	fmt.Printf("sum(%v, %v, %v) = %v\n", a, b, c, funcs.SumTreeNumbers(a, b, c))
-	fmt.Printf("sum(%v, %v, %v) = %v\n", a, b, defaultInt, funcs.SumTreeNumbers(a, b, defaultInt))
+	fmt.Println("\nHello world")
+	fmt.Printf("\ndefaultBool = %t", defaultBool)
+	fmt.Printf("\nsum(%v, %v, %v) = %v", a, b, variable, funcs.SumTreeNumbers(a, b, variable))
+	fmt.Printf("\nsum(%v, %v, %v) = %v", a, b, c, funcs.SumTreeNumbers(a, b, c))
+	fmt.Printf("\nsum(%v, %v, %v) = %v", a, b, defaultInt, funcs.SumTreeNumbers(a, b, defaultInt))
 
-	fmt.Printf("str1 = %s\n", str1)
-	fmt.Printf("%v == %v = %v\n", num1, num2, num1 == num2)
+	fmt.Printf("\nstr1 = %s\n", str1)
+	fmt.Printf("\n%v == %v = %v", num1, num2, num1 == num2)
 
 	str2 = str1
 	str2 += "321"
@@ -344,15 +492,15 @@ func testTrash() {
 	}
 
 	var maxInt8PlusOne = int8(maxInt + 1)
-	fmt.Printf("maxInt = %v\n", maxInt)
-	fmt.Printf("maxInt8PlusOne = %v\n", maxInt8PlusOne)
+	fmt.Printf("\nmaxInt = %v", maxInt)
+	fmt.Printf("\nmaxInt8PlusOne = %v", maxInt8PlusOne)
 	//if true {
 	//} // doesn't work = };
 	//else {
 	//}
 
 	x := Sin(1.0)
-	fmt.Printf("Sin(1.0) %v \n", x)
+	fmt.Printf("\nSin(1.0) %v", x)
 
 	var complex1 complex128 = complex(1, 2) // 1 + 2i
 	complex2 := 3 + 4i

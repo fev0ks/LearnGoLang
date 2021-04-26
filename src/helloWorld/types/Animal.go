@@ -45,7 +45,7 @@ func Print(s Stringer) {
 }
 
 func PrintAnimalType(s Type) {
-	fmt.Println(s.GetType())
+	fmt.Printf("\nType of animal = %s", s.GetType())
 }
 
 func (a Animal) String() string {
