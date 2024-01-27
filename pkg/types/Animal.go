@@ -59,3 +59,8 @@ func (c Cat) String() string {
 func (a Animal) GetType() string {
 	return a.AnimalType
 }
+
+func (a *Animal) UpdateAnimalName(name string) {
+	a.Name = name
+	fmt.Printf("\na.String(): %v", a.String())
+}

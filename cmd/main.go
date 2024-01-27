@@ -1,51 +1,119 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
-	"helloWorld/funcs"
-	"helloWorld/logging"
-	"helloWorld/multithreading"
-	_ "helloWorld/pkg/logging"
-	aliasForLogging "helloWorld/pkg/logging"
-	"helloWorld/types"
+	"io"
 	. "math"
+	"os"
 	"reflect"
+	"runtime"
 	"time"
+
+	"test.com/pkg/funcs"
+	"test.com/pkg/logging"
+	aliasForLogging "test.com/pkg/pkg/logging"
+	"test.com/pkg/types"
 )
 
 const (
 	_ = iota
 	One
 	Two
-	Three = iota
+	Three
 	Four
 )
 
 func main() {
+	var x interface{} = nil
+	_ = x
 	//fmt.Printf("one = %v, two = %v, tree = %v, four = %v", One, Two, Three, Four)
 	//fmt.Println(muFunc()) // = 1
 
 	//var i interface {}
 	//if i == nil { //true
 	//}
+	//i,k := 1,2
+	//i,k := 3,4
+	//fmt.Println(i,k,l)
 
 	//funcs.ThrowPanic(12, 0)
 
-	testVariables()
-	testLogger()
-	testArray()
-	testLoops()
-	testTrash()
+	//testGoFUnc()
+	//testBufio()
+	//testWriteString()
+	//testVariables()
+	//testLogger()
+	//testArray()
+	//testLoops()
+	//testTrash()
 	testTypes()
-	testFunc()
-	multithreading.StartThreads(5)
-	multithreading.Chan()
-	multithreading.WaitGroup()
-	testSwitch(2)
-	testSwitch(1)
-	testSwitch(0)
-	testSwitch(99)
+	//testFunc()
+	//multithreading.StartThreads(5)
+	//multithreading.Chan()
+	//multithreading.WaitGroup()
+	//testNewBlockVarDeclaration()
+	//multithreading.Start()
+	//testSwitch(2)
+	//testSwitch(1)
+	//testSwitch(0)
+	//testSwitch(99)
+}
 
+func testNewBlockVarDeclaration() {
+	x := 1
+	fmt.Println("I am x =", x)
+	if x == 1 {
+		x := 2
+		fmt.Println("I am a new x =", x)
+		x -= 3
+		fmt.Println("I am a updated new x =", x)
+		{
+			x := "Lol"
+			fmt.Println("I am a x in block =", x)
+			for i := 0; i < 3; i++ {
+				var x interface{} = nil
+				fmt.Println("I am a x in loop =", x)
+			}
+		}
+	}
+	fmt.Println("I am old x =", x)
+}
+
+func testBufio() {
+	var f *os.File
+	f = os.Stdin
+	defer f.Close()
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		fmt.Println(">", scanner.Text())
+	}
+}
+
+func testGoFUnc() {
+	runtime.GOMAXPROCS(1)
+	x := 0
+	go func() {
+		for {
+			runtime.Gosched()
+			x++
+		}
+	}()
+
+	time.Sleep(500 * time.Millisecond)
+	fmt.Println(x)
+}
+
+func testWriteString() {
+	myString := ""
+	arguments := os.Args
+	if len(arguments) == 1 {
+		myString = "Please give me one argument!"
+	} else {
+		myString = arguments[0]
+	}
+	io.WriteString(os.Stdout, myString)
+	io.WriteString(os.Stdout, "\n")
 }
 
 func muFunc() (i int) {
@@ -60,7 +128,7 @@ func muFunc() (i int) {
 //testVariables
 //v1 = 100
 //v2 = Hello!
-//v3 = [0 1 2 3 4 5 6 7 8 9]
+//v3 = [0 1 2 3 4 5 6 7 8 0]
 //v4 = [1000 2000 12334]
 //v5 = 50
 //v6 = 0xc00000a098
@@ -77,14 +145,20 @@ func testVariables() {
 	var v2 string = "Hello!"
 	fmt.Printf("\nv2 = %v ", v2)
 
-	var v3 = [10]int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9} //[0 1 2 3 4 5 6 7 8 9]
+	var v3 = [10]int{0, 1, 2, 3, 4, 5, 6, 7, 8} //[0 1 2 3 4 5 6 7 8 0]
 	fmt.Printf("\nv3 = %v ", v3)
 
-	var v4 = []int{1000, 2000, 12334}
+	var v4 = []int{1, 2, 3}
 	fmt.Printf("\nv4 = %v ", v4) //[1000 2000 12334]
+	//fmt.Printf("\nv4 = %v ", v4[3]) //panic: runtime error: index out of range [3] with length 3
+	v4 = append(v4, 4) //4
+	fmt.Printf("\nv4[3] = %v ", v4[3])
 
-	var v5 = struct{ f int }{50}
-	fmt.Printf("\nv5 = %v ", v5.f)
+	var v5 = struct {
+		f int
+		s string
+	}{50, "kek"}
+	fmt.Printf("\nv5 = %v ", v5)
 
 	var v6 *int = &v1
 	fmt.Printf("\nv6 = %v ", v6) //0xc0000ac058
@@ -100,13 +174,13 @@ func testVariables() {
 	fmt.Printf("\nv8(10) = %v ", v8(10)) //v8(10) = 11
 }
 
-//***
-//testFunc
-//first = 2, second = 3, message = incremented by 1
-//result = 3, message = sum
-//fileName = , err = Ошибка при чтении файла ImNotFile: &{%!g(string=open) %!g(string=ImNotFile) %!g(syscall.Errno=2)}
-//imSumFunc(3,5) = 8
-//err is not nil PANIC!!!! Ошибка при чтении файла ImNotFile: &{%!g(string=open) %!g(string=ImNotFile) %!g(syscall.Errno=2)}
+// ***
+// testFunc
+// first = 2, second = 3, message = incremented by 1
+// result = 3, message = sum
+// fileName = , err = Ошибка при чтении файла ImNotFile: &{%!g(string=open) %!g(string=ImNotFile) %!g(syscall.Errno=2)}
+// imSumFunc(3,5) = 8
+// err is not nil PANIC!!!! Ошибка при чтении файла ImNotFile: &{%!g(string=open) %!g(string=ImNotFile) %!g(syscall.Errno=2)}
 func testFunc() {
 	fmt.Printf("\n***\ntestFunc")
 	first, second, message := funcs.IncTwo(1, 2)
@@ -187,7 +261,8 @@ func testArray() {
 	slice[2] = "3"
 	slice[3] = "4"
 	//slice[len(slice)+1] = "out of length" //runtime error: index out of range [11] with length 10
-	fmt.Printf("\nslice: %v, slice.len: %v", slice, len(slice))
+	fmt.Printf("\nslice: %v, slice.len: %v\n", slice, len(slice))
+	fmt.Println("slice[4] =", slice[4])
 
 	var slice2 = slice
 	slice2[0] = "'updated in slice 2'"
@@ -406,6 +481,16 @@ func testTypes() {
 
 	types.Print(cat)
 
+	cat.UpdateAnimalName("NotSnow")
+	fmt.Printf("\nafter update cat.String(): %v", cat.String())
+
+	UpdateValueAnimalName(cat, "NowSnowByValue")
+	fmt.Printf("\nafter update by value cat.String(): %v", cat.String())
+
+	UpdateRefAnimalName(&cat, "NowSnowByRef")
+	fmt.Printf("\nafter update by ref cat.String(): %v", cat.String())
+	fmt.Println()
+
 	var nullCat types.Animal
 	fmt.Printf("\nnullCat: %v", nullCat)
 
@@ -431,6 +516,16 @@ func testTypes() {
 	types.PrintAnimalType(newDog)
 	//fmt.Printf("newCat.GetType(): %v \n", newCat.GetType()) //newCat is not Animal, (a Animal) GetType()
 	//types.PrintAnimalType(newCat)
+}
+
+func UpdateValueAnimalName(animal types.Animal, name string) {
+	animal.Name = name
+	fmt.Printf("\nanimal.String(): %v", animal.String())
+}
+
+func UpdateRefAnimalName(animal *types.Animal, name string) {
+	animal.Name = name
+	fmt.Printf("\nanimal.String(): %v", animal.String())
 }
 
 //***

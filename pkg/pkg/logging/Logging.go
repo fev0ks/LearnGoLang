@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-//duplicate file to check what will be if there are the same packages are used...
+// duplicate file to check what will be if there are the same packages are used...
 var debug bool
 
 func Debug(b bool) {

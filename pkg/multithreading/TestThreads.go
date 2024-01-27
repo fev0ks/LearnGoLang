@@ -61,7 +61,7 @@ func Chan() {
 
 func nonBufferChan() {
 	fmt.Printf("\n***\nnonBufferChan\n")
-	in := make(chan string, 0) // Создание небуферизованного канала in
+	in := make(chan string, 0) // Создание не буферизованного канала in
 	go write(5, in, "nonBufferChan")
 	go read(5, in)
 	time.Sleep(time.Duration(10 * sleepMs))
