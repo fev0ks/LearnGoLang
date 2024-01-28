@@ -8,8 +8,8 @@ import (
 func main() {
 	//slicer()
 	//extendSlice()
-	//interfaceSlice()
-	memLeak()
+	interfaceSlice()
+	//memLeak()
 
 }
 
@@ -57,6 +57,9 @@ func interfaceSlice() {
 
 	m := make([]int, 10)
 	fmt.Println(m, len(m), cap(m))
+
+	s4 := append(sl, sl...)
+	fmt.Println(s4, len(s4), cap(s4))
 }
 
 func add(s *[]interface{}) {

@@ -1,14 +1,15 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"sync"
-	"time"
 )
 
 func main() {
-	ch()
+	//mapInit()
+	m := make(map[int]int)
+	fmt.Println(len(m))
+
 	//m := map[int]int{1: 1, 2: 2, 3: 3}
 	//kek(m)
 	//fmt.Println(m)
@@ -22,6 +23,11 @@ func main() {
 	//fmt.Println(s1, len(s1), cap(s1))
 	//fmt.Println(s, len(s), cap(s))
 	//testAsyncMap()
+}
+
+func mapInit() {
+	//var m map[string]string
+	//m["qwe"] = "qwe" //panic: assignment to entry in nil map
 }
 
 func testAsyncMap() {
@@ -40,32 +46,6 @@ func testAsyncMap() {
 	}
 	wg.Wait()
 	fmt.Println(m)
-}
-
-func ch() {
-	sc := make(chan struct{})
-	cA, clA := context.WithCancel(context.Background())
-	cB, _ := context.WithTimeout(context.Background(), 4*time.Second)
-
-	go func() {
-		for {
-			select {
-			case <-cA.Done():
-				fmt.Println("A")
-				sc <- struct{}{}
-			case <-cB.Done():
-				fmt.Println("B")
-				sc <- struct{}{}
-			}
-		}
-	}()
-
-	time.Sleep(5 * time.Second)
-	clA()
-	<-sc
-	<-sc
-	<-sc
-	<-sc
 }
 
 func kek(m map[int]int) {
