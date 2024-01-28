@@ -1,7 +1,7 @@
 package main
 
-type Observer struct {
-}
-
-type PubSub[T any] struct {
-}
+//type Observer struct {
+//}
+//
+//type PubSub[T any] struct {
+//}

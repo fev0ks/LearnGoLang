@@ -13,6 +13,10 @@ type Do struct {
 }
 
 func main() {
+	ctxCancel()
+}
+
+func updateVar() {
 	var m Message
 
 	go func() {
@@ -50,6 +54,5 @@ func ctxCancel() {
 	time.Sleep(2 * time.Second)
 	cancelContextA()
 	<-sc
-	<-sc
-	<-sc
+	fmt.Println("end")
 }
