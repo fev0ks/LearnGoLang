@@ -38,8 +38,8 @@ func main() {
 	//fmt.Println(*a1.Val)
 	//fmt.Println(*a2.Val)
 	//a.b.Kek()
-
 }
+
 func copyPoint() {
 	c := car{
 		model: "BMW",
