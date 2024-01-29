@@ -1,7 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
+	"io"
+	"log"
 	"reflect"
 )
 
@@ -56,7 +59,8 @@ type A2 interface {
 
 func main() {
 	//nilInterface()
-	intUnderInt()
+	//intUnderInt()
+	testNilStructAsIntf()
 }
 
 func implInterface() {
@@ -104,5 +108,34 @@ func intUnderInt() {
 	a, ok := a2.(A) // A2 doesn't hide say2() of B type even A2 doesn't have this method
 	if ok {
 		a.say2()
+	}
+}
+
+func testNilStructAsIntf() {
+	//var myMap map[int]int // (&nil)
+	// make()
+	//myMap[0] = 1 // panic,
+
+	// bug = &bytes.Buffer{}
+	buf2 := new(bytes.Buffer)
+	write1(buf2) // p is Type '*bytes.Buffer', has value ''
+	if buf2 != nil {
+		fmt.Println(buf2)
+	}
+
+	var buf *bytes.Buffer // ? NewBuffer()
+	write1(buf)           // p is Type *bytes.Buffer, has value '<nil>'
+	if buf != nil {
+		fmt.Println(buf)
+	}
+}
+
+func write1(p io.Writer) { // io.Writer? - interface
+	fmt.Printf("p is Type '%s', has value '%v'\n", reflect.TypeOf(p), reflect.ValueOf(p))
+	if p != nil { // should actually prevent running
+		_, err := p.Write([]byte("test"))
+		if err != nil {
+			log.Fatal(err.Error())
+		}
 	}
 }
