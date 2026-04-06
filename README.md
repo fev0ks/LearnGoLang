@@ -7,6 +7,7 @@
 ## Как теперь читать проект
 
 - `topics/` — теперь это основной слой навигации и физической раскладки примеров по темам.
+- `docs/senior-golang-study` — отдельный теоретический трек по подготовке к Senior Go Developer вакансиям.
 - `topics/01-language-basics` — базовые заметки по языку: `slice`, `map`, `defer`, `interfaces`, `pointers`, `structs`, строки.
 - `topics/02-concurrency` — `chan`, goroutine, multithreading, rate limiting, lock-free и concurrency patterns.
 - `topics/03-runtime-and-internals` — `atomic`, alignment, typed `nil`, netpoll, syscall, tracing, generics, low-level поведение runtime.
@@ -53,3 +54,11 @@
 - [topics/06-algorithms-and-tasks/README.md](/Users/fev0ks/Projects/personal/LearnGoLang/topics/06-algorithms-and-tasks/README.md)
 - [topics/07-mixed-sandbox/README.md](/Users/fev0ks/Projects/personal/LearnGoLang/topics/07-mixed-sandbox/README.md)
 - [topics/08-interview-prep/README.md](/Users/fev0ks/Projects/personal/LearnGoLang/topics/08-interview-prep/README.md)
+
+## Теория И Подготовка
+
+- [docs/senior-golang-study/README.md](/Users/fev0ks/Projects/personal/LearnGoLang/docs/senior-golang-study/README.md)
+- [docs/senior-golang-study/05-system-design/README.md](/Users/fev0ks/Projects/personal/LearnGoLang/docs/senior-golang-study/05-system-design/README.md)
+- [docs/senior-golang-study/06-databases/README.md](/Users/fev0ks/Projects/personal/LearnGoLang/docs/senior-golang-study/06-databases/README.md)
+- [docs/senior-golang-study/07-message-brokers-and-streaming/README.md](/Users/fev0ks/Projects/personal/LearnGoLang/docs/senior-golang-study/07-message-brokers-and-streaming/README.md)
+- [docs/senior-golang-study/13-interview-practice/README.md](/Users/fev0ks/Projects/personal/LearnGoLang/docs/senior-golang-study/13-interview-practice/README.md)

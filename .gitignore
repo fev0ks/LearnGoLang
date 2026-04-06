@@ -1,2 +1,5 @@
 .DS_Store
 trace.out
+.idea/dbnavigator.xml
+.idea/go.imports.xml
+.idea/vcs.xml
