@@ -2,41 +2,109 @@ package main
 
 import (
 	"context"
-	"git.dnkbit.one/dnkbit/backend/proto-files/go/v1/common"
-	pb "git.dnkbit.one/dnkbit/backend/proto-files/go/v1/external_api/stream_service_external" // Импортируй сгенерированный gRPC-код
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/keepalive"
-	"google.golang.org/grpc/metadata"
-	"google.golang.org/grpc/status"
+	"errors"
+	"fmt"
+	"io"
 	"log"
+	"sync"
 	"time"
 )
 
-func main() {
-	// Подключаемся к gRPC-серверу
-	conn, err := grpc.NewClient("localhost:8076", grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithKeepaliveParams(keepalive.ClientParameters{Time: time.Duration(100) * time.Second, Timeout: 0}),
-	)
-	if err != nil {
-		log.Fatalf("Не удалось подключиться: %v", err)
+type UserEvent struct {
+	Kind string
+}
+
+type StreamAck struct {
+	Message string
+}
+
+type userEventStream interface {
+	Context() context.Context
+	Send(*UserEvent) error
+	Recv() (*StreamAck, error)
+	Close() error
+}
+
+type localStream struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+	sendCh chan *UserEvent
+	recvCh chan *StreamAck
+	once   sync.Once
+}
+
+func newLocalStream(parent context.Context) *localStream {
+	ctx, cancel := context.WithCancel(parent)
+	s := &localStream{
+		ctx:    ctx,
+		cancel: cancel,
+		sendCh: make(chan *UserEvent, 1),
+		recvCh: make(chan *StreamAck, 1),
 	}
-	defer conn.Close()
 
-	client := pb.NewStreamServiceClient(conn) // Создаем gRPC-клиента
+	go func() {
+		defer close(s.recvCh)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case event, ok := <-s.sendCh:
+				if !ok {
+					return
+				}
+				select {
+				case <-ctx.Done():
+					return
+				case s.recvCh <- &StreamAck{Message: fmt.Sprintf("ack for %s", event.Kind)}:
+				}
+			}
+		}
+	}()
 
-	// Открываем поток
-	md := metadata.Pairs("x-device-id", "1", "x-locale", "en", "x-platform-type", "3", "authorization", "eyJhbGciOiJIUzUxMiIsInR5cCI6IkpXVCJ9.eyJkZXZpY2VJZCI6IjEiLCJlbWFpbCI6IiIsImV4cCI6MTc5NDQzMzA0Mywib3BlcmF0aW9uVHlwZSI6IiIsInBob25lIjoiKzc5NjU3Nzc3Nzc4IiwicGxhdGZvcm0iOiIiLCJ0b2tlblR5cGUiOiJBQ0NFU1MiLCJ1c2VySWQiOiI0ZjUwZTA4OC0xYzNhLTQ3MWUtYTgwNC0wOTM0NDk1NDkwMGEiLCJ1c2VyVHlwZSI6IiJ9.X6aCMwItQm3Z8_Lz0pFm9-9IZk5Z-jqUGViAoxIp9ecKKmF1A_xrng6q2SDZVb7WbyT5ZhcFxaMdd1dL-8U4JA")
-	ctx := metadata.NewOutgoingContext(context.Background(), md)
+	return s
+}
+
+func (s *localStream) Context() context.Context {
+	return s.ctx
+}
+
+func (s *localStream) Send(event *UserEvent) error {
+	select {
+	case <-s.ctx.Done():
+		return s.ctx.Err()
+	case s.sendCh <- event:
+		return nil
+	}
+}
+
+func (s *localStream) Recv() (*StreamAck, error) {
+	select {
+	case <-s.ctx.Done():
+		return nil, s.ctx.Err()
+	case ack, ok := <-s.recvCh:
+		if !ok {
+			return nil, io.EOF
+		}
+		return ack, nil
+	}
+}
+
+func (s *localStream) Close() error {
+	s.once.Do(func() {
+		s.cancel()
+		close(s.sendCh)
+	})
+	return nil
+}
+
+func main() {
+	// Самодостаточный пример bidirectional stream-паттерна без внешних proto import'ов.
+	ctx := context.Background()
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
-	// Функция пересоздания stream
-	createStream := func() (pb.StreamService_TrackUserEventsClient, error) {
-		stream, err := client.TrackUserEvents(ctx, &common.EmptyRequest{})
-		if err != nil {
-			log.Printf("Ошибка при создании stream: %v", err)
-			return nil, err
-		}
+
+	createStream := func() (userEventStream, error) {
+		stream := newLocalStream(ctx)
 		log.Println("Stream успешно создан")
 		return stream, nil
 	}
@@ -58,11 +126,12 @@ func main() {
 			select {
 			case <-stream.Context().Done():
 				log.Println("context done")
+				return
 			default:
-				err := stream.SendMsg(&common.UserEvent{}) // Отправляем пустой запрос
+				err := stream.Send(&UserEvent{Kind: "ping"})
 				if err != nil {
 					log.Printf("Ошибка отправки ping: %v", err)
-					//return
+					return
 				}
 			}
 
@@ -76,69 +145,19 @@ func main() {
 		for {
 			resp, err := stream.Recv()
 			if err != nil {
-				st, _ := status.FromError(err)
-				log.Printf("Ошибка получения ответа: %v", st.Message())
+				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, io.EOF) {
+					log.Printf("Поток завершен: %v", err)
+					return
+				}
+				log.Printf("Ошибка получения ответа: %v", err)
 				break
 			}
-			log.Printf("Получен Pong: %s", resp.String())
+			log.Printf("Получен Pong: %s", resp.Message)
 		}
 	}()
 
-	select {}
+	<-ctx.Done()
+	if err := stream.Close(); err != nil {
+		log.Printf("Ошибка закрытия stream: %v", err)
+	}
 }
-
-//
-//func (server *GRPCServer) broadcastEventToUsersNew(ctx context.Context,
-//	wait *sync.WaitGroup,
-//	event *common.UserEvent,
-//	senderId string,
-//	agentIds []uuid.UUID,
-//) {
-//	for _, agentId := range agentIds {
-//		if senderId != agentId.String() {
-//			agentStream, agentExists := server.Cache.GetUserStream(agentId.String())
-//			if agentExists {
-//				wait.Add(1)
-//				select {
-//				case <-agentStream.Stream.Context().Done():
-//					wait.Done()
-//				default:
-//					if sendErr := server.sendEventWithRetry(agentStream.Stream, event, constants.MaxSendRetries, time.Second); sendErr != nil {
-//						agentStream.ErrorChannel <- sendErr
-//					}
-//					wait.Done()
-//				}
-//			} else {
-//				// broadcast event to other chat-service pods
-//				eventWrapper := &chatService.EventWrapper{
-//					AgentId: agentId.String(),
-//					Event:   event,
-//				}
-//				eventWrapperJson, marshalErr := protojson.Marshal(eventWrapper)
-//				if marshalErr != nil {
-//					server.log.Logger.Error(serviceErrors.ErrJsonMarshal.Default,
-//						zap.Error(marshalErr),
-//						zap.String("agent id", agentId.String()))
-//				} else {
-//					rabbitUtil.PublishMessage(ctx, server.EventPublisher, constants.ChatEventExchanger, server.Consumer.RoutingKey, eventWrapperJson, server.log.Logger)
-//				}
-//			}
-//		}
-//	}
-//}
-//
-//func (server *GRPCServer) sendEventWithRetry(stream chatService.ChatService_SubscribeToChatEventsNewServer, event *common.UserEvent, maxRetries int, delay time.Duration) error {
-//	for i := 0; i < maxRetries; i++ {
-//		if sendErr := stream.Send(event); sendErr != nil {
-//			eventJson, _ := json.Marshal(event)
-//			server.log.Logger.Error(serviceErrors.ErrSentUserEvent.Default,
-//				zap.Error(sendErr),
-//				zap.String("user event", string(eventJson)))
-//
-//			time.Sleep(delay)
-//			continue
-//		}
-//		return nil
-//	}
-//	return status.Errorf(codes.Aborted, serviceErrors.ErrSentUserEvent.Default)
-//}

@@ -2,6 +2,14 @@
 
 Сюда складывай материалы по самому языку и runtime.
 
+Базовые заметки:
+- [Value vs Pointer Semantics](./value-vs-pointer-semantics.md)
+- [Interfaces, Method Sets And Nil Pitfalls](./interfaces-method-sets-and-nil.md)
+- [Escape Analysis](./escape-analysis.md)
+- [Garbage Collector](./garbage-collector.md)
+- [Scheduler And Preemption](./scheduler-and-preemption.md)
+- [Memory Model](./memory-model.md)
+
 Темы:
 - указатели, value vs reference semantics;
 - интерфейсы, method sets, nil interface pitfalls;

@@ -2,6 +2,9 @@
 
 Сюда складывай материалы по SQL и storage design.
 
+Отдельные заметки:
+- `migrations-in-go.md` - чем отличаются `goose`, `golang-migrate`, `Atlas`, `gormigrate`, `dbmate` и что выбирать на практике
+
 Темы:
 - PostgreSQL internals на практическом уровне;
 - индексы: B-tree, partial, composite, covering;

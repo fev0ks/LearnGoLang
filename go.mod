@@ -7,7 +7,6 @@ go 1.23.0
 toolchain go1.23.3
 
 require (
-	git.dnkbit.one/dnkbit/backend/proto-files v1.10.255
 	github.com/go-redis/redis/v8 v8.11.5
 	github.com/sirupsen/logrus v1.6.0
 	go.mongodb.org/mongo-driver v1.17.1

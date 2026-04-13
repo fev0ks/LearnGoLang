@@ -2,6 +2,10 @@
 
 Сюда собирай темы про протоколы, API и сетевое поведение сервисов.
 
+Базовые заметки:
+- [Rate Limiting](./rate-limiting.md)
+- [Rate Limiting Examples](./rate-limiting-examples/README.md)
+
 Темы:
 - HTTP/1.1, HTTP/2, keep-alive, connection pooling;
 - REST, gRPC, async APIs;

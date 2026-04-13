@@ -15,14 +15,15 @@
 Рекомендуемый порядок прохождения:
 1. `01-go-core`
 2. `09-concurrency-and-performance`
-3. `04-architecture-and-patterns`
-4. `05-system-design`
-5. `06-databases`
-6. `07-message-brokers-and-streaming`
-7. `10-testing-and-quality`
-8. `11-devops-and-observability`
-9. `12-security`
-10. `13-interview-practice`
+3. `16-go-version-differences`
+4. `04-architecture-and-patterns`
+5. `05-system-design`
+6. `06-databases`
+7. `07-message-brokers-and-streaming`
+8. `10-testing-and-quality`
+9. `11-devops-and-observability`
+10. `12-security`
+11. `13-interview-practice`
 
 Разделы:
 - `00-roadmap` - приоритеты, план подготовки, чек-листы
@@ -41,6 +42,7 @@
 - `13-interview-practice` - вопросы, ответы, сторителлинг, мок-интервью
 - `14-hands-on-labs` - практические мини-проекты и drill-задачи
 - `15-notes-and-links` - быстрые заметки, ссылки, статьи, backlog тем
+- `16-go-version-differences` - ключевые изменения между версиями Go и влияние на кодовую базу
 
 ## Базовая подборка
 

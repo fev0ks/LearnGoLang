@@ -2,6 +2,11 @@
 
 Этот раздел нужен, потому что senior backend обычно отвечает и за production readiness.
 
+Базовые заметки:
+- [Kibana And Elasticsearch](./kibana-and-elasticsearch.md)
+- [Kibana And Elasticsearch Cheatsheet](./kibana-and-elasticsearch-cheatsheet.md)
+- [Logging And Log Shipping](./logging-and-log-shipping/README.md)
+
 Темы:
 - Docker multi-stage builds;
 - CI/CD pipelines;
@@ -9,6 +14,7 @@
 - health checks, readiness, liveness;
 - metrics, logs, traces;
 - Prometheus, Grafana, OpenTelemetry;
+- Kibana, Elasticsearch, log investigation;
 - dashboards, alerts, runbooks;
 - graceful shutdown и rollout strategy;
 - feature flags и safe deployment patterns.
