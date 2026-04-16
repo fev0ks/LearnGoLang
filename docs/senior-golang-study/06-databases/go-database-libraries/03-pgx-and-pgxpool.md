@@ -2,7 +2,16 @@
 
 `pgx` это PostgreSQL driver and toolkit для Go.
 
-`pgxpool` это connection pool для `pgx`.
+## Содержание
+
+- [Когда его часто выбирают](#когда-его-часто-выбирают)
+- [Базовый пример `pgxpool`](#базовый-пример-pgxpool)
+- [Что дает `pgxpool`](#что-дает-pgxpool)
+- [Плюсы](#плюсы)
+- [Минусы](#минусы)
+- [`pgx` и `database/sql`](#pgx-и-databasesql)
+- [Когда выбирать](#когда-выбирать)
+- [Interview-ready answer](#interview-ready-answer)
 
 ## Когда его часто выбирают
 

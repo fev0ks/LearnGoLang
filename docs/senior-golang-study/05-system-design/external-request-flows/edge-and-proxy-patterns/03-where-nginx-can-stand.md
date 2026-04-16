@@ -2,6 +2,15 @@
 
 `nginx` не имеет одного фиксированного места в архитектуре. Он может стоять в разных точках в зависимости от задачи.
 
+## Содержание
+
+- [1. Nginx как внешний reverse proxy](#1-nginx-как-внешний-reverse-proxy)
+- [2. Nginx за Cloudflare или другим edge](#2-nginx-за-cloudflare-или-другим-edge)
+- [3. Nginx как ingress в Kubernetes](#3-nginx-как-ingress-в-kubernetes)
+- [4. Nginx как static file server и API proxy](#4-nginx-как-static-file-server-и-api-proxy)
+- [Чего не стоит делать](#чего-не-стоит-делать)
+- [Practical rule](#practical-rule)
+
 ## 1. Nginx как внешний reverse proxy
 
 ```mermaid

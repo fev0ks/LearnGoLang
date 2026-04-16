@@ -2,6 +2,18 @@
 
 Здесь собраны не "редкие tricky задачи", а то, что реально часто всплывает на интервью и в коде.
 
+## Содержание
+
+- [Hash map lookup](#hash-map-lookup)
+- [Linear scan](#linear-scan)
+- [Sorting](#sorting)
+- [Binary search](#binary-search)
+- [Two pointers](#two-pointers)
+- [Sliding window](#sliding-window)
+- [BFS and DFS](#bfs-and-dfs)
+- [Что чаще всего бывает в Go-коде](#что-чаще-всего-бывает-в-go-коде)
+- [Что важно на интервью](#что-важно-на-интервью)
+
 ## Hash map lookup
 
 Типичный use case:

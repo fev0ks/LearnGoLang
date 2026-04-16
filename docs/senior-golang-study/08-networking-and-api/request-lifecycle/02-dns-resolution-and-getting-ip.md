@@ -2,6 +2,18 @@
 
 После того как browser понял, что нужно открыть `google.com`, ему нужен IP-адрес, куда отправлять сетевые пакеты.
 
+## Содержание
+
+- [1. Браузерный DNS cache](#1-браузерный-dns-cache)
+- [2. OS resolver cache](#2-os-resolver-cache)
+- [3. Запрос к recursive DNS resolver](#3-запрос-к-recursive-dns-resolver)
+- [4. Что делает recursive resolver](#4-что-делает-recursive-resolver)
+- [5. Что именно может вернуть DNS](#5-что-именно-может-вернуть-dns)
+- [6. Что происходит после получения IP](#6-что-происходит-после-получения-ip)
+- [Где здесь бывает latency и failure](#где-здесь-бывает-latency-и-failure)
+- [Что важно для backend engineer](#что-важно-для-backend-engineer)
+- [Что могут спросить на интервью](#что-могут-спросить-на-интервью)
+
 ## 1. Браузерный DNS cache
 
 Сначала проверяется browser DNS cache.

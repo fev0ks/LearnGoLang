@@ -2,15 +2,19 @@
 
 Эта заметка нужна, чтобы понимать `Prometheus` не как "место, где лежат графики", а как конкретный pipeline:
 
-```text
-application code
-  -> in-process metrics registry
-  -> /metrics endpoint
-  -> Prometheus scrape
-  -> TSDB storage
-  -> PromQL query
-  -> Grafana / alerts / recording rules
-```
+## Содержание
+
+- [Самая короткая интуиция](#самая-короткая-интуиция)
+- [Почему pull model важна](#почему-pull-model-важна)
+- [Что происходит внутри приложения](#что-происходит-внутри-приложения)
+- [Как выглядит `/metrics`](#как-выглядит-metrics)
+- [Что делает Prometheus на scrape](#что-делает-prometheus-на-scrape)
+- [Как строится flow end-to-end](#как-строится-flow-end-to-end)
+- [Как думать о метриках правильно](#как-думать-о-метриках-правильно)
+- [Основные классы метрик в backend-сервисе](#основные-классы-метрик-в-backend-сервисе)
+- [Что такое good metric contract](#что-такое-good-metric-contract)
+- [Где чаще всего ломаются](#где-чаще-всего-ломаются)
+- [Practical Rule](#practical-rule)
 
 ## Самая короткая интуиция
 

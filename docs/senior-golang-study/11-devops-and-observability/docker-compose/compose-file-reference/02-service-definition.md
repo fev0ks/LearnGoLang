@@ -2,19 +2,13 @@
 
 `services` это ядро compose-файла. Каждый entry внутри `services` описывает одну runtime-роль.
 
-Пример:
+## Содержание
 
-```yaml
-services:
-  api:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    environment:
-      APP_ENV: local
-    ports:
-      - "8080:8080"
-```
+- [Что важно понимать про имя сервиса](#что-важно-понимать-про-имя-сервиса)
+- [Базовый skeleton сервиса](#базовый-skeleton-сервиса)
+- [Самые частые service keys](#самые-частые-service-keys)
+- [Еще несколько полезных service keys](#еще-несколько-полезных-service-keys)
+- [Practical rule](#practical-rule)
 
 ## Что важно понимать про имя сервиса
 

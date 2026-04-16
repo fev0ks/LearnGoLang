@@ -2,6 +2,19 @@
 
 В system design люди часто говорят "edge", "proxy", "gateway", "LB", но смешивают разные роли.
 
+## Содержание
+
+- [Что такое `edge`](#что-такое-edge)
+- [Зачем edge-функции нужны на практике](#зачем-edge-функции-нужны-на-практике)
+- [Что такое `reverse proxy`](#что-такое-reverse-proxy)
+- [Зачем эти reverse proxy функции нужны на практике](#зачем-эти-reverse-proxy-функции-нужны-на-практике)
+- [How API Gateway overlaps with proxy and edge](#how-api-gateway-overlaps-with-proxy-and-edge)
+- [Что такое `load balancer`](#что-такое-load-balancer)
+- [Что такое `API gateway`](#что-такое-api-gateway)
+- [Что такое `ingress`](#что-такое-ingress)
+- [Важная мысль](#важная-мысль)
+- [Быстрый mental model](#быстрый-mental-model)
+
 ## Что такое `edge`
 
 `edge` это внешний периметр системы, который первым принимает трафик из интернета.

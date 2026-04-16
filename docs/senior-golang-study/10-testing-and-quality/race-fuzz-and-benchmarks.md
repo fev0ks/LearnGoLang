@@ -2,6 +2,16 @@
 
 Это не "дополнительные игрушки", а отдельные виды инженерной проверки, которые ловят классы проблем, плохо видимые обычными unit tests.
 
+## Содержание
+
+- [Race tests](#race-tests)
+- [Fuzz tests](#fuzz-tests)
+- [Benchmarks](#benchmarks)
+- [Когда benchmark врет](#когда-benchmark-врет)
+- [Practical usage](#practical-usage)
+- [Что могут спросить на интервью](#что-могут-спросить-на-интервью)
+- [Связанные темы](#связанные-темы)
+
 ## Race tests
 
 Race detector ищет data races во время выполнения тестов.

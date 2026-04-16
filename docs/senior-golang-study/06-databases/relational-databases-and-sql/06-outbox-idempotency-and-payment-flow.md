@@ -2,7 +2,14 @@
 
 Это разбор типового interview-сценария:
 
-> Есть метод `PayOrder`. Он читает заказ из БД, пишет payment/status, публикует событие `OrderPaid` и возвращает response. Что может пойти не так?
+## Содержание
+
+- [Наивный flow](#наивный-flow)
+- [Главные проблемы](#главные-проблемы)
+- [Transactional outbox](#transactional-outbox)
+- [Псевдо-SQL](#псевдо-sql)
+- [Что должен делать consumer](#что-должен-делать-consumer)
+- [Хороший interview ответ](#хороший-interview-ответ)
 
 ## Наивный flow
 

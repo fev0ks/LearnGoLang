@@ -2,6 +2,19 @@
 
 Эта заметка нужна, чтобы понимать `Tempo` как trace backend и уметь practically расследовать latency.
 
+## Содержание
+
+- [Что такое Tempo](#что-такое-tempo)
+- [Где Tempo в стеке](#где-tempo-в-стеке)
+- [Что можно увидеть в trace](#что-можно-увидеть-в-trace)
+- [Service graph vs traces](#service-graph-vs-traces)
+- [Как расследовать latency через Tempo](#как-расследовать-latency-через-tempo)
+- [Как обычно искать traces](#как-обычно-искать-traces)
+- [Как читать waterfall](#как-читать-waterfall)
+- [Где traces особенно полезны](#где-traces-особенно-полезны)
+- [Чего Tempo не даст сам по себе](#чего-tempo-не-даст-сам-по-себе)
+- [Practical Rule](#practical-rule)
+
 ## Что такое Tempo
 
 `Tempo` — backend для distributed traces в экосистеме `Grafana`.

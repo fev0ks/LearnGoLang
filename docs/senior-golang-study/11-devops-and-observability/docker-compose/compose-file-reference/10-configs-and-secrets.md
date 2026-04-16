@@ -2,9 +2,16 @@
 
 `configs` и `secrets` позволяют доставлять данные в контейнер как files, а не только как env vars.
 
-Разница по смыслу:
-- `configs` для обычной конфигурации;
-- `secrets` для чувствительных значений.
+## Содержание
+
+- [Top-level `configs`](#top-level-configs)
+- [Service-level `configs`](#service-level-configs)
+- [Top-level `secrets`](#top-level-secrets)
+- [Service-level `secrets`](#service-level-secrets)
+- [Build secrets](#build-secrets)
+- [Когда использовать `configs`](#когда-использовать-configs)
+- [Когда использовать `secrets`](#когда-использовать-secrets)
+- [Practical rules](#practical-rules)
 
 ## Top-level `configs`
 

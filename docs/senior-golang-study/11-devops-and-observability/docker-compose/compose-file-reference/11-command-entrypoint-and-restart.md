@@ -2,6 +2,21 @@
 
 Эта группа ключей управляет тем, что именно контейнер запускает и как он завершается или перезапускается.
 
+## Содержание
+
+- [`command`](#command)
+- [`entrypoint`](#entrypoint)
+- [Когда менять `command`, а когда `entrypoint`](#когда-менять-command-а-когда-entrypoint)
+- [`restart`](#restart)
+- [`init`](#init)
+- [`stop_signal`](#stop_signal)
+- [`stop_grace_period`](#stop_grace_period)
+- [`user`](#user)
+- [`working_dir`](#working_dir)
+- [`stdin_open` и `tty`](#stdin_open-и-tty)
+- [Practical patterns](#practical-patterns)
+- [Practical rules](#practical-rules)
+
 ## `command`
 
 `command` переопределяет `CMD` из image.

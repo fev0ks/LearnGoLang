@@ -2,6 +2,18 @@
 
 Эта заметка нужна для простых, но частых interview вопросов: какие в Go есть базовые типы и какие у них zero values.
 
+## Содержание
+
+- [Основные группы типов](#основные-группы-типов)
+- [`bool`](#bool)
+- [`string`](#string)
+- [Integer types](#integer-types)
+- [Floating-point types](#floating-point-types)
+- [Complex types](#complex-types)
+- [Zero values у часто спрашиваемых reference-like типов](#zero-values-у-часто-спрашиваемых-reference-like-типов)
+- [Мини-таблица](#мини-таблица)
+- [Что обычно спрашивают на интервью](#что-обычно-спрашивают-на-интервью)
+
 ## Основные группы типов
 
 В Go обычно выделяют:

@@ -2,6 +2,18 @@
 
 `environment` и `env_file` определяют переменные окружения контейнера.
 
+## Содержание
+
+- [`environment`](#environment)
+- [Важные нюансы `environment`](#важные-нюансы-environment)
+- [`env_file`](#env_file)
+- [Расширенный синтаксис `env_file`](#расширенный-синтаксис-env_file)
+- [Формат env-файла](#формат-env-файла)
+- [Precedence между `environment` и `env_file`](#precedence-между-environment-и-env_file)
+- [Важное различие: `.env` для Compose и `env_file` для контейнера](#важное-различие-env-для-compose-и-env_file-для-контейнера)
+- [Когда что использовать](#когда-что-использовать)
+- [Security note](#security-note)
+
 ## `environment`
 
 Можно задавать в двух формах.

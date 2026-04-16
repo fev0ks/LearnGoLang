@@ -2,9 +2,14 @@
 
 `networks` в Compose отвечают за связность контейнеров.
 
-Главная practical идея:
-- если сервисы в одной сети, они могут обращаться друг к другу по именам сервисов;
-- `api` может ходить в `postgres:5432`, если оба сервиса подключены к одной сети.
+## Содержание
+
+- [Что происходит по умолчанию](#что-происходит-по-умолчанию)
+- [Базовый пример](#базовый-пример)
+- [Часто используемые top-level network attributes](#часто-используемые-top-level-network-attributes)
+- [Service-level `networks`](#service-level-networks)
+- [`network_mode`](#network_mode)
+- [Practical rules](#practical-rules)
 
 ## Что происходит по умолчанию
 

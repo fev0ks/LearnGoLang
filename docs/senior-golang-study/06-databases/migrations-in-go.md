@@ -2,6 +2,33 @@
 
 Эта заметка про то, как выбирать инструмент миграций в Go-проекте и как с ним работать без лишней магии.
 
+## Содержание
+
+- [Короткий ответ](#короткий-ответ)
+- [Популярные инструменты](#популярные-инструменты)
+- [`golang-migrate`](#golang-migrate)
+- [`goose`](#goose)
+- [`Atlas`](#atlas)
+- [`gormigrate`](#gormigrate)
+- [`dbmate`](#dbmate)
+- [Что выбрать на практике](#что-выбрать-на-практике)
+- [Что лучше не делать](#что-лучше-не-делать)
+- [Нормальный production workflow](#нормальный-production-workflow)
+- [Практические правила](#практические-правила)
+- [Моя практическая рекомендация](#моя-практическая-рекомендация)
+- [Главный принцип: Forward-Only In Production](#главный-принцип-forward-only-in-production)
+- [migrate-down: roll back the last migration (DEV ONLY — never run in prod)](#migrate-down-roll-back-the-last-migration-dev-only--never-run-in-prod)
+- [Кто и где запускает миграции](#кто-и-где-запускает-миграции)
+- [Schema source of truth](#schema-source-of-truth)
+- [Zero-downtime patterns: Expand / Contract](#zero-downtime-patterns-expand--contract)
+- [Locks, timeouts, и DDL safety](#locks-timeouts-и-ddl-safety)
+- [Dirty state recovery](#dirty-state-recovery)
+- [Конкурентное применение и advisory locks](#конкурентное-применение-и-advisory-locks)
+- [Schema review process](#schema-review-process)
+- [Что отличает Atlas в этом контексте](#что-отличает-atlas-в-этом-контексте)
+- [Production checklist](#production-checklist)
+- [Финальное правило](#финальное-правило)
+
 ## Короткий ответ
 
 Если нужен самый практичный выбор:

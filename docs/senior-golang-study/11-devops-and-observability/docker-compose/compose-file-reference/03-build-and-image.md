@@ -2,6 +2,16 @@
 
 `image` и `build` отвечают за то, откуда сервис получает свой контейнерный образ.
 
+## Содержание
+
+- [`image`](#image)
+- [`build`](#build)
+- [Часто используемые build keys](#часто-используемые-build-keys)
+- [Когда задают и `image`, и `build`](#когда-задают-и-image-и-build)
+- [`pull_policy`](#pull_policy)
+- [Когда что использовать](#когда-что-использовать)
+- [Practical rules](#practical-rules)
+
 ## `image`
 
 `image` говорит Compose взять уже готовый образ.

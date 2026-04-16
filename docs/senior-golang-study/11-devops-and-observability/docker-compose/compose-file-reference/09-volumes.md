@@ -2,6 +2,14 @@
 
 `volumes` отвечают за данные, которые не должны жить только в эфемерном слое контейнера.
 
+## Содержание
+
+- [Два главных варианта](#два-главных-варианта)
+- [Top-level volume attributes](#top-level-volume-attributes)
+- [Service-level `volumes`](#service-level-volumes)
+- [`volumes_from`](#volumes_from)
+- [Practical rules](#practical-rules)
+
 ## Два главных варианта
 
 ### Bind mount

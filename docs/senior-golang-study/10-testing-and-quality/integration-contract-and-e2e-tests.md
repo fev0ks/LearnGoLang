@@ -2,6 +2,19 @@
 
 Эти тесты стоят дороже unit tests, но именно они часто ловят самые болезненные production-баги.
 
+## Содержание
+
+- [Integration tests](#integration-tests)
+- [`httptest.Server`](#httptestserver)
+- [Testcontainers](#testcontainers)
+- [Contract tests](#contract-tests)
+- [E2E tests](#e2e-tests)
+- [Что не стоит делать](#что-не-стоит-делать)
+- [Practical layering](#practical-layering)
+- [Команды](#команды)
+- [Что могут спросить на интервью](#что-могут-спросить-на-интервью)
+- [Связанные темы](#связанные-темы)
+
 ## Integration tests
 
 Integration test проверяет код вместе с реальной зависимостью или с очень близкой к реальности средой.

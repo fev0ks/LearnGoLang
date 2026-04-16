@@ -2,6 +2,16 @@
 
 Ниже несколько типовых схем, которые полезно быстро узнавать и уметь объяснять.
 
+## Содержание
+
+- [1. Simple public API](#1-simple-public-api)
+- [2. Managed edge plus origin proxy](#2-managed-edge-plus-origin-proxy)
+- [3. Cloud LB plus Kubernetes ingress](#3-cloud-lb-plus-kubernetes-ingress)
+- [4. Public API through API gateway](#4-public-api-through-api-gateway)
+- [5. Static and API split](#5-static-and-api-split)
+- [Как выбирать схему](#как-выбирать-схему)
+- [Practical rule](#practical-rule)
+
 ## 1. Simple public API
 
 ```mermaid

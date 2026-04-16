@@ -2,11 +2,19 @@
 
 Эта заметка нужна, чтобы различать типы метрик не теоретически, а по задаче.
 
-Коротко:
-- `Counter` — только растет;
-- `Gauge` — может расти и падать;
-- `Histogram` — считает распределение значений;
-- `Summary` — тоже про распределение, но с другим operational tradeoff.
+## Содержание
+
+- [Counter](#counter)
+- [Gauge](#gauge)
+- [Histogram](#histogram)
+- [Summary](#summary)
+- [Что обычно использовать в backend](#что-обычно-использовать-в-backend)
+- [Как выбирать labels](#как-выбирать-labels)
+- [Что обычно значат result labels](#что-обычно-значат-result-labels)
+- [Базовый набор метрик для API-сервиса](#базовый-набор-метрик-для-api-сервиса)
+- [Базовый набор для worker / consumer](#базовый-набор-для-worker--consumer)
+- [RED и USE](#red-и-use)
+- [Practical Rule](#practical-rule)
 
 ## Counter
 

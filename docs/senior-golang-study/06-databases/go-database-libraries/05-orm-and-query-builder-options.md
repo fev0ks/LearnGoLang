@@ -2,6 +2,14 @@
 
 В Go часто спорят про ORM. Важно не занимать религиозную позицию, а понимать trade-offs.
 
+## Содержание
+
+- [GORM](#gorm)
+- [Ent](#ent)
+- [Bun](#bun)
+- [Главный риск ORM](#главный-риск-orm)
+- [Interview-ready answer](#interview-ready-answer)
+
 ## GORM
 
 `GORM` это популярный ORM для Go.

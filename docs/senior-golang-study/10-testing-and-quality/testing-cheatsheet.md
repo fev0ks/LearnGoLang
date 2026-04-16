@@ -2,6 +2,21 @@
 
 Короткий набор шаблонов, которые удобно копировать и адаптировать под задачу.
 
+## Содержание
+
+- [Table-Driven Test](#table-driven-test)
+- [`cmp.Diff`](#cmpdiff)
+- [`httptest` For Handler](#httptest-for-handler)
+- [`httptest.Server` For HTTP Client](#httptestserver-for-http-client)
+- [`gomock`](#gomock)
+- [Fake Repository](#fake-repository)
+- [`testcontainers-go`](#testcontainers-go)
+- [Fuzz Test](#fuzz-test)
+- [Benchmark](#benchmark)
+- [Race Detector](#race-detector)
+- [Handy Commands](#handy-commands)
+- [Quick Rule Of Thumb](#quick-rule-of-thumb)
+
 ## Table-Driven Test
 
 ```go

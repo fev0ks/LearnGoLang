@@ -2,6 +2,22 @@
 
 Эта заметка нужна, чтобы понимать `Dockerfile` не как набор случайных команд, а как описание процесса сборки image и runtime-окружения контейнера.
 
+## Содержание
+
+- [Что такое Dockerfile](#что-такое-dockerfile)
+- [Как мыслить про Dockerfile](#как-мыслить-про-dockerfile)
+- [Основные директивы](#основные-директивы)
+- [Layers и cache](#layers-и-cache)
+- [Build context](#build-context)
+- [`.dockerignore`](#dockerignore)
+- [Multi-stage build](#multi-stage-build)
+- [`scratch`, `distroless`, `alpine`, `debian`](#scratch-distroless-alpine-debian)
+- [`CGO` и почему он меняет Dockerfile](#cgo-и-почему-он-меняет-dockerfile)
+- [Что важно для Go-проектов](#что-важно-для-go-проектов)
+- [Частые ошибки](#частые-ошибки)
+- [Practical rule of thumb](#practical-rule-of-thumb)
+- [Связанные темы](#связанные-темы)
+
 ## Что такое Dockerfile
 
 `Dockerfile`:

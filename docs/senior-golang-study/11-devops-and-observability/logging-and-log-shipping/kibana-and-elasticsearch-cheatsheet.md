@@ -2,6 +2,28 @@
 
 Короткий practical cheatsheet для ежедневного поиска по логам в Kibana и через Elasticsearch Query DSL.
 
+## Содержание
+
+- [Быстрый Workflow](#быстрый-workflow)
+- [KQL: Базовые Фильтры](#kql-базовые-фильтры)
+- [KQL: Useful Patterns](#kql-useful-patterns)
+- [DSL: Базовый Search](#dsl-базовый-search)
+- [DSL: Поиск По `trace.id`](#dsl-поиск-по-traceid)
+- [DSL: Ошибки По Endpoint](#dsl-ошибки-по-endpoint)
+- [DSL: Медленные Запросы](#dsl-медленные-запросы)
+- [DSL: Top Endpoints By Errors](#dsl-top-endpoints-by-errors)
+- [DSL: Errors Over Time](#dsl-errors-over-time)
+- [`text` vs `keyword`](#text-vs-keyword)
+- [`match` vs `term` vs `wildcard`](#match-vs-term-vs-wildcard)
+- [Реальный Пример По Логам](#реальный-пример-по-логам)
+- [Как Искать, Если Не Знаешь Точное Значение](#как-искать-если-не-знаешь-точное-значение)
+- [Готовые KQL Запросы Для Этого Документа](#готовые-kql-запросы-для-этого-документа)
+- [Правило На Практике](#правило-на-практике)
+- [Полезные Поля В Логах](#полезные-поля-в-логах)
+- [Частые Ошибки](#частые-ошибки)
+- [Quick Incident Queries](#quick-incident-queries)
+- [Related](#related)
+
 ## Быстрый Workflow
 
 1. Сузить `time range`.

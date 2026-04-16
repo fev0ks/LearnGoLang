@@ -2,6 +2,18 @@
 
 Транзакция нужна, чтобы группа операций применялась как одно логическое изменение.
 
+## Содержание
+
+- [ACID простыми словами](#acid-простыми-словами)
+- [Пример транзакции](#пример-транзакции)
+- [Где должны быть границы транзакции](#где-должны-быть-границы-транзакции)
+- [Isolation levels](#isolation-levels)
+- [Locks](#locks)
+- [Double-write example](#double-write-example)
+- [Deadlock](#deadlock)
+- [Transaction в Go](#transaction-в-go)
+- [Interview-ready summary](#interview-ready-summary)
+
 ## ACID простыми словами
 
 `Atomicity`:

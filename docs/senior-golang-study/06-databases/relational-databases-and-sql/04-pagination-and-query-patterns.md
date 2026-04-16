@@ -2,6 +2,16 @@
 
 Pagination кажется простой, пока таблица не становится большой.
 
+## Содержание
+
+- [Offset pagination](#offset-pagination)
+- [Keyset pagination](#keyset-pagination)
+- [Индекс под keyset pagination](#индекс-под-keyset-pagination)
+- [N+1 query problem](#n1-query-problem)
+- [Filtering and sorting](#filtering-and-sorting)
+- [Search-like queries](#search-like-queries)
+- [Interview-ready summary](#interview-ready-summary)
+
 ## Offset pagination
 
 Пример:

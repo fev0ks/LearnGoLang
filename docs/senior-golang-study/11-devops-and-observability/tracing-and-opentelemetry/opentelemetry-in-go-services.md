@@ -2,6 +2,20 @@
 
 Эта заметка про то, как tracing выглядит именно в Go-сервисе.
 
+## Содержание
+
+- [Базовая схема](#базовая-схема)
+- [Что обычно инициализируют](#что-обычно-инициализируют)
+- [Middleware layer](#middleware-layer)
+- [Service and repository spans](#service-and-repository-spans)
+- [Что класть в span attributes](#что-класть-в-span-attributes)
+- [Propagation через разные границы](#propagation-через-разные-границы)
+- [Sampling](#sampling)
+- [Common mistakes](#common-mistakes)
+- [Как обычно выглядит минимальный useful набор spans](#как-обычно-выглядит-минимальный-useful-набор-spans)
+- [Когда tracing особенно окупается](#когда-tracing-особенно-окупается)
+- [Practical Rule](#practical-rule)
+
 ## Базовая схема
 
 Обычно есть три части:

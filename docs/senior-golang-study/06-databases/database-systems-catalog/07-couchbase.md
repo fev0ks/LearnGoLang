@@ -2,6 +2,17 @@
 
 Couchbase это distributed document database с key-value доступом и дополнительными возможностями для query, search, analytics и mobile sync scenarios.
 
+## Содержание
+
+- [Где используется](#где-используется)
+- [Сильные стороны](#сильные-стороны)
+- [Слабые стороны](#слабые-стороны)
+- [Когда выбирать](#когда-выбирать)
+- [Когда не выбирать](#когда-не-выбирать)
+- [Типичные ошибки](#типичные-ошибки)
+- [Interview-ready answer](#interview-ready-answer)
+- [Query examples](#query-examples)
+
 ## Где используется
 
 - document data;

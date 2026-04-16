@@ -2,6 +2,14 @@
 
 `sqlx` и `sqlc` часто сравнивают, потому что оба сохраняют SQL-first подход, но решают разные проблемы.
 
+## Содержание
+
+- [`sqlx`](#sqlx)
+- [`sqlc`](#sqlc)
+- [Главное отличие](#главное-отличие)
+- [Когда что выбирать](#когда-что-выбирать)
+- [Interview-ready answer](#interview-ready-answer)
+
 ## `sqlx`
 
 `sqlx` это extensions над `database/sql`.

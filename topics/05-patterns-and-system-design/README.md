@@ -15,3 +15,7 @@
 - outbox и integration patterns;
 - websocket и service-like sandbox;
 - небольшие design-oriented упражнения.
+
+Связанная теория:
+- [Go code patterns](../../docs/senior-golang-study/04-architecture-and-patterns/patterns/01-go-code-patterns.md)
+- [Architecture patterns](../../docs/senior-golang-study/04-architecture-and-patterns/patterns/02-architecture-patterns.md)

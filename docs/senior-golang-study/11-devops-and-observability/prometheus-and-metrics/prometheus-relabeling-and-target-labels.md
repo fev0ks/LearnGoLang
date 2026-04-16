@@ -2,10 +2,18 @@
 
 Эта заметка нужна, чтобы понять, что происходит между service discovery и реальным scrape target.
 
-Коротко:
-- service discovery находит много сырых target'ов и служебных labels;
-- `relabel_configs` решает, какие target'ы оставить, какой адрес реально скрейпить и какие labels попадут в итоговую series;
-- без relabeling `Prometheus` в Kubernetes быстро превращается в шумную кучу служебных меток.
+## Содержание
+
+- [Самая короткая интуиция](#самая-короткая-интуиция)
+- [Откуда берутся сырые labels](#откуда-берутся-сырые-labels)
+- [Что делает relabeling](#что-делает-relabeling)
+- [Почему это важно](#почему-это-важно)
+- [Частые действия в relabel_configs](#частые-действия-в-relabel_configs)
+- [Важные служебные labels](#важные-служебные-labels)
+- [Как labels попадают в time series](#как-labels-попадают-в-time-series)
+- [Где тут главные риски](#где-тут-главные-риски)
+- [Practical example](#practical-example)
+- [Practical Rule](#practical-rule)
 
 ## Самая короткая интуиция
 

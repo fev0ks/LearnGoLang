@@ -2,6 +2,17 @@
 
 DynamoDB это fully managed NoSQL database в AWS для key-value and document access patterns.
 
+## Содержание
+
+- [Где используется](#где-используется)
+- [Сильные стороны](#сильные-стороны)
+- [Слабые стороны](#слабые-стороны)
+- [Когда выбирать](#когда-выбирать)
+- [Когда не выбирать](#когда-не-выбирать)
+- [Типичные ошибки](#типичные-ошибки)
+- [Interview-ready answer](#interview-ready-answer)
+- [Query examples](#query-examples)
+
 ## Где используется
 
 - AWS-native backend;

@@ -2,16 +2,20 @@
 
 Эта заметка нужна, чтобы понимать, как `Prometheus` работает в реальной распределенной среде, где у одного сервиса много pod'ов.
 
-Коротко:
+## Содержание
 
-```text
-many pods of one service
-  -> Prometheus discovers targets
-  -> Prometheus scrapes each target separately
-  -> each pod exposes its own /metrics
-  -> Prometheus stores separate time series per target
-  -> PromQL aggregates them into service-level view
-```
+- [Самая короткая интуиция](#самая-короткая-интуиция)
+- [Откуда Prometheus вообще узнает про pod'ы](#откуда-prometheus-вообще-узнает-про-podы)
+- [Как происходит scrape](#как-происходит-scrape)
+- [Что видит Prometheus после scrape](#что-видит-prometheus-после-scrape)
+- [Почему это нормально](#почему-это-нормально)
+- [Как потом получить картину по сервису](#как-потом-получить-картину-по-сервису)
+- [Как посмотреть один pod отдельно](#как-посмотреть-один-pod-отдельно)
+- [Что происходит при рестарте pod'а](#что-происходит-при-рестарте-podа)
+- [Что обычно путают](#что-обычно-путают)
+- [Где тут важен relabeling](#где-тут-важен-relabeling)
+- [Практический mental model](#практический-mental-model)
+- [Practical Rule](#practical-rule)
 
 ## Самая короткая интуиция
 

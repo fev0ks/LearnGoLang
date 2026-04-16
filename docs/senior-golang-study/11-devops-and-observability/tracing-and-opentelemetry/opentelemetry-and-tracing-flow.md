@@ -2,17 +2,17 @@
 
 Эта заметка нужна, чтобы понимать distributed tracing как flow, а не как набор buzzwords.
 
-Коротко:
+## Содержание
 
-```text
-request / event
-  -> span creation in service A
-  -> context propagation to service B
-  -> child spans in service B/C/DB/cache
-  -> exporter sends spans via OTLP
-  -> backend stores traces
-  -> Grafana / Tempo lets you inspect waterfall and timings
-```
+- [Самая короткая интуиция](#самая-короткая-интуиция)
+- [Базовые сущности](#базовые-сущности)
+- [Что такое OpenTelemetry по сути](#что-такое-opentelemetry-по-сути)
+- [Как выглядит tracing flow на практике](#как-выглядит-tracing-flow-на-практике)
+- [Что такое OTLP](#что-такое-otlp)
+- [Чем traces отличаются от logs и metrics](#чем-traces-отличаются-от-logs-и-metrics)
+- [Что важно не делать](#что-важно-не-делать)
+- [Где tracing особенно полезен](#где-tracing-особенно-полезен)
+- [Practical Rule](#practical-rule)
 
 ## Самая короткая интуиция
 

@@ -2,6 +2,18 @@
 
 Индекс нужен, чтобы база могла быстрее находить строки под конкретный query pattern.
 
+## Содержание
+
+- [Самая простая идея](#самая-простая-идея)
+- [B-tree index](#b-tree-index)
+- [Composite index](#composite-index)
+- [Partial index](#partial-index)
+- [Covering index](#covering-index)
+- [Почему индекс не всегда помогает](#почему-индекс-не-всегда-помогает)
+- [EXPLAIN](#explain)
+- [Цена индексов](#цена-индексов)
+- [Interview-ready summary](#interview-ready-summary)
+
 ## Самая простая идея
 
 Без индекса БД часто вынуждена делать sequential scan:

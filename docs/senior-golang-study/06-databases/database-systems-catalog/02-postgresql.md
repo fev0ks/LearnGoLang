@@ -2,6 +2,17 @@
 
 PostgreSQL это open-source relational database, которую часто выбирают как основной storage для backend-сервисов.
 
+## Содержание
+
+- [Где используется](#где-используется)
+- [Сильные стороны](#сильные-стороны)
+- [Слабые стороны](#слабые-стороны)
+- [Когда выбирать](#когда-выбирать)
+- [Когда не выбирать](#когда-не-выбирать)
+- [Типичные ошибки](#типичные-ошибки)
+- [Interview-ready answer](#interview-ready-answer)
+- [Query examples](#query-examples)
+
 ## Где используется
 
 - transactional backend systems;
