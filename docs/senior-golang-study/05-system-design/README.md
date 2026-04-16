@@ -12,6 +12,9 @@
 - idempotency и duplicate handling;
 - observability как часть дизайна, а не постфактум.
 
+Подпакеты:
+- [External Request Flows](./external-request-flows/README.md)
+
 Хорошие тренировочные кейсы:
 - URL shortener;
 - notification service;

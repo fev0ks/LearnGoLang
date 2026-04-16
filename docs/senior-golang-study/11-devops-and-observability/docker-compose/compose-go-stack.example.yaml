@@ -1,0 +1,183 @@
+# Сложный локальный стек для Go-сервиса.
+# Этот пример специально сделан богаче минимального:
+# здесь есть API, worker, мигратор, БД, кэш, брокер и опциональная observability-инфраструктура.
+
+services:
+  api:
+    # Собираем dev-образ, но по структуре он близок к реальному приложению.
+    # При желании код можно монтировать bind-volume'ом и получать hot reload.
+    build:
+      context: ../../../../..
+      dockerfile: docs/senior-golang-study/11-devops-and-observability/dockerfiles-for-go/Dockerfile.dev-hot-reload.example
+    container_name: shortener-api
+    environment:
+      APP_ENV: local
+      HTTP_ADDR: :8080
+      POSTGRES_DSN: postgres://app:app@postgres:5432/shortener?sslmode=disable
+      REDIS_ADDR: redis:6379
+      KAFKA_BROKERS: redpanda:9092
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      redpanda:
+        condition: service_started
+    volumes:
+      # Bind mount удобен для локальной разработки и live reload.
+      - ../../../../..:/app
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    networks:
+      - app-net
+
+  worker:
+    build:
+      context: ../../../../..
+      dockerfile: docs/senior-golang-study/11-devops-and-observability/dockerfiles-for-go/Dockerfile.dev-hot-reload.example
+    container_name: shortener-worker
+    command: ["air", "-c", ".air.worker.toml"]
+    environment:
+      APP_ENV: local
+      POSTGRES_DSN: postgres://app:app@postgres:5432/shortener?sslmode=disable
+      REDIS_ADDR: redis:6379
+      KAFKA_BROKERS: redpanda:9092
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      redpanda:
+        condition: service_started
+    volumes:
+      - ../../../../..:/app
+    networks:
+      - app-net
+
+  migrator:
+    # Отдельный одноразовый сервис для миграций обычно лучше,
+    # чем попытка выполнять миграции прямо при старте API.
+    build:
+      context: ../../../../..
+      dockerfile: docs/senior-golang-study/11-devops-and-observability/dockerfiles-for-go/Dockerfile.cgo-runtime.example
+    container_name: shortener-migrator
+    command: ["./migrate", "up"]
+    environment:
+      POSTGRES_DSN: postgres://app:app@postgres:5432/shortener?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+    networks:
+      - app-net
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: shortener-postgres
+    environment:
+      POSTGRES_DB: shortener
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: app
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app -d shortener"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks:
+      - app-net
+
+  redis:
+    image: redis:7-alpine
+    container_name: shortener-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks:
+      - app-net
+
+  redpanda:
+    # Redpanda удобно использовать как локальный Kafka-compatible broker.
+    image: docker.redpanda.com/redpandadata/redpanda:v25.1.2
+    container_name: shortener-redpanda
+    command:
+      - redpanda
+      - start
+      - --overprovisioned
+      - --smp
+      - "1"
+      - --memory
+      - "512M"
+      - --reserve-memory
+      - "0M"
+      - --node-id
+      - "0"
+      - --check=false
+      - --kafka-addr
+      - internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr
+      - internal://redpanda:9092,external://localhost:19092
+    ports:
+      - "19092:19092"
+    networks:
+      - app-net
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.122.1
+    container_name: shortener-otel
+    # Профиль позволяет не поднимать observability-стек каждый раз.
+    profiles: ["observability"]
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otelcol-contrib/config.yaml:ro
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    ports:
+      - "4317:4317"
+      - "4318:4318"
+    networks:
+      - app-net
+
+  prometheus:
+    image: prom/prometheus:v3.2.1
+    container_name: shortener-prometheus
+    profiles: ["observability"]
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    networks:
+      - app-net
+
+  grafana:
+    image: grafana/grafana:11.6.0
+    container_name: shortener-grafana
+    profiles: ["observability"]
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+    networks:
+      - app-net
+
+volumes:
+  # Named volumes сохраняют данные между перезапусками контейнеров.
+  postgres-data:
+  redis-data:
+
+networks:
+  app-net:
+    # Одна bridge-сеть обычно достаточна для локального multi-service стека.
+    driver: bridge

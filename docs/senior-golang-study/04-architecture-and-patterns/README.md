@@ -18,6 +18,9 @@ Senior-фокус:
 - как не превратить "чистую" архитектуру в избыточный boilerplate;
 - как принимать решения под ограничения команды, дедлайна и текущей нагрузки.
 
+Подпакеты:
+- [Service Topologies](./service-topologies/README.md)
+
 ## Подборка
 
 - [Google SRE Books](https://sre.google/books/)

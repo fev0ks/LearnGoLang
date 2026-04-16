@@ -2,6 +2,12 @@
 
 Сюда собирай практические темы по безопасности backend-сервисов.
 
+Базовые заметки:
+- [Secrets Management](./secrets-management/README.md)
+- [Service To Service TLS](./service-to-service-tls/README.md)
+- [Perimeter And Traffic Protection](./perimeter-and-traffic-protection/README.md)
+- [CORS And Browser API Security](./cors-and-browser-api-security/README.md)
+
 Темы:
 - authentication и authorization;
 - JWT, opaque tokens, session-based auth;
@@ -18,6 +24,12 @@
 - какие угрозы актуальны именно для твоего сервиса;
 - как найти баланс между security и delivery speed;
 - какие меры обязательны по умолчанию в новых сервисах.
+
+Структура раздела:
+- `secrets-management` - где хранить секреты, как передавать их в сервис и как не утекать в git, CI, images и логи
+- `service-to-service-tls` - как устроены `TLS termination`, `re-encryption`, `mTLS` и зачем внутренним сервисам могут понадобиться сертификаты
+- `perimeter-and-traffic-protection` - как думать про DDoS, perimeter filters и почему backend не должен быть первой линией защиты
+- `cors-and-browser-api-security` - как работает `CORS`, что такое preflight и где эту политику обычно держат
 
 ## Подборка
 

@@ -13,6 +13,7 @@ application -> stdout/file -> collector/shipper -> processor/router -> storage -
 Примеры:
 - `application -> stdout -> Fluent Bit -> Elasticsearch -> Kibana`
 - `application -> stdout -> Promtail -> Loki -> Grafana`
+- `application -> stdout -> Grafana Alloy -> Loki -> Grafana`
 - `application -> stdout -> CloudWatch Logs -> OpenSearch`
 - `application -> stdout -> Cloud Logging -> sink to GCS`
 
@@ -34,7 +35,12 @@ application -> stdout/file -> collector/shipper -> processor/router -> storage -
 - `Vector`
 - `Logstash`
 - `Promtail`
+- `Grafana Alloy`
 - `OpenTelemetry Collector`
+
+Важно:
+- `Promtail` исторически очень часто встречается в связке с `Loki`;
+- для новых инсталляций стоит знать про `Grafana Alloy` как более современный collector в экосистеме `Grafana`.
 
 `storage/query backend`:
 - хранит логи и даёт возможность искать их;

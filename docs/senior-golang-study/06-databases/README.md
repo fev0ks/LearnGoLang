@@ -5,6 +5,11 @@
 Отдельные заметки:
 - `migrations-in-go.md` - чем отличаются `goose`, `golang-migrate`, `Atlas`, `gormigrate`, `dbmate` и что выбирать на практике
 
+Подпакеты:
+- [Relational Databases And SQL](./relational-databases-and-sql/README.md)
+- [Go Database Libraries](./go-database-libraries/README.md)
+- [Database Systems Catalog](./database-systems-catalog/README.md)
+
 Темы:
 - PostgreSQL internals на практическом уровне;
 - индексы: B-tree, partial, composite, covering;

@@ -5,6 +5,7 @@
 Базовые заметки:
 - [Rate Limiting](./rate-limiting.md)
 - [Rate Limiting Examples](./rate-limiting-examples/README.md)
+- [What Happens When You Open google.com](./request-lifecycle/README.md)
 
 Темы:
 - HTTP/1.1, HTTP/2, keep-alive, connection pooling;

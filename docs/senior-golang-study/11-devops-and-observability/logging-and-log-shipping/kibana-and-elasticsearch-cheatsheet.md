@@ -515,3 +515,8 @@ service.name : "payments-api" and service.version : "1.8.4" and log.level : "err
 ```text
 service.name : "payments-api" and not trace.id : *
 ```
+
+## Related
+
+- [Kibana And Elasticsearch](./kibana-and-elasticsearch.md)
+- [Logging And Log Shipping README](./README.md)

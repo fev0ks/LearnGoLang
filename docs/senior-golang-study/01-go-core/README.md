@@ -9,6 +9,8 @@
 - [Garbage Collector](./garbage-collector.md)
 - [Scheduler And Preemption](./scheduler-and-preemption.md)
 - [Memory Model](./memory-model.md)
+- [Primitive Types And Zero Values](./primitive-types-and-zero-values.md)
+- [Numeric Types, Integer Sizes And Overflow](./numeric-types-integer-sizes-and-overflow.md)
 
 Темы:
 - указатели, value vs reference semantics;

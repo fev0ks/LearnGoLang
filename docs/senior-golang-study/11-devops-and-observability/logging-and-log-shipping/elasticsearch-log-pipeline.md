@@ -1,71 +1,131 @@
 # Elasticsearch Log Pipeline
 
-`Elasticsearch` используют, когда нужен удобный поиск по логам, фильтрация по полям и агрегации поверх большого потока structured events.
+Этот файл про то, как логи попадают в `Elasticsearch` и что важно для стабильного ingestion/storage. Поиск в `Kibana`, `KQL`, `DSL`, `text` vs `keyword` и расследование инцидентов разобраны отдельно в [Kibana And Elasticsearch](./kibana-and-elasticsearch.md).
 
-## Базовый путь
+## Когда этот стек вообще выбирают
 
-Чаще всего схема такая:
+`Elasticsearch` или `OpenSearch` обычно берут, когда:
+- нужен сильный full-text search;
+- важны aggregations по полям;
+- команда хочет document-oriented log investigation workflow;
+- searchable storage важнее, чем минимальная стоимость ingest.
+
+## Базовая схема
+
+Частый production path:
 
 ```text
-application -> stdout/file -> Fluent Bit/Vector/Logstash -> Elasticsearch -> Kibana
+application -> stdout/file -> collector -> Elasticsearch -> Kibana
 ```
 
-Иногда между collector и `Elasticsearch` вставляют `Kafka`, если:
-- объёмы очень большие;
-- нужен decoupling;
-- ingestion в `Elasticsearch` может временно проседать.
+Типичный вариант в контейнерной среде:
 
-## Как это работает по шагам
+```text
+Go service -> stdout JSON
+container runtime -> container logs
+Fluent Bit/Vector/Logstash -> Elasticsearch/OpenSearch
+Kibana -> search and dashboards
+```
 
-1. Приложение пишет JSON-лог.
-2. Collector получает запись из `stdout` или файла.
-3. Collector парсит JSON и добавляет metadata:
-   `service`, `env`, `host`, `pod`, `container`, `region`.
-4. Collector отправляет документ в `Elasticsearch`.
-5. `Elasticsearch` индексирует документ.
-6. `Kibana` ищет по индексам и строит dashboards.
+Если ingestion и storage нужно развязать:
 
-## Почему часто используют Fluent Bit
+```text
+application -> collector -> Kafka -> processor -> Elasticsearch
+```
+
+Это дороже по сложности, но дает:
+- буферизацию;
+- decoupling;
+- reprocessing;
+- более мягкое поведение при просадке storage.
+
+## Роли компонентов
+
+`application`:
+- пишет structured logs;
+- не должна знать детали backend storage;
+- обычно пишет в `stdout`.
+
+`collector`:
+- забирает логи;
+- парсит и обогащает metadata;
+- буферизует и ретраит;
+- отправляет в `Elasticsearch`.
+
+`Elasticsearch`:
+- индексирует документы;
+- хранит searchable data;
+- отвечает за mappings, shards, lifecycle и query performance.
+
+`Kibana`:
+- UI для поиска, dashboards и incident investigation.
+
+## Почему часто используют `Fluent Bit`
 
 `Fluent Bit`:
-- лёгкий;
-- хорошо подходит как node-level collector;
+- легкий;
+- хорошо работает как node-level agent;
 - умеет parsing, filtering, buffering и output в `Elasticsearch`;
-- дешевле по ресурсам, чем `Logstash`.
+- обычно дешевле по ресурсам, чем `Logstash`.
 
-`Logstash` используют, когда нужна более тяжёлая обработка:
-- сложные parsing pipelines;
-- enrichment;
-- legacy integrations.
+`Logstash` чаще нужен, когда:
+- требуется тяжелый pipeline processing;
+- нужно сложное enrichment;
+- есть legacy integrations;
+- pipeline строится вокруг более "ETL-like" обработки логов.
 
-## Что важно для Elasticsearch
+## Что важно для стабильного Elasticsearch ingestion
 
-### Mapping
+### 1. Mapping discipline
 
-Нужно заранее понимать, какие поля:
+Нужно заранее понимать типы полей:
 - `keyword`
 - `text`
 - `date`
 - `long`, `double`, `boolean`
 
-Если schema management плохой:
-- получаются кривые mappings;
-- поиск и агрегации работают хуже;
-- storage растёт слишком быстро.
+Плохой mapping почти всегда приводит к проблемам:
+- filter и aggregations работают не так, как ожидалось;
+- storage растет слишком быстро;
+- query latency становится непредсказуемой.
 
-### Index Lifecycle
+### 2. Index lifecycle
 
-Обычно логи хранят не в одном большом индексе, а в rollover-индексах или data streams.
+Логи почти никогда не стоит хранить в одном большом индексе.
 
-Частый подход:
-- daily или size-based rollover;
+Обычно используют:
+- rollover по времени или размеру;
 - `hot` tier для свежих данных;
-- `warm` или `cold` tier для старых;
-- удаление по retention policy.
+- `warm`/`cold` tier для старых;
+- retention policy на удаление.
 
-### Structured Fields
+### 3. Shards and index sizing
 
-Хорошие поля для расследования:
+Одна из самых частых operational проблем:
+- слишком много маленьких индексов и shard'ов;
+- cluster тратит ресурсы на metadata и coordination вместо нормальной работы.
+
+Практически важно:
+- не плодить индексы без необходимости;
+- не создавать новый индекс на каждую мелочь;
+- думать о rollover и shard count заранее.
+
+### 4. Cardinality control
+
+Опасные поля:
+- почти уникальные значения;
+- noisy dimensions;
+- бесконтрольные user-generated identifiers как indexed fields everywhere.
+
+Это бьет по:
+- storage;
+- memory;
+- query performance;
+- aggregation cost.
+
+## Какие поля обычно полезны
+
+Хороший минимальный набор для searchable logs:
 - `service.name`
 - `service.version`
 - `env`
@@ -79,35 +139,21 @@ application -> stdout/file -> Fluent Bit/Vector/Logstash -> Elasticsearch -> Kib
 - `url.path`
 - `http.status_code`
 
-## Когда Elasticsearch хорош
+Если structured fields слабые, даже хороший `Elasticsearch` не даст хорошего опыта расследования.
 
-Подходит, когда:
-- нужен сильный full-text search;
-- нужны aggregations и dashboards;
-- много structured fields;
-- нужно быстро искать по `request_id`, `trace_id`, `user_id`, `error_kind`.
+## Частые production topologies
 
-## Когда Elasticsearch дорогой или неудобный
-
-Плохо подходит, когда:
-- логов очень много, а бюджет ограничен;
-- всё подряд индексируется без разбора;
-- retention нужен на месяцы и годы в searchable виде;
-- команда не готова поддерживать mappings, ILM и capacity planning.
-
-## Типичный production pipeline
-
-### В Docker или Kubernetes
+### Kubernetes / Docker
 
 ```text
 Go service -> stdout JSON
-Kubernetes/Docker runtime -> container logs
-Fluent Bit DaemonSet -> parse, enrich, buffer
-Elasticsearch/OpenSearch -> index
-Kibana -> search
+runtime container logs
+Fluent Bit DaemonSet
+Elasticsearch/OpenSearch
+Kibana
 ```
 
-### С промежуточной Kafka
+### Kafka as intermediate buffer
 
 ```text
 Go service -> stdout
@@ -117,34 +163,55 @@ Logstash/Vector -> Elasticsearch
 Kibana
 ```
 
-Это усложняет систему, но даёт:
-- буферизацию;
-- reprocessing;
-- decoupling ingest от storage.
+Это оправдано, когда:
+- объемы большие;
+- storage иногда деградирует;
+- нужен replay;
+- ingestion и indexing нужно масштабировать отдельно.
 
 ## Частые failure modes
 
-`Elasticsearch slow or red`:
+`Elasticsearch slow / red`:
 - collector buffers растут;
-- часть логов может дропаться;
-- растёт lag.
+- ingestion lag увеличивается;
+- часть логов может дропаться, если buffering ограничен.
 
 `bad mappings`:
-- `status_code` случайно становится `text`;
+- поле типа `status_code` внезапно становится `text`;
 - exact filters и aggregations ломаются.
 
 `too much cardinality`:
-- уникальные значения в огромном количестве полей;
-- рост индекса и memory pressure.
+- memory pressure;
+- дорогое индексирование;
+- тяжелые aggregations.
 
 `oversharding`:
-- слишком много маленьких индексов и shard'ов;
-- cluster начинает страдать даже при умеренном объёме данных.
+- cluster страдает даже при умеренных объемах;
+- растет operational pain.
+
+## Practical rule
+
+`Elasticsearch` хорош, когда:
+- нужен сильный поиск;
+- searchable logs реально используются командой;
+- есть дисциплина по mappings и retention.
+
+`Elasticsearch` быстро становится плохим выбором, когда:
+- логов очень много;
+- все подряд индексируется без разбора;
+- searchable retention хотят держать слишком долго;
+- команда не готова заниматься lifecycle, shards и capacity.
 
 ## Что важно объяснить на интервью
 
 - почему приложение лучше не подключать напрямую к `Elasticsearch`;
-- зачем нужен collector;
-- почему `keyword` и `text` нельзя путать;
-- зачем нужны rollover, retention и hot/warm/cold tiers;
-- когда лучше выбрать `Loki` вместо `Elasticsearch`.
+- зачем нужен collector между приложением и search backend;
+- почему lifecycle и shard management важны не меньше самого поиска;
+- зачем нужен intermediate buffer вроде `Kafka` на больших объемах;
+- какие признаки говорят, что Elasticsearch-стек уже деградирует operationally.
+
+## Связанные темы
+
+- [Logs Pipeline Overview](./logs-pipeline-overview.md)
+- [Kibana And Elasticsearch](./kibana-and-elasticsearch.md)
+- [Log Platforms Comparison Table](./log-platforms-comparison-table.md)

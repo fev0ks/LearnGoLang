@@ -16,6 +16,9 @@
 - разбор собственных ошибок и production incidents;
 - лидерские и ownership-кейсы.
 
+Подпакеты:
+- [Algorithms And Complexity](./algorithms-and-complexity/README.md)
+
 ## Подборка
 
 - [Effective Go](https://go.dev/doc/effective_go)

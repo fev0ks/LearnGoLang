@@ -18,6 +18,19 @@
 application -> stdout/file -> Promtail/Fluent Bit/Vector/Otel Collector -> Loki -> Grafana
 ```
 
+Исторически многие команды использовали именно `Promtail -> Loki`.
+
+Но practically важно помнить:
+- `Promtail` часто встретится в существующих кластерах и старых гайдах;
+- для новых установок стоит знать про `Grafana Alloy` как более современный collector в экосистеме `Grafana`.
+
+Поэтому в реальной жизни сегодня ты увидишь и такие варианты:
+
+```text
+application -> stdout/file -> Grafana Alloy -> Loki -> Grafana
+application -> stdout/file -> Fluent Bit -> Loki -> Grafana
+```
+
 ## Как Loki работает концептуально
 
 1. Приложение пишет лог.
@@ -93,6 +106,15 @@ Loki
 Grafana
 ```
 
+Если смотреть на более современную формулировку для новых стеков, часто уже уместнее думать так:
+
+```text
+Go service -> stdout JSON
+Grafana Alloy or Fluent Bit DaemonSet
+Loki
+Grafana
+```
+
 Иногда используют object storage под капотом:
 - `S3`
 - `GCS`
@@ -119,6 +141,21 @@ Grafana
 - мощнее по search и aggregations;
 - обычно дороже;
 - требует больше внимания к mappings и capacity planning.
+
+## Promtail и Grafana Alloy
+
+`Promtail`:
+- это loki-centric агент для сбора и отправки логов;
+- его до сих пор важно знать, потому что он часто встречается в существующих инсталляциях и документации.
+
+`Grafana Alloy`:
+- это более новый collector в экосистеме `Grafana`;
+- он лучше вписывается в современный unified observability-подход, где рядом живут logs, metrics, traces и profiling;
+- если начинаешь новый стек с нуля, про `Alloy` стоит знать обязательно.
+
+Практическое правило:
+- старый или уже существующий `Loki`-стек очень вероятно будет с `Promtail`;
+- новый дизайн логового пайплайна уже разумно сравнивать не только с `Promtail`, но и с `Grafana Alloy`, `Fluent Bit` и `OpenTelemetry Collector`.
 
 ## Что важно объяснить на интервью
 

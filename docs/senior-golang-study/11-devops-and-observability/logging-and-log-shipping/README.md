@@ -4,17 +4,40 @@
 - как они двигаются от приложения до системы поиска;
 - чем отличаются `Elasticsearch`, `Loki` и облачные пайплайны;
 - где нужен collector вроде `Fluent Bit`, `Vector`, `Logstash` или `OpenTelemetry Collector`;
-- как выбирать между online-search и cold storage.
+- как выбирать между online-search и cold storage;
+- как расследовать инциденты в `Kibana` и работать с `Elasticsearch`.
+
+Как читать:
+- сначала понять общую схему движения логов;
+- затем сравнить основные backend-платформы;
+- после этого переходить к `Kibana`/`Elasticsearch` и практическому расследованию;
+- в конце смотреть облачные варианты и выбор collector'ов.
 
 Материалы:
+
+Foundation:
 - [Logs Pipeline Overview](./logs-pipeline-overview.md)
+- [Logging In Go And Why Wrap Logger](./logging-in-go-and-why-wrap-logger.md)
+
+Platforms:
 - [Elasticsearch Log Pipeline](./elasticsearch-log-pipeline.md)
 - [Loki Log Pipeline](./loki-log-pipeline.md)
+- [Log Platforms Comparison Table](./log-platforms-comparison-table.md)
+
+Investigation:
+- [Grafana Overview And Functionality](./grafana-overview-and-functionality.md)
+- [Kibana And Elasticsearch](./kibana-and-elasticsearch.md)
+- [Kibana And Elasticsearch Cheatsheet](./kibana-and-elasticsearch-cheatsheet.md)
+- [Grafana vs Kibana And Similar Tools](./grafana-vs-kibana-and-similar-tools.md)
+
+Delivery And Collectors:
 - [Cloud Log Delivery: AWS And Google Cloud](./cloud-log-delivery-aws-and-google-cloud.md)
+- [Promtail vs Grafana Alloy vs Fluent Bit](./promtail-vs-grafana-alloy-vs-fluent-bit.md)
 
 Что важно уметь объяснить:
 - почему приложение обычно не должно писать прямо в `Elasticsearch`;
 - зачем нужен shipper или collector;
 - чем index-based поиск отличается от label-based;
+- как различать `text`, `keyword`, `match`, `term` и `wildcard` при расследовании по логам;
 - почему `S3` и `GCS` хороши для архива, но не заменяют нормальный log query engine;
 - где главные риски: потеря логов, backpressure, cardinality, retention cost, noisy fields.

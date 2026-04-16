@@ -246,4 +246,5 @@
 
 ## Связанные темы
 
-- [DevOps And Observability README](./README.md)
+- [Logging And Log Shipping README](./README.md)
+- [DevOps And Observability README](../README.md)
