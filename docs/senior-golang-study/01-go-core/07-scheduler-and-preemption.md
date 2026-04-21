@@ -164,17 +164,20 @@ func criticalSection() {
   P[2] → M[2] → G[z] (running)
 
 Syscall начинается:
-  M[2] уходит в syscall (без P)
-  P[2] → idle pool или подхватывается M[3]
+  entersyscall() → G.status = Gsyscall
+  P[2] отвязывается от M[2] (handoff)
+  P[2] подхватывается idle M или создаётся новый M
 
 Syscall завершается:
-  G[z] пытается взять любой свободный P
-  если P нет → G[z] в global run queue (Grunnable)
+  exitsyscall() → пытается взять P обратно (fast path)
+  если P нет → G[z] в global run queue (slow path)
 ```
 
-Это называется **handoff**: P не ждет завершения syscall, а продолжает работу с другими горутинами.
+**Handoff**: P не ждёт завершения syscall, а сразу отдаётся для других горутин. `sysmon` принудительно забирает P у M в syscall через ~20 мкс если есть горутины в очереди.
 
-Для **non-blocking syscall** (сетевой I/O через netpoller): горутина паркуется, M освобождает P и берет другую горутину — OS thread не блокируется.
+Для **сетевого I/O**: горутина паркуется через netpoller, M **не блокируется** вообще — это принципиальное отличие от файлового I/O.
+
+→ Подробно: [08-syscall.md](./08-syscall.md) — `entersyscall`/`exitsyscall` механика, sysmon retake, CGo, `LockOSThread`, thread exhaustion.
 
 ## Netpoller интеграция
 
@@ -182,17 +185,19 @@ Syscall завершается:
 
 ```
 conn.Read(buf):
-  1. горутина регистрирует fd в netpoller
-  2. паркуется (Gwaiting)
-  3. M освобождается, берет другую горутину из LRQ
+  1. syscall.Read() с O_NONBLOCK → EAGAIN (нет данных)
+  2. горутина регистрируется в pollDesc → gopark() → Gwaiting
+  3. M освобождается, берёт другую горутину из LRQ
 
-данные готовы (epoll event):
-  4. sysmon или другой P вызывает netpoll(nonblocking)
-  5. blocked G переходит в Grunnable → добавляется в LRQ
-  6. при следующем шедулировании G продолжает выполнение
+данные готовы:
+  4. epoll_wait → уведомление по fd
+  5. netpoll() → G переходит в Grunnable → в LRQ
+  6. G продолжает, Read возвращает данные
 ```
 
-Именно поэтому 100k concurrent TCP connections в Go работают с 4–8 OS threads (при GOMAXPROCS=4–8). Goroutines паркуются, а не блокируют threads.
+Именно поэтому 100k concurrent TCP connections работают с 4–8 OS threads. Горутины в `Gwaiting` потребляют только память (~2 KB стека), не CPU.
+
+→ Подробно: [09-netpoller.md](./09-netpoller.md) — pollDesc, epoll интеграция, SetDeadline через таймеры, DNS resolver, диагностика CLOSE_WAIT/TIME_WAIT.
 
 ## GOMAXPROCS в контейнерах
 
