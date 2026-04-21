@@ -12,7 +12,7 @@
 - после этого уже связывать это с edge, CDN, gateway и ingress.
 
 Материалы:
-- [DDoS Protection](./ddos-protection.md)
+- [DDoS Protection](./01-ddos-protection.md)
 
 Что важно уметь объяснить:
 - почему `DDoS protection` ставят раньше приложения;

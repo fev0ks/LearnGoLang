@@ -157,5 +157,5 @@ go test ./... -run Contract
 
 ## Связанные темы
 
-- [Automated Testing Strategy](./automated-testing-strategy.md)
-- [Test Doubles And Test Design](./test-doubles-and-test-design.md)
+- [Automated Testing Strategy](./01-automated-testing-strategy.md)
+- [Test Doubles And Test Design](./03-test-doubles-and-test-design.md)

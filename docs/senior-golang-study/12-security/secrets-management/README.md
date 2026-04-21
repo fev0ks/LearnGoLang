@@ -8,10 +8,10 @@
 - после этого посмотреть отдельные сценарии для local dev, containers и `Kubernetes`.
 
 Материалы:
-- [Secrets Delivery Options](./secrets-delivery-options.md)
-- [Local Development Secrets](./local-development-secrets.md)
-- [Docker Compose And Container Secrets](./docker-compose-and-container-secrets.md)
-- [Kubernetes Secrets And External Managers](./kubernetes-secrets-and-external-managers.md)
+- [Secrets Delivery Options](./01-secrets-delivery-options.md)
+- [Local Development Secrets](./02-local-development-secrets.md)
+- [Docker Compose And Container Secrets](./03-docker-compose-and-container-secrets.md)
+- [Kubernetes Secrets And External Managers](./04-kubernetes-secrets-and-external-managers.md)
 
 Что важно уметь объяснить:
 - почему нельзя просто хардкодить секреты в код, image и compose-файлы;

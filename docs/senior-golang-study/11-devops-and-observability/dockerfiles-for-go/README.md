@@ -3,9 +3,9 @@
 Этот подпакет про Dockerfile patterns для Go-проектов: production, distroless/scratch, dev hot reload и случаи с `CGO`.
 
 Материалы:
-- [Dockerfile Anatomy](./dockerfile-anatomy.md)
-- [Dockerfiles For Go Projects](./dockerfiles-for-go-projects.md)
-- [Why Dockerfile Is Needed](./why-dockerfile-is-needed.md)
+- [Dockerfile Anatomy](./02-dockerfile-anatomy.md)
+- [Dockerfiles For Go Projects](./03-dockerfiles-for-go-projects.md)
+- [Why Dockerfile Is Needed](./01-why-dockerfile-is-needed.md)
 - [Multi-stage Scratch Example](./Dockerfile.scratch.example)
 - [Distroless Example](./Dockerfile.distroless.example)
 - [Dev Hot Reload Example](./Dockerfile.dev-hot-reload.example)

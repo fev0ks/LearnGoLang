@@ -10,7 +10,7 @@
 - [Tests](./implementations_test.go)
 
 Как использовать:
-- читать вместе с [Rate Limiting](../rate-limiting.md);
+- читать вместе с [Rate Limiting](../01-rate-limiting.md);
 - смотреть на contract `Decision` и `Limiter`;
 - сравнивать fairness, burst behavior и сложность state management;
 - держать в голове, что это in-memory reference implementations, а не distributed production limiters.

@@ -136,5 +136,5 @@ go test -bench=. -benchmem ./...
 
 ## Связанные темы
 
-- [Automated Testing Strategy](./automated-testing-strategy.md)
-- [Unit Tests In Go](./unit-tests-in-go.md)
+- [Automated Testing Strategy](./01-automated-testing-strategy.md)
+- [Unit Tests In Go](./02-unit-tests-in-go.md)

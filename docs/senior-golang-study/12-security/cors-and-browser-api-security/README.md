@@ -8,8 +8,8 @@
 - после этого уже смотреть, где такую политику обычно настраивают.
 
 Материалы:
-- [CORS Basics And Where To Configure It](./cors-basics-and-where-to-configure-it.md)
-- [CORS Middleware Example](./cors-middleware-example.md)
+- [CORS Basics And Where To Configure It](./01-cors-basics-and-where-to-configure-it.md)
+- [CORS Middleware Example](./02-cors-middleware-example.md)
 
 Что важно уметь объяснить:
 - что `CORS` — это часть browser security model, а не perimeter defense;

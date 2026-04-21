@@ -3,7 +3,7 @@
 Сюда собирай темы про протоколы, API и сетевое поведение сервисов.
 
 Базовые заметки:
-- [Rate Limiting](./rate-limiting.md)
+- [Rate Limiting](./01-rate-limiting.md)
 - [Rate Limiting Examples](./rate-limiting-examples/README.md)
 - [What Happens When You Open google.com](./request-lifecycle/README.md)
 

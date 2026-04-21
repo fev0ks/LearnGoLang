@@ -20,7 +20,7 @@
 - **namespaces** — изолируют *видимость* (что процесс видит).
 - **cgroups** — ограничивают *потребление* ресурсов (сколько может использовать).
 
-Детальное описание всех 8 типов namespaces, cgroups v2 контроллеров и практических команд — в [linux/namespaces-and-cgroups.md](../linux/namespaces-and-cgroups.md).
+Детальное описание всех 8 типов namespaces, cgroups v2 контроллеров и практических команд — в [linux/05-namespaces-and-cgroups.md](../linux/05-namespaces-and-cgroups.md).
 
 ```bash
 # Посмотреть namespaces процесса

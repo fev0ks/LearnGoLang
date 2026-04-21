@@ -17,17 +17,17 @@
 Материалы:
 
 Foundation:
-- [Prometheus Metrics Flow](./prometheus-metrics-flow.md)
+- [Prometheus Metrics Flow](./02-prometheus-metrics-flow.md)
 - [How Prometheus Discovers And Scrapes Multiple Pods](./how-prometheus-discovers-and-scrapes-multiple-pods.md)
-- [Prometheus Relabeling And Target Labels](./prometheus-relabeling-and-target-labels.md)
-- [Prometheus UI And Grafana](./prometheus-ui-and-grafana.md)
+- [Prometheus Relabeling And Target Labels](./03-prometheus-relabeling-and-target-labels.md)
+- [Prometheus UI And Grafana](./04-prometheus-ui-and-grafana.md)
 
 Design:
-- [Metric Types And Design](./metric-types-and-design.md)
+- [Metric Types And Design](./01-metric-types-and-design.md)
 - [Practical Metric Patterns](./practical-metric-patterns/README.md)
 
 Querying:
-- [PromQL Cheatsheet](./promql-cheatsheet.md)
+- [PromQL Cheatsheet](./05-promql-cheatsheet.md)
 
 Что важно уметь объяснить:
 - почему `Prometheus` обычно scrapes, а не принимает push от приложений;

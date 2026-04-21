@@ -132,7 +132,7 @@ Go backend -> OTLP exporter -> Tempo -> Grafana
 - backend сам отправляет завершенные spans;
 - на shutdown приложения надо делать flush, иначе последние spans можно потерять.
 
-Более приземленный пример с `trace_id`, `span_id`, `traceparent` и деревом spans лежит в [Push Model, TraceId And Spans Example](./01-push-model-traceid-and-spans-example.md).
+Более приземленный пример с `trace_id`, `span_id`, `traceparent` и деревом spans лежит в [Push Model, TraceId And Spans Example](./04-push-model-traceid-and-spans-example.md).
 
 ## Как выглядит tracing flow на практике
 

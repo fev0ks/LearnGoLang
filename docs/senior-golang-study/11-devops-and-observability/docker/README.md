@@ -4,8 +4,8 @@
 
 ## Материалы
 
-- [Container vs Virtual Machine](./container-vs-virtual-machine.md) — Linux namespaces и cgroups под капотом, OCI, Kata/gVisor
-- [Docker For Go Services](./docker-for-go-services.md) — multi-stage Dockerfile, layer caching, PID 1 / SIGTERM, GOMEMLIMIT, GOMAXPROCS, security
+- [Container vs Virtual Machine](./01-container-vs-virtual-machine.md) — Linux namespaces и cgroups под капотом, OCI, Kata/gVisor
+- [Docker For Go Services](./02-docker-for-go-services.md) — multi-stage Dockerfile, layer caching, PID 1 / SIGTERM, GOMEMLIMIT, GOMAXPROCS, security
 
 ## Что важно уметь объяснить
 

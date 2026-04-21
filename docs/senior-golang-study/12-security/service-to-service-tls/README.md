@@ -8,7 +8,7 @@
 - после этого уже переходить к service mesh или platform-specific реализации.
 
 Материалы:
-- [TLS Termination, Re-encryption And mTLS](./tls-termination-re-encryption-and-mtls.md)
+- [TLS Termination, Re-encryption And mTLS](./01-tls-termination-re-encryption-and-mtls.md)
 
 Что важно уметь объяснить:
 - почему `TLS termination at edge` не всегда означает plain HTTP внутри;

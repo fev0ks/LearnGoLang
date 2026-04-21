@@ -29,8 +29,8 @@
 - `sqlc` — SQL→Go codegen: type-safe методы, `Querier` interface для моков
 - `squirrel` — query builder для dynamic WHERE; дополняет, не заменяет sqlc/pgxpool
 - GORM N+1 и как его избежать через `Preload`
-- `shopspring/decimal` — для денег, никогда `float64` → [подробнее](../../../03-go-libraries-and-ecosystem/shopspring-decimal.md)
-- UUID v7 лучше v4 для primary keys → [подробнее](../../../03-go-libraries-and-ecosystem/google-uuid.md)
+- `shopspring/decimal` — для денег, никогда `float64` → [подробнее](../../../03-go-libraries-and-ecosystem/01-shopspring-decimal.md)
+- UUID v7 лучше v4 для primary keys → [подробнее](../../../03-go-libraries-and-ecosystem/02-google-uuid.md)
 
 ## Официальные ссылки
 

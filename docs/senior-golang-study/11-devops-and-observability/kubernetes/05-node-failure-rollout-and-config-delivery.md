@@ -109,7 +109,7 @@ Kubernetes использует три типа probe:
 
 Без readiness probe — трафик идет в Pod сразу после старта контейнера, до того как приложение реально готово принимать запросы. Результат: 502/503 в начале каждого deploy.
 
-Подробно про реализацию probes в Go и graceful shutdown — в [probes-and-graceful-shutdown.md](./probes-and-graceful-shutdown.md).
+Подробно про реализацию probes в Go и graceful shutdown — в [04-probes-and-graceful-shutdown.md](./04-probes-and-graceful-shutdown.md).
 
 ## Config delivery
 

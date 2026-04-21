@@ -161,5 +161,5 @@ func (f *fakeRepo) GetByID(ctx context.Context, id string) (User, error) {
 
 ## Связанные темы
 
-- [Unit Tests In Go](./unit-tests-in-go.md)
-- [Integration, Contract And E2E Tests](./integration-contract-and-e2e-tests.md)
+- [Unit Tests In Go](./02-unit-tests-in-go.md)
+- [Integration, Contract And E2E Tests](./05-integration-contract-and-e2e-tests.md)

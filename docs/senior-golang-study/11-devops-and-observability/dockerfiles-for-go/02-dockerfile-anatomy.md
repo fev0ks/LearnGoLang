@@ -449,7 +449,7 @@ Prod image:
 
 ## Связанные темы
 
-- [Dockerfiles For Go Projects](./dockerfiles-for-go-projects.md)
+- [Dockerfiles For Go Projects](./03-dockerfiles-for-go-projects.md)
 - [Multi-stage Scratch Example](./Dockerfile.scratch.example)
 - [Distroless Example](./Dockerfile.distroless.example)
 - [Dev Hot Reload Example](./Dockerfile.dev-hot-reload.example)

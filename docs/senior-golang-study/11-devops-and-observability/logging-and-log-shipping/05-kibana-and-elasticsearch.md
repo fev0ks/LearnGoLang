@@ -151,7 +151,7 @@
 `wildcard`:
 - искать по шаблону, но осторожно из-за цены.
 
-Готовые примеры `match`, `term` и `wildcard` вынесены в [Kibana And Elasticsearch Cheatsheet](./kibana-and-elasticsearch-cheatsheet.md).
+Готовые примеры `match`, `term` и `wildcard` вынесены в [Kibana And Elasticsearch Cheatsheet](./06-kibana-and-elasticsearch-cheatsheet.md).
 
 ## Как работать в Kibana
 
@@ -180,7 +180,7 @@
 - посмотреть top endpoints по числу `500`;
 - сравнить поведение между двумя версиями сервиса.
 
-Готовые KQL и DSL примеры вынесены в [Kibana And Elasticsearch Cheatsheet](./kibana-and-elasticsearch-cheatsheet.md).
+Готовые KQL и DSL примеры вынесены в [Kibana And Elasticsearch Cheatsheet](./06-kibana-and-elasticsearch-cheatsheet.md).
 
 ## Что искать в реальном инциденте
 

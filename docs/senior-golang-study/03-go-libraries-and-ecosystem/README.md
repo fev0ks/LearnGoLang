@@ -4,10 +4,10 @@
 
 ## Материалы
 
-- [shopspring/decimal](./shopspring-decimal.md) — точная десятичная арифметика; почему float64 нельзя для денег
-- [google/uuid](./google-uuid.md) — UUID v4 vs v7; почему v7 лучше для primary keys
-- [samber/lo](./samber-lo.md) — generics-утилиты для коллекций: Map, Filter, GroupBy, Chunk
-- [pkg/errors](./pkg-errors.md) — ошибки со стектрейсом; совместимость с errors.Is
+- [shopspring/decimal](./01-shopspring-decimal.md) — точная десятичная арифметика; почему float64 нельзя для денег
+- [google/uuid](./02-google-uuid.md) — UUID v4 vs v7; почему v7 лучше для primary keys
+- [samber/lo](./03-samber-lo.md) — generics-утилиты для коллекций: Map, Filter, GroupBy, Chunk
+- [pkg/errors](./04-pkg-errors.md) — ошибки со стектрейсом; совместимость с errors.Is
 
 ## Категории (материалы готовятся)
 

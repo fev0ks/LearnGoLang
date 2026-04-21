@@ -7,9 +7,9 @@
 - как искать утечки, contention и performance regressions в Go.
 
 Материалы:
-- [How To Investigate Production Issues](./how-to-investigate-production-issues.md)
-- [Go Profiling, Tracing And Performance Debugging](./go-profiling-tracing-and-performance-debugging.md)
-- [Finding Leaks, Contention And Memory Problems](./finding-leaks-contention-and-memory-problems.md)
+- [How To Investigate Production Issues](./01-how-to-investigate-production-issues.md)
+- [Go Profiling, Tracing And Performance Debugging](./02-go-profiling-tracing-and-performance-debugging.md)
+- [Finding Leaks, Contention And Memory Problems](./03-finding-leaks-contention-and-memory-problems.md)
 
 Что важно уметь объяснить:
 - с чего начинать расследование инцидента;

@@ -3,13 +3,13 @@
 Сюда собирай материалы по проверке качества и инженерным практикам.
 
 Базовые заметки:
-- [Automated Testing Strategy](./automated-testing-strategy.md)
-- [Unit Tests In Go](./unit-tests-in-go.md)
-- [Integration, Contract And E2E Tests](./integration-contract-and-e2e-tests.md)
-- [Test Doubles And Test Design](./test-doubles-and-test-design.md)
-- [Race, Fuzz And Benchmarks](./race-fuzz-and-benchmarks.md)
-- [Testing Libraries In Go](./testing-libraries-in-go.md)
-- [Testing Cheatsheet](./testing-cheatsheet.md)
+- [Automated Testing Strategy](./01-automated-testing-strategy.md)
+- [Unit Tests In Go](./02-unit-tests-in-go.md)
+- [Integration, Contract And E2E Tests](./05-integration-contract-and-e2e-tests.md)
+- [Test Doubles And Test Design](./03-test-doubles-and-test-design.md)
+- [Race, Fuzz And Benchmarks](./06-race-fuzz-and-benchmarks.md)
+- [Testing Libraries In Go](./04-testing-libraries-in-go.md)
+- [Testing Cheatsheet](./07-testing-cheatsheet.md)
 
 Темы:
 - unit, integration, contract, end-to-end tests;

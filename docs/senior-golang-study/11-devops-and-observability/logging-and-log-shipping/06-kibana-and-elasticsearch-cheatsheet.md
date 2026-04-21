@@ -540,5 +540,5 @@ service.name : "payments-api" and not trace.id : *
 
 ## Related
 
-- [Kibana And Elasticsearch](./kibana-and-elasticsearch.md)
+- [Kibana And Elasticsearch](./05-kibana-and-elasticsearch.md)
 - [Logging And Log Shipping README](./README.md)

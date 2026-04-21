@@ -11,11 +11,11 @@
 
 ## Материалы
 
-- [Kubernetes: зачем нужен backend-разработчику](./kubernetes-basics-for-backend.md)
-- [Pod vs Container](./pod-vs-container.md)
-- [Core Objects And Deployment Flow](./core-objects-and-deployment-flow.md)
-- [Node Failure, Rollout And Config Delivery](./node-failure-rollout-and-config-delivery.md)
-- [Probes и Graceful Shutdown в Go](./probes-and-graceful-shutdown.md)
+- [Kubernetes: зачем нужен backend-разработчику](./01-kubernetes-basics-for-backend.md)
+- [Pod vs Container](./03-pod-vs-container.md)
+- [Core Objects And Deployment Flow](./02-core-objects-and-deployment-flow.md)
+- [Node Failure, Rollout And Config Delivery](./05-node-failure-rollout-and-config-delivery.md)
+- [Probes и Graceful Shutdown в Go](./04-probes-and-graceful-shutdown.md)
 
 ## Что важно уметь объяснить
 

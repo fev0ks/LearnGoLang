@@ -16,23 +16,23 @@
 Материалы:
 
 Foundation:
-- [Logs Pipeline Overview](./logs-pipeline-overview.md)
-- [Logging In Go And Why Wrap Logger](./logging-in-go-and-why-wrap-logger.md)
+- [Logs Pipeline Overview](./01-logs-pipeline-overview.md)
+- [Logging In Go And Why Wrap Logger](./02-logging-in-go-and-why-wrap-logger.md)
 
 Platforms:
-- [Elasticsearch Log Pipeline](./elasticsearch-log-pipeline.md)
-- [Loki Log Pipeline](./loki-log-pipeline.md)
-- [Log Platforms Comparison Table](./log-platforms-comparison-table.md)
+- [Elasticsearch Log Pipeline](./04-elasticsearch-log-pipeline.md)
+- [Loki Log Pipeline](./07-loki-log-pipeline.md)
+- [Log Platforms Comparison Table](./03-log-platforms-comparison-table.md)
 
 Investigation:
-- [Grafana Overview And Functionality](./grafana-overview-and-functionality.md)
-- [Kibana And Elasticsearch](./kibana-and-elasticsearch.md)
-- [Kibana And Elasticsearch Cheatsheet](./kibana-and-elasticsearch-cheatsheet.md)
-- [Grafana vs Kibana And Similar Tools](./grafana-vs-kibana-and-similar-tools.md)
+- [Grafana Overview And Functionality](./08-grafana-overview-and-functionality.md)
+- [Kibana And Elasticsearch](./05-kibana-and-elasticsearch.md)
+- [Kibana And Elasticsearch Cheatsheet](./06-kibana-and-elasticsearch-cheatsheet.md)
+- [Grafana vs Kibana And Similar Tools](./09-grafana-vs-kibana-and-similar-tools.md)
 
 Delivery And Collectors:
-- [Cloud Log Delivery: AWS And Google Cloud](./cloud-log-delivery-aws-and-google-cloud.md)
-- [Promtail vs Grafana Alloy vs Fluent Bit](./promtail-vs-grafana-alloy-vs-fluent-bit.md)
+- [Cloud Log Delivery: AWS And Google Cloud](./11-cloud-log-delivery-aws-and-google-cloud.md)
+- [Promtail vs Grafana Alloy vs Fluent Bit](./10-promtail-vs-grafana-alloy-vs-fluent-bit.md)
 
 Что важно уметь объяснить:
 - почему приложение обычно не должно писать прямо в `Elasticsearch`;

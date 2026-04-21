@@ -43,10 +43,10 @@
 | [02. Numeric Types, Sizes And Overflow](../01-go-core/02-numeric-types-integer-sizes-and-overflow.md) | int vs int64, диапазоны, overflow | ★ |
 | [03. Value vs Pointer Semantics](../01-go-core/03-value-vs-pointer-semantics.md) | когда копировать, mutex copy bug, slice aliasing | ★★ |
 | [04. Interfaces, Method Sets And Nil](../01-go-core/04-interfaces-method-sets-and-nil.md) | iface/eface layout, itab vtable, typed nil trap | ★★★ |
-| [05. Escape Analysis](../01-go-core/05-escape-analysis.md) | stack vs heap, причины escape, `-gcflags=-m` | ★★ |
+| [05. Escape Analysis](../01-go-core/memory-internals/03-escape-analysis.md) | stack vs heap, причины escape, `-gcflags=-m` | ★★ |
 | [06. Memory Model](../01-go-core/06-memory-model.md) | happens-before, channel/mutex/Once гарантии, data race | ★★★ |
 | [07. Scheduler And Preemption](../01-go-core/07-scheduler-and-preemption.md) | GMP, work stealing, async preemption, GOMAXPROCS | ★★★ |
-| [08. Garbage Collector](../01-go-core/08-garbage-collector.md) | tri-color, write barrier, GOGC, GOMEMLIMIT, gctrace | ★★★ |
+| [08. Garbage Collector](../01-go-core/memory-internals/04-garbage-collector.md) | tri-color, write barrier, GOGC, GOMEMLIMIT, gctrace | ★★★ |
 
 #### 09 Concurrency (конспекты в разработке)
 
@@ -190,7 +190,7 @@
 
 | Файл | Что внутри | Приоритет |
 |------|-----------|-----------|
-| [rate-limiting.md](../08-networking-and-api/rate-limiting.md) | token bucket, leaky bucket, sliding window, fixed window | ★★★ |
+| [01-rate-limiting.md](../08-networking-and-api/01-rate-limiting.md) | token bucket, leaky bucket, sliding window, fixed window | ★★★ |
 
 ---
 
@@ -202,107 +202,107 @@
 
 | Файл | Что внутри | Приоритет |
 |------|-----------|-----------|
-| [namespaces-and-cgroups.md](../11-devops-and-observability/linux/namespaces-and-cgroups.md) | 8 типов namespaces, cgroups v2, как Docker собирает контейнер | ★★★ |
-| [signals-and-processes.md](../11-devops-and-observability/linux/signals-and-processes.md) | SIGTERM/SIGKILL, PID 1 в контейнере, zombie/orphan | ★★★ |
-| [file-descriptors-and-io.md](../11-devops-and-observability/linux/file-descriptors-and-io.md) | fd tables, epoll O(ready), Go netpoller, 100k connections | ★★★ |
-| [virtual-memory.md](../11-devops-and-observability/linux/virtual-memory.md) | page fault, mmap, OOM killer, GOMEMLIMIT | ★★★ |
-| [tcp-sockets.md](../11-devops-and-observability/linux/tcp-sockets.md) | TCP states, TIME_WAIT, CLOSE_WAIT, SO_REUSEPORT, Nagle | ★★★ |
+| [05-namespaces-and-cgroups.md](../11-devops-and-observability/linux/05-namespaces-and-cgroups.md) | 8 типов namespaces, cgroups v2, как Docker собирает контейнер | ★★★ |
+| [04-signals-and-processes.md](../11-devops-and-observability/linux/04-signals-and-processes.md) | SIGTERM/SIGKILL, PID 1 в контейнере, zombie/orphan | ★★★ |
+| [02-file-descriptors-and-io.md](../11-devops-and-observability/linux/02-file-descriptors-and-io.md) | fd tables, epoll O(ready), Go netpoller, 100k connections | ★★★ |
+| [01-virtual-memory.md](../11-devops-and-observability/linux/01-virtual-memory.md) | page fault, mmap, OOM killer, GOMEMLIMIT | ★★★ |
+| [03-tcp-sockets.md](../11-devops-and-observability/linux/03-tcp-sockets.md) | TCP states, TIME_WAIT, CLOSE_WAIT, SO_REUSEPORT, Nagle | ★★★ |
 
 #### 11 Docker
 
 | Файл | Что внутри | Приоритет |
 |------|-----------|-----------|
-| [container-vs-virtual-machine.md](../11-devops-and-observability/docker/container-vs-virtual-machine.md) | container = namespaces + cgroups + overlay FS | ★★★ |
-| [docker-for-go-services.md](../11-devops-and-observability/docker/docker-for-go-services.md) | multi-stage build, distroless/scratch, GOMEMLIMIT, automaxprocs | ★★★ |
-| [dockerfile-anatomy.md](../11-devops-and-observability/dockerfiles-for-go/dockerfile-anatomy.md) | слои, кэш layers, порядок инструкций | ★★ |
-| [dockerfiles-for-go-projects.md](../11-devops-and-observability/dockerfiles-for-go/dockerfiles-for-go-projects.md) | паттерны prod/dev Dockerfile | ★★ |
+| [01-container-vs-virtual-machine.md](../11-devops-and-observability/docker/01-container-vs-virtual-machine.md) | container = namespaces + cgroups + overlay FS | ★★★ |
+| [02-docker-for-go-services.md](../11-devops-and-observability/docker/02-docker-for-go-services.md) | multi-stage build, distroless/scratch, GOMEMLIMIT, automaxprocs | ★★★ |
+| [02-dockerfile-anatomy.md](../11-devops-and-observability/dockerfiles-for-go/02-dockerfile-anatomy.md) | слои, кэш layers, порядок инструкций | ★★ |
+| [03-dockerfiles-for-go-projects.md](../11-devops-and-observability/dockerfiles-for-go/03-dockerfiles-for-go-projects.md) | паттерны prod/dev Dockerfile | ★★ |
 
 > Docker Compose — справочный раздел для локального окружения:
-> [docker-compose-for-go-projects.md](../11-devops-and-observability/docker-compose/docker-compose-for-go-projects.md) · [справочник полей](../11-devops-and-observability/docker-compose/compose-file-reference/README.md)
+> [02-docker-compose-for-go-projects.md](../11-devops-and-observability/docker-compose/02-docker-compose-for-go-projects.md) · [справочник полей](../11-devops-and-observability/docker-compose/compose-file-reference/README.md)
 
 #### 11 Kubernetes
 
 | Файл | Что внутри | Приоритет |
 |------|-----------|-----------|
-| [kubernetes-basics-for-backend.md](../11-devops-and-observability/kubernetes/kubernetes-basics-for-backend.md) | Pod, Deployment, Service, ConfigMap, основы для backend | ★★★ |
-| [probes-and-graceful-shutdown.md](../11-devops-and-observability/kubernetes/probes-and-graceful-shutdown.md) | liveness, readiness, startup, SIGTERM grace period | ★★★ |
-| [core-objects-and-deployment-flow.md](../11-devops-and-observability/kubernetes/core-objects-and-deployment-flow.md) | ReplicaSet, Deployment rollout, revision history | ★★★ |
-| [node-failure-rollout-and-config-delivery.md](../11-devops-and-observability/kubernetes/node-failure-rollout-and-config-delivery.md) | rollout strategy, node failure, ConfigMap/Secret delivery | ★★ |
-| [pod-vs-container.md](../11-devops-and-observability/kubernetes/pod-vs-container.md) | sidecar, init container, shared network namespace | ★★ |
+| [01-kubernetes-basics-for-backend.md](../11-devops-and-observability/kubernetes/01-kubernetes-basics-for-backend.md) | Pod, Deployment, Service, ConfigMap, основы для backend | ★★★ |
+| [04-probes-and-graceful-shutdown.md](../11-devops-and-observability/kubernetes/04-probes-and-graceful-shutdown.md) | liveness, readiness, startup, SIGTERM grace period | ★★★ |
+| [02-core-objects-and-deployment-flow.md](../11-devops-and-observability/kubernetes/02-core-objects-and-deployment-flow.md) | ReplicaSet, Deployment rollout, revision history | ★★★ |
+| [05-node-failure-rollout-and-config-delivery.md](../11-devops-and-observability/kubernetes/05-node-failure-rollout-and-config-delivery.md) | rollout strategy, node failure, ConfigMap/Secret delivery | ★★ |
+| [03-pod-vs-container.md](../11-devops-and-observability/kubernetes/03-pod-vs-container.md) | sidecar, init container, shared network namespace | ★★ |
 
 #### 11 Metrics: Prometheus
 
 | Файл | Что внутри | Приоритет |
 |------|-----------|-----------|
-| [metric-types-and-design.md](../11-devops-and-observability/prometheus-and-metrics/metric-types-and-design.md) | counter, gauge, histogram, summary — когда что | ★★★ |
-| [promql-cheatsheet.md](../11-devops-and-observability/prometheus-and-metrics/promql-cheatsheet.md) | rate(), histogram_quantile(), aggregations | ★★★ |
+| [01-metric-types-and-design.md](../11-devops-and-observability/prometheus-and-metrics/01-metric-types-and-design.md) | counter, gauge, histogram, summary — когда что | ★★★ |
+| [05-promql-cheatsheet.md](../11-devops-and-observability/prometheus-and-metrics/05-promql-cheatsheet.md) | rate(), histogram_quantile(), aggregations | ★★★ |
 | [http-request-rate-counters.md](../11-devops-and-observability/prometheus-and-metrics/practical-metric-patterns/http-request-rate-counters.md) | как считать RPS через counter | ★★★ |
 | [latency-histograms.md](../11-devops-and-observability/prometheus-and-metrics/practical-metric-patterns/latency-histograms.md) | p50/p95/p99, правильные bucket boundaries | ★★★ |
 | [http-error-rate.md](../11-devops-and-observability/prometheus-and-metrics/practical-metric-patterns/http-error-rate.md) | error rate по статус-кодам | ★★★ |
 | [gauges-inflight-queue-depth.md](../11-devops-and-observability/prometheus-and-metrics/practical-metric-patterns/gauges-inflight-queue-depth.md) | in-flight requests, queue depth | ★★ |
 | [storage-operation-metrics.md](../11-devops-and-observability/prometheus-and-metrics/practical-metric-patterns/storage-operation-metrics.md) | метрики DB и cache операций | ★★ |
-| [prometheus-metrics-flow.md](../11-devops-and-observability/prometheus-and-metrics/prometheus-metrics-flow.md) | scrape flow, pull model, alertmanager | ★★ |
+| [02-prometheus-metrics-flow.md](../11-devops-and-observability/prometheus-and-metrics/02-prometheus-metrics-flow.md) | scrape flow, pull model, alertmanager | ★★ |
 | [how-prometheus-discovers-and-scrapes-multiple-pods.md](../11-devops-and-observability/prometheus-and-metrics/how-prometheus-discovers-and-scrapes-multiple-pods.md) | service discovery в Kubernetes | ★★ |
-| [prometheus-ui-and-grafana.md](../11-devops-and-observability/prometheus-and-metrics/prometheus-ui-and-grafana.md) | dashboards, alerts | ★★ |
-| [prometheus-relabeling-and-target-labels.md](../11-devops-and-observability/prometheus-and-metrics/prometheus-relabeling-and-target-labels.md) | relabeling, label management | ★ |
+| [04-prometheus-ui-and-grafana.md](../11-devops-and-observability/prometheus-and-metrics/04-prometheus-ui-and-grafana.md) | dashboards, alerts | ★★ |
+| [03-prometheus-relabeling-and-target-labels.md](../11-devops-and-observability/prometheus-and-metrics/03-prometheus-relabeling-and-target-labels.md) | relabeling, label management | ★ |
 
 #### 11 Tracing
 
 | Файл | Что внутри | Приоритет |
 |------|-----------|-----------|
-| [opentelemetry-and-tracing-flow.md](../11-devops-and-observability/tracing-and-opentelemetry/opentelemetry-and-tracing-flow.md) | spans, trace context propagation, sampling | ★★★ |
-| [opentelemetry-in-go-services.md](../11-devops-and-observability/tracing-and-opentelemetry/opentelemetry-in-go-services.md) | instrumentation в Go, SDK setup | ★★★ |
-| [01-push-model-traceid-and-spans-example.md](../11-devops-and-observability/tracing-and-opentelemetry/01-push-model-traceid-and-spans-example.md) | TraceID, SpanID, push vs pull model | ★★ |
-| [tempo-and-trace-investigation.md](../11-devops-and-observability/tracing-and-opentelemetry/tempo-and-trace-investigation.md) | Grafana Tempo, расследование по трейсам | ★★ |
+| [01-opentelemetry-and-tracing-flow.md](../11-devops-and-observability/tracing-and-opentelemetry/01-opentelemetry-and-tracing-flow.md) | spans, trace context propagation, sampling | ★★★ |
+| [02-opentelemetry-in-go-services.md](../11-devops-and-observability/tracing-and-opentelemetry/02-opentelemetry-in-go-services.md) | instrumentation в Go, SDK setup | ★★★ |
+| [04-push-model-traceid-and-spans-example.md](../11-devops-and-observability/tracing-and-opentelemetry/04-push-model-traceid-and-spans-example.md) | TraceID, SpanID, push vs pull model | ★★ |
+| [03-tempo-and-trace-investigation.md](../11-devops-and-observability/tracing-and-opentelemetry/03-tempo-and-trace-investigation.md) | Grafana Tempo, расследование по трейсам | ★★ |
 
 #### 11 Logging
 
 | Файл | Что внутри | Приоритет |
 |------|-----------|-----------|
-| [logging-in-go-and-why-wrap-logger.md](../11-devops-and-observability/logging-and-log-shipping/logging-in-go-and-why-wrap-logger.md) | slog, structured logging, зачем обёртка над логгером | ★★★ |
-| [logs-pipeline-overview.md](../11-devops-and-observability/logging-and-log-shipping/logs-pipeline-overview.md) | как логи попадают из контейнера в хранилище | ★★ |
-| [log-platforms-comparison-table.md](../11-devops-and-observability/logging-and-log-shipping/log-platforms-comparison-table.md) | ELK vs Loki vs Cloud logging — trade-offs | ★★ |
-| [loki-log-pipeline.md](../11-devops-and-observability/logging-and-log-shipping/loki-log-pipeline.md) | Loki + Promtail + Grafana | ★★ |
-| [elasticsearch-log-pipeline.md](../11-devops-and-observability/logging-and-log-shipping/elasticsearch-log-pipeline.md) | ELK/EFK stack | ★★ |
-| [grafana-overview-and-functionality.md](../11-devops-and-observability/logging-and-log-shipping/grafana-overview-and-functionality.md) | Grafana: dashboards, alerting, explore | ★★ |
-| [kibana-and-elasticsearch.md](../11-devops-and-observability/logging-and-log-shipping/kibana-and-elasticsearch.md) | поиск в Kibana, KQL | ★★ |
-| [promtail-vs-grafana-alloy-vs-fluent-bit.md](../11-devops-and-observability/logging-and-log-shipping/promtail-vs-grafana-alloy-vs-fluent-bit.md) | сравнение агентов доставки логов | ★ |
-| [grafana-vs-kibana-and-similar-tools.md](../11-devops-and-observability/logging-and-log-shipping/grafana-vs-kibana-and-similar-tools.md) | сравнение инструментов визуализации | ★ |
-| [kibana-and-elasticsearch-cheatsheet.md](../11-devops-and-observability/logging-and-log-shipping/kibana-and-elasticsearch-cheatsheet.md) | KQL cheatsheet | ★ |
-| [cloud-log-delivery-aws-and-google-cloud.md](../11-devops-and-observability/logging-and-log-shipping/cloud-log-delivery-aws-and-google-cloud.md) | CloudWatch, Google Cloud Logging | ★ |
+| [02-logging-in-go-and-why-wrap-logger.md](../11-devops-and-observability/logging-and-log-shipping/02-logging-in-go-and-why-wrap-logger.md) | slog, structured logging, зачем обёртка над логгером | ★★★ |
+| [01-logs-pipeline-overview.md](../11-devops-and-observability/logging-and-log-shipping/01-logs-pipeline-overview.md) | как логи попадают из контейнера в хранилище | ★★ |
+| [03-log-platforms-comparison-table.md](../11-devops-and-observability/logging-and-log-shipping/03-log-platforms-comparison-table.md) | ELK vs Loki vs Cloud logging — trade-offs | ★★ |
+| [07-loki-log-pipeline.md](../11-devops-and-observability/logging-and-log-shipping/07-loki-log-pipeline.md) | Loki + Promtail + Grafana | ★★ |
+| [04-elasticsearch-log-pipeline.md](../11-devops-and-observability/logging-and-log-shipping/04-elasticsearch-log-pipeline.md) | ELK/EFK stack | ★★ |
+| [08-grafana-overview-and-functionality.md](../11-devops-and-observability/logging-and-log-shipping/08-grafana-overview-and-functionality.md) | Grafana: dashboards, alerting, explore | ★★ |
+| [05-kibana-and-elasticsearch.md](../11-devops-and-observability/logging-and-log-shipping/05-kibana-and-elasticsearch.md) | поиск в Kibana, KQL | ★★ |
+| [10-promtail-vs-grafana-alloy-vs-fluent-bit.md](../11-devops-and-observability/logging-and-log-shipping/10-promtail-vs-grafana-alloy-vs-fluent-bit.md) | сравнение агентов доставки логов | ★ |
+| [09-grafana-vs-kibana-and-similar-tools.md](../11-devops-and-observability/logging-and-log-shipping/09-grafana-vs-kibana-and-similar-tools.md) | сравнение инструментов визуализации | ★ |
+| [06-kibana-and-elasticsearch-cheatsheet.md](../11-devops-and-observability/logging-and-log-shipping/06-kibana-and-elasticsearch-cheatsheet.md) | KQL cheatsheet | ★ |
+| [11-cloud-log-delivery-aws-and-google-cloud.md](../11-devops-and-observability/logging-and-log-shipping/11-cloud-log-delivery-aws-and-google-cloud.md) | CloudWatch, Google Cloud Logging | ★ |
 
 #### 11 Incident Investigation And Profiling
 
 | Файл | Что внутри | Приоритет |
 |------|-----------|-----------|
-| [how-to-investigate-production-issues.md](../11-devops-and-observability/incident-investigation-and-profiling/how-to-investigate-production-issues.md) | методология расследования: logs → metrics → traces → pprof | ★★★ |
-| [go-profiling-tracing-and-performance-debugging.md](../11-devops-and-observability/incident-investigation-and-profiling/go-profiling-tracing-and-performance-debugging.md) | pprof, runtime/trace, GODEBUG | ★★★ |
-| [finding-leaks-contention-and-memory-problems.md](../11-devops-and-observability/incident-investigation-and-profiling/finding-leaks-contention-and-memory-problems.md) | goroutine leak, lock contention, memory leak — как найти | ★★★ |
+| [01-how-to-investigate-production-issues.md](../11-devops-and-observability/incident-investigation-and-profiling/01-how-to-investigate-production-issues.md) | методология расследования: logs → metrics → traces → pprof | ★★★ |
+| [02-go-profiling-tracing-and-performance-debugging.md](../11-devops-and-observability/incident-investigation-and-profiling/02-go-profiling-tracing-and-performance-debugging.md) | pprof, runtime/trace, GODEBUG | ★★★ |
+| [03-finding-leaks-contention-and-memory-problems.md](../11-devops-and-observability/incident-investigation-and-profiling/03-finding-leaks-contention-and-memory-problems.md) | goroutine leak, lock contention, memory leak — как найти | ★★★ |
 
 #### 10 Testing And Quality
 
 | Файл | Что внутри | Приоритет |
 |------|-----------|-----------|
-| [automated-testing-strategy.md](../10-testing-and-quality/automated-testing-strategy.md) | пирамида тестов, trade-offs между уровнями | ★★★ |
-| [unit-tests-in-go.md](../10-testing-and-quality/unit-tests-in-go.md) | table-driven, subtests, parallel, testable design | ★★★ |
-| [test-doubles-and-test-design.md](../10-testing-and-quality/test-doubles-and-test-design.md) | mock vs fake vs stub, когда что использовать | ★★★ |
-| [integration-contract-and-e2e-tests.md](../10-testing-and-quality/integration-contract-and-e2e-tests.md) | testcontainers, contract tests, e2e | ★★ |
-| [race-fuzz-and-benchmarks.md](../10-testing-and-quality/race-fuzz-and-benchmarks.md) | race detector, fuzzing, benchmarks — когда нужны | ★★ |
-| [testing-libraries-in-go.md](../10-testing-and-quality/testing-libraries-in-go.md) | testify, gomock, go-cmp — сравнение | ★★ |
-| [testing-cheatsheet.md](../10-testing-and-quality/testing-cheatsheet.md) | быстрая шпаргалка | ★ |
+| [01-automated-testing-strategy.md](../10-testing-and-quality/01-automated-testing-strategy.md) | пирамида тестов, trade-offs между уровнями | ★★★ |
+| [02-unit-tests-in-go.md](../10-testing-and-quality/02-unit-tests-in-go.md) | table-driven, subtests, parallel, testable design | ★★★ |
+| [03-test-doubles-and-test-design.md](../10-testing-and-quality/03-test-doubles-and-test-design.md) | mock vs fake vs stub, когда что использовать | ★★★ |
+| [05-integration-contract-and-e2e-tests.md](../10-testing-and-quality/05-integration-contract-and-e2e-tests.md) | testcontainers, contract tests, e2e | ★★ |
+| [06-race-fuzz-and-benchmarks.md](../10-testing-and-quality/06-race-fuzz-and-benchmarks.md) | race detector, fuzzing, benchmarks — когда нужны | ★★ |
+| [04-testing-libraries-in-go.md](../10-testing-and-quality/04-testing-libraries-in-go.md) | testify, gomock, go-cmp — сравнение | ★★ |
+| [07-testing-cheatsheet.md](../10-testing-and-quality/07-testing-cheatsheet.md) | быстрая шпаргалка | ★ |
 
 #### 12 Security
 
 | Файл | Что внутри | Приоритет |
 |------|-----------|-----------|
-| [tls-termination-re-encryption-and-mtls.md](../12-security/service-to-service-tls/tls-termination-re-encryption-and-mtls.md) | TLS termination, re-encryption, mTLS между сервисами | ★★★ |
-| [secrets-delivery-options.md](../12-security/secrets-management/secrets-delivery-options.md) | Vault, k8s secrets, env, file mounts — trade-offs | ★★★ |
-| [cors-basics-and-where-to-configure-it.md](../12-security/cors-and-browser-api-security/cors-basics-and-where-to-configure-it.md) | CORS, preflight, где настраивать (LB vs middleware) | ★★★ |
-| [ddos-protection.md](../12-security/perimeter-and-traffic-protection/ddos-protection.md) | DDoS, perimeter protection, WAF | ★★ |
-| [kubernetes-secrets-and-external-managers.md](../12-security/secrets-management/kubernetes-secrets-and-external-managers.md) | k8s Secrets, External Secrets Operator, Vault Agent | ★★ |
-| [local-development-secrets.md](../12-security/secrets-management/local-development-secrets.md) | .env, direnv, как не утечь в git | ★★ |
-| [cors-middleware-example.md](../12-security/cors-and-browser-api-security/cors-middleware-example.md) | реализация CORS middleware на Go | ★★ |
-| [docker-compose-and-container-secrets.md](../12-security/secrets-management/docker-compose-and-container-secrets.md) | secrets в compose и контейнерах | ★ |
+| [01-tls-termination-re-encryption-and-mtls.md](../12-security/service-to-service-tls/01-tls-termination-re-encryption-and-mtls.md) | TLS termination, re-encryption, mTLS между сервисами | ★★★ |
+| [01-secrets-delivery-options.md](../12-security/secrets-management/01-secrets-delivery-options.md) | Vault, k8s secrets, env, file mounts — trade-offs | ★★★ |
+| [01-cors-basics-and-where-to-configure-it.md](../12-security/cors-and-browser-api-security/01-cors-basics-and-where-to-configure-it.md) | CORS, preflight, где настраивать (LB vs middleware) | ★★★ |
+| [01-ddos-protection.md](../12-security/perimeter-and-traffic-protection/01-ddos-protection.md) | DDoS, perimeter protection, WAF | ★★ |
+| [04-kubernetes-secrets-and-external-managers.md](../12-security/secrets-management/04-kubernetes-secrets-and-external-managers.md) | k8s Secrets, External Secrets Operator, Vault Agent | ★★ |
+| [02-local-development-secrets.md](../12-security/secrets-management/02-local-development-secrets.md) | .env, direnv, как не утечь в git | ★★ |
+| [02-cors-middleware-example.md](../12-security/cors-and-browser-api-security/02-cors-middleware-example.md) | реализация CORS middleware на Go | ★★ |
+| [03-docker-compose-and-container-secrets.md](../12-security/secrets-management/03-docker-compose-and-container-secrets.md) | secrets в compose и контейнерах | ★ |
 
 ---
 
@@ -314,8 +314,8 @@
 
 | Файл | Что внутри | Приоритет |
 |------|-----------|-----------|
-| [time-and-space-complexity.md](../13-interview-practice/algorithms-and-complexity/time-and-space-complexity.md) | big O, примеры, как объяснять | ★★ |
-| [common-algorithm-patterns-and-examples-in-go.md](../13-interview-practice/algorithms-and-complexity/common-algorithm-patterns-and-examples-in-go.md) | sliding window, two pointers, binary search на Go | ★★ |
+| [01-time-and-space-complexity.md](../13-interview-practice/algorithms-and-complexity/01-time-and-space-complexity.md) | big O, примеры, как объяснять | ★★ |
+| [02-common-algorithm-patterns-and-examples-in-go.md](../13-interview-practice/algorithms-and-complexity/02-common-algorithm-patterns-and-examples-in-go.md) | sliding window, two pointers, binary search на Go | ★★ |
 
 → [README раздела](../13-interview-practice/README.md) — рекомендации по behavioral вопросам, storytelling, design drills.
 

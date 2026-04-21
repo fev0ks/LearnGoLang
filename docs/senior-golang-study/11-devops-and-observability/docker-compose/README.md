@@ -3,9 +3,9 @@
 Этот подпакет про локальные multi-service стеки: как быстро поднять Go API вместе с базой, кэшем, брокером и observability-инструментами.
 
 Материалы:
-- [Docker Compose Anatomy](./docker-compose-anatomy.md)
+- [Docker Compose Anatomy](./01-docker-compose-anatomy.md)
 - [Compose File Reference](./compose-file-reference/README.md)
-- [Docker Compose For Go Projects](./docker-compose-for-go-projects.md)
+- [Docker Compose For Go Projects](./02-docker-compose-for-go-projects.md)
 - [Complex Compose Example](./compose-go-stack.example.yaml)
 
 Что важно уметь объяснить:

@@ -1,6 +1,6 @@
 # Elasticsearch Log Pipeline
 
-Этот файл про то, как логи попадают в `Elasticsearch` и что важно для стабильного ingestion/storage. Поиск в `Kibana`, `KQL`, `DSL`, `text` vs `keyword` и расследование инцидентов разобраны отдельно в [Kibana And Elasticsearch](./kibana-and-elasticsearch.md).
+Этот файл про то, как логи попадают в `Elasticsearch` и что важно для стабильного ingestion/storage. Поиск в `Kibana`, `KQL`, `DSL`, `text` vs `keyword` и расследование инцидентов разобраны отдельно в [Kibana And Elasticsearch](./05-kibana-and-elasticsearch.md).
 
 ## Содержание
 
@@ -226,6 +226,6 @@ Kibana
 
 ## Связанные темы
 
-- [Logs Pipeline Overview](./logs-pipeline-overview.md)
-- [Kibana And Elasticsearch](./kibana-and-elasticsearch.md)
-- [Log Platforms Comparison Table](./log-platforms-comparison-table.md)
+- [Logs Pipeline Overview](./01-logs-pipeline-overview.md)
+- [Kibana And Elasticsearch](./05-kibana-and-elasticsearch.md)
+- [Log Platforms Comparison Table](./03-log-platforms-comparison-table.md)

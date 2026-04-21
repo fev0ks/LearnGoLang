@@ -15,16 +15,16 @@
 Материалы:
 
 Practical first:
-- [Push Model, TraceId And Spans Example](./01-push-model-traceid-and-spans-example.md)
+- [Push Model, TraceId And Spans Example](./04-push-model-traceid-and-spans-example.md)
 
 Foundation:
-- [OpenTelemetry And Tracing Flow](./opentelemetry-and-tracing-flow.md)
+- [OpenTelemetry And Tracing Flow](./01-opentelemetry-and-tracing-flow.md)
 
 Instrumentation:
-- [OpenTelemetry In Go Services](./opentelemetry-in-go-services.md)
+- [OpenTelemetry In Go Services](./02-opentelemetry-in-go-services.md)
 
 Investigation:
-- [Tempo And Trace Investigation](./tempo-and-trace-investigation.md)
+- [Tempo And Trace Investigation](./03-tempo-and-trace-investigation.md)
 
 Что важно уметь объяснить:
 - чем `trace` отличается от `metric` и `log`;

@@ -54,7 +54,7 @@ srv := &http.Server{
 
 `ReadTimeout` vs `ReadHeaderTimeout`: если выставить только `ReadTimeout`, загрузка больших файлов упрётся в него. Для streaming используй `ReadHeaderTimeout` + отдельный timeout на уровне handler.
 
-Graceful shutdown (обязателен в Kubernetes — детали в [kubernetes/probes-and-graceful-shutdown.md](../../../11-devops-and-observability/kubernetes/probes-and-graceful-shutdown.md)):
+Graceful shutdown (обязателен в Kubernetes — детали в [kubernetes/04-probes-and-graceful-shutdown.md](../../../11-devops-and-observability/kubernetes/04-probes-and-graceful-shutdown.md)):
 
 ```go
 ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)

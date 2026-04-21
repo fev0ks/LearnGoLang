@@ -4,11 +4,11 @@
 
 ## Материалы
 
-- [Namespaces и cgroups](./namespaces-and-cgroups.md) — все 8 типов namespaces с механикой; cgroups v1 vs v2; cpu.max, memory.max, PSI; как Docker собирает контейнер из этих примитивов
-- [Signals и процессы](./signals-and-processes.md) — таблица сигналов; PID 1 special behavior; zombie/orphan; `docker stop` sequence; Kubernetes grace period; Go signal handling
-- [File Descriptors и I/O модели](./file-descriptors-and-io.md) — fd таблицы; ulimit; blocking / select / poll / epoll; Go netpoller на базе epoll; io_uring
-- [Virtual Memory](./virtual-memory.md) — page tables; page fault; mmap; page cache; copy-on-write; OOM killer; overcommit; Go heap и GOMEMLIMIT
-- [TCP Сокеты](./tcp-sockets.md) — socket lifecycle; TCP states; accept backlog; TIME_WAIT; CLOSE_WAIT; SO_REUSEPORT; Nagle / TCP_NODELAY; socket buffers; sysctl tuning
+- [Namespaces и cgroups](./05-namespaces-and-cgroups.md) — все 8 типов namespaces с механикой; cgroups v1 vs v2; cpu.max, memory.max, PSI; как Docker собирает контейнер из этих примитивов
+- [Signals и процессы](./04-signals-and-processes.md) — таблица сигналов; PID 1 special behavior; zombie/orphan; `docker stop` sequence; Kubernetes grace period; Go signal handling
+- [File Descriptors и I/O модели](./02-file-descriptors-and-io.md) — fd таблицы; ulimit; blocking / select / poll / epoll; Go netpoller на базе epoll; io_uring
+- [Virtual Memory](./01-virtual-memory.md) — page tables; page fault; mmap; page cache; copy-on-write; OOM killer; overcommit; Go heap и GOMEMLIMIT
+- [TCP Сокеты](./03-tcp-sockets.md) — socket lifecycle; TCP states; accept backlog; TIME_WAIT; CLOSE_WAIT; SO_REUSEPORT; Nagle / TCP_NODELAY; socket buffers; sysctl tuning
 
 ## Что важно уметь объяснить
 
