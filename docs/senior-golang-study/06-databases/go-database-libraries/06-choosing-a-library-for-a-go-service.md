@@ -4,68 +4,102 @@
 
 ## Вопросы перед выбором
 
-1. Какая БД?
-- PostgreSQL-only;
-- несколько SQL databases;
-- SQLite for local/tests.
+**1. Какая БД?**
+- PostgreSQL-only → `pgxpool`, нативный API, pgtype, batch
+- несколько SQL databases → `database/sql` + подходящие драйверы
+- SQLite для тестов → `go-sqlite3` или `mattn/go-sqlite3`
 
-2. Насколько сложные queries?
-- simple CRUD;
-- много joins;
-- heavy reporting;
-- dynamic filters.
+**2. Насколько сложные queries?**
+- simple CRUD → любой вариант
+- много joins и сложных выборок → SQL-first (sqlc, sqlx, pgxpool raw)
+- heavy reporting → raw SQL обязательно, ORM не поможет
+- dynamic filters (поиск, фильтры по многим полям) → squirrel
 
-3. Кто будет читать SQL?
-- backend команда;
-- DBA;
-- reviewers;
-- аналитики.
+**3. Как хранить и писать SQL?**
+- SQL как контракт, хочется compile-time check → sqlc
+- SQL в коде, меньше boilerplate → sqlx
+- SQL в runtime строках, полный контроль → database/sql или pgxpool
+- SQL конкатенировать нельзя, но нужен dynamic → squirrel builder
 
-4. Что важнее?
-- скорость разработки;
-- контроль SQL;
-- type safety;
-- меньше boilerplate.
+**4. Что важнее?**
+- скорость разработки → GORM, Ent
+- контроль SQL → pgxpool, sqlc
+- type safety → sqlc, Ent
+- меньше boilerplate → sqlx, squirrel
 
-5. Как будете тестировать?
-- unit tests with fakes;
-- integration tests with real DB;
-- testcontainers;
-- migration-based schema setup.
+**5. Как будете тестировать?**
+- integration tests с реальной БД → testcontainers + любой вариант
+- unit tests с моками → sqlc (генерирует Querier interface), database/sql (sql.DB можно замокировать)
 
-## Практические default варианты
+## Практические рецепты
 
-PostgreSQL service с strong SQL culture:
-- `pgxpool`
-- или `sqlc + pgx`
+**PostgreSQL service, SQL culture, средний проект:**
+```
+pgxpool + sqlc (статические queries) + squirrel (dynamic filters)
+```
 
-Минимум зависимостей:
-- `database/sql` + driver
+**PostgreSQL service, нужна простота:**
+```
+pgxpool (всё вручную, полный контроль)
+```
 
-Raw SQL, но меньше boilerplate:
-- `sqlx`
+**Минимум зависимостей, multi-database:**
+```
+database/sql + pgx/stdlib или lib/pq
+```
 
-Много SQL и хочется type-safe API:
-- `sqlc`
+**Raw SQL, но меньше scan boilerplate:**
+```
+sqlx
+```
 
-CRUD-heavy MVP or admin:
-- `GORM`
+**Много SQL, нужна type-safety:**
+```
+sqlc + pgx/v5 backend
+```
 
-Typed entity framework:
-- `Ent`
+**CRUD-heavy MVP / admin panel:**
+```
+GORM
+```
 
-SQL-first ORM/query builder:
-- `Bun`
+**Сложная domain модель:**
+```
+Ent
+```
+
+**Dynamic queries поверх любого SQL-first:**
+```
+squirrel (дополняет pgxpool/sqlx/sqlc, а не заменяет)
+```
+
+## Типы данных в Go + PostgreSQL
+
+Независимо от выбранной ORM/driver:
+
+| Тип данных | PostgreSQL | Go-библиотека |
+|---|---|---|
+| Деньги / финансы | `NUMERIC(10,2)` | `shopspring/decimal` |
+| Уникальные ID | `UUID` | `google/uuid` (v7 для PK) |
+| Bulk-трансформации | — | `samber/lo` |
+| Ошибки со стектрейсом | — | `pkg/errors` или `fmt.Errorf("%w")` |
 
 ## Что я бы сказал на интервью
 
-Хороший ответ:
-
 ```text
-Если это PostgreSQL-heavy сервис, я бы сначала смотрел на pgxpool или sqlc+pgx.
-Если команда хочет максимально явный SQL и меньше магии, ORM не нужен.
-Если это CRUD-heavy internal app, GORM или Ent могут ускорить разработку.
-Главное — понимать generated SQL, иметь миграции, индексы, observability и integration tests.
+Если это PostgreSQL-heavy сервис, я бы выбрал pgxpool для прямых
+запросов и sqlc для статических queries. Для dynamic фильтров —
+squirrel, чтобы не конкатенировать строки вручную.
+
+Если команда хочет максимально явный SQL и минимум магии —
+ORM не нужен. Если это CRUD-heavy internal app — GORM или Ent
+ускорят разработку.
+
+Для денег всегда shopspring/decimal, никогда float64.
+UUID v7 для primary keys — sequential insert, меньше фрагментации.
+
+Главное — понимать generated SQL, иметь миграции, индексы,
+observability, integration tests и pool metrics.
 ```
 
 ## Red flags
@@ -75,15 +109,20 @@ SQL-first ORM/query builder:
 - "pgxpool решит проблемы с плохими запросами"
 - "sqlc сам оптимизирует SQL"
 - "если есть GORM, миграции и индексы не важны"
+- "буду хранить деньги в float64, там же есть округление"
+- "UUID v4 и v7 — одно и то же"
 
-## Хороший production checklist
+## Production checklist
 
 Независимо от библиотеки нужны:
-- migrations;
-- transaction boundaries;
-- context timeouts;
-- pool metrics;
-- slow query visibility;
-- integration tests;
-- explain plan для критичных queries;
-- понятный error mapping.
+
+- [ ] migrations (goose, atlas, migrate)
+- [ ] transaction boundaries на бизнес-операции
+- [ ] context timeout на каждый запрос
+- [ ] pool limits (`MaxConns`, `ConnMaxLifetime`)
+- [ ] pool metrics в Prometheus
+- [ ] slow query logging
+- [ ] integration tests с реальной БД (testcontainers)
+- [ ] EXPLAIN ANALYZE для критичных queries
+- [ ] понятный error mapping (pgconn.PgError → domain errors)
+- [ ] graceful shutdown (закрыть pool при SIGTERM)

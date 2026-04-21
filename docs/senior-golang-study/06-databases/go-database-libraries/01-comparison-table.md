@@ -1,47 +1,60 @@
 # Comparison Table
 
-Таблица ниже не говорит "всегда бери X". Она помогает понять trade-offs.
+Таблица помогает понять trade-offs, а не говорит «всегда бери X».
 
-## Быстрое сравнение
+## SQL drivers и abstraction layers
 
-| Подход | Что это | Плюсы | Минусы | Когда выбирать |
-| --- | --- | --- | --- | --- |
-| `database/sql` | стандартный SQL abstraction layer | стандартная библиотека, predictable API, много драйверов | много boilerplate, ручной scan, нет type-safe queries | простой сервис, полный контроль SQL, минимум зависимостей |
-| `pgx` | PostgreSQL driver/toolkit | PostgreSQL-specific features, хороший контроль, быстрый драйвер | привязка к Postgres API, больше явного кода | PostgreSQL-first сервисы |
-| `pgxpool` | pool поверх `pgx` | удобный pooling, нативный Postgres workflow | надо понимать pool и lifecycle | production Go + PostgreSQL |
-| `sqlx` | расширение `database/sql` | меньше boilerplate, struct scan, остается SQL-first | SQL все еще строками, runtime ошибки возможны | хочешь raw SQL, но меньше ручного scan |
-| `sqlc` | генератор Go-кода из SQL | type-safe Go methods, SQL остается SQL, compile-time checking | нужен generation step, queries живут отдельно | строгий SQL-first подход, большие команды |
-| `GORM` | ORM | быстро стартовать, associations, hooks, migrations | магия, сложнее контролировать SQL, риск N+1 | CRUD-heavy app, admin/internal systems |
-| `Ent` | schema-first ORM/entity framework | type-safe API, code generation, graph-like model | сложнее setup, framework lock-in | сложный domain model, нужен typed query API |
-| `Bun` | SQL-first ORM/query builder | ближе к SQL, меньше магии чем классический ORM | еще один abstraction layer, надо изучать API | нужен query builder + struct mapping без полного GORM-style ORM |
+| Библиотека | Что это | Плюсы | Минусы | Когда выбирать |
+|---|---|---|---|---|
+| `database/sql` | стандартный abstraction layer | stdlib, нет зависимостей, много драйверов | много boilerplate, ручной scan | multi-database, минимум зависимостей |
+| `lib/pq` | legacy PostgreSQL driver | работает с `database/sql` | maintenance mode, нет batch/COPY | legacy проекты на `database/sql` |
+| `pgx/v5` | PostgreSQL driver + toolkit | нативный PG API, batch, COPY, pgtype | только PostgreSQL | любой новый PG-проект |
+| `pgxpool` | connection pool поверх pgx | нативный pool, Stat(), thread-safe | только PostgreSQL | production Go + PostgreSQL |
+
+## SQL-first подходы
+
+| Библиотека | Что это | Плюсы | Минусы | Когда выбирать |
+|---|---|---|---|---|
+| `sqlx` | runtime extensions над `database/sql` | меньше boilerplate, NamedExec, SelectContext | SQL в строках, runtime ошибки | migration path от database/sql |
+| `sqlc` | code generator из SQL | type-safe Go methods, SQL читается, compile-time check | generation step, сложнее dynamic queries | SQL-first проект, большая команда |
+| `squirrel` | query builder | dynamic WHERE без строк, type-safe builder | только builder — не ORM, не driver | dynamic filters, поиск, pagination |
+
+## ORM и query builders
+
+| Библиотека | Что это | Плюсы | Минусы | Когда выбирать |
+|---|---|---|---|---|
+| `GORM` | ORM | быстро стартовать, associations, hooks | магия, N+1 риск, сложнее debug | CRUD-heavy app, admin |
+| `Ent` | schema-first entity framework | type-safe API, graph model | framework lock-in, codegen | сложный domain model |
+| `Bun` | SQL-first ORM/query builder | ближе к SQL, меньше магии | ещё один abstraction layer | query builder + mapping без GORM magic |
 
 ## Как думать про выбор
 
-Если команда хорошо пишет SQL:
-- `database/sql`, `pgx`, `sqlx`, `sqlc`.
+**PostgreSQL-first сервис:**
+- `pgxpool` + `sqlc` для статических queries + `squirrel` для dynamic
 
-Если нужен максимальный контроль PostgreSQL:
-- `pgx` или `pgxpool`.
+**Минимум зависимостей / multi-database:**
+- `database/sql` + driver
 
-Если хочется SQL-first и type safety:
-- `sqlc`.
+**Raw SQL, но меньше boilerplate:**
+- `sqlx`
 
-Если продукт CRUD-heavy и важна скорость:
-- `GORM`, `Ent`, `Bun`.
+**Dynamic filtering (поиск, фильтры):**
+- `squirrel` — query builder без ORM
 
-Если важнее debugging slow queries:
-- меньше магии обычно лучше.
+**CRUD-heavy / internal admin:**
+- `GORM` или `Bun`
+
+**Сложный domain model с relationships:**
+- `Ent`
 
 ## Practical warning
 
 Любая библиотека не отменяет:
-- миграции;
-- индексы;
-- транзакции;
-- connection pool tuning;
-- observability;
-- понимание SQL и query plans.
+- схему и миграции
+- индексы и query plans
+- транзакции и transaction boundaries
+- connection pool tuning
+- observability (slow query logging)
+- integration tests
 
-Самая частая ошибка:
-- выбрать ORM, чтобы "не думать про SQL";
-- а потом не понимать, почему production query стал медленным.
+Самая частая ошибка — выбрать ORM «чтобы не думать про SQL», а потом не понимать, почему production query медленный.
