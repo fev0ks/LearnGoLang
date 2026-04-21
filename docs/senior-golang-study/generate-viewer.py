@@ -151,6 +151,9 @@ body{display:flex;height:100vh;overflow:hidden;font-family:-apple-system,BlinkMa
 #welcome p{font-size:1rem;margin-bottom:24px;line-height:1.7}
 #welcome .shortcuts{display:inline-flex;gap:20px;background:#f1f5f9;padding:10px 20px;border-radius:8px;font-size:12px;color:#64748b}
 kbd{background:#e2e8f0;border-radius:4px;padding:1px 6px;font-family:monospace;font-size:.9em;color:#334155;border:1px solid #cbd5e1}
+#to-top{position:fixed;bottom:120px;right:600px;width:50px;height:50px;border-radius:50%;background:#334155;color:#e2e8f0;border:none;cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center;opacity:0;pointer-events:none;transition:opacity .2s,background .15s;z-index:100}
+#to-top.visible{opacity:1;pointer-events:auto}
+#to-top:hover{background:#4f6df5}
 """
 
 JS = r"""
@@ -211,6 +214,7 @@ function loadFile(path) {
   if (content === undefined) return;
 
   currentPath = path;
+  history.replaceState(null, '', '#' + encodeURIComponent(path));
 
   document.querySelectorAll('.file-item').forEach(el => {
     el.classList.toggle('active', el.dataset.path === path);
@@ -221,7 +225,11 @@ function loadFile(path) {
   const ext = path.split('.').pop().toLowerCase();
   let html;
   if (ext === 'md') {
-    html = '<div class="md">' + marked.parse(content) + '</div>';
+    try {
+      html = '<div class="md">' + addHeadingIds(marked.parse(content)) + '</div>';
+    } catch(e) {
+      html = '<pre>' + escHtml(content) + '</pre>';
+    }
   } else {
     const langMap = {go:'go', yaml:'yaml', yml:'yaml', example:'dockerfile', json:'json'};
     const lang    = langMap[ext] || 'plaintext';
@@ -231,11 +239,9 @@ function loadFile(path) {
   const contentEl = document.getElementById('content');
   contentEl.innerHTML = html;
 
-  contentEl.querySelectorAll('pre code, .raw-file code').forEach(el => hljs.highlightElement(el));
+  try { contentEl.querySelectorAll('pre code, .raw-file code').forEach(el => hljs.highlightElement(el)); } catch(e) {}
 
   document.getElementById('content-wrap').scrollTop = 0;
-  history.replaceState(null, '', '#' + encodeURIComponent(path));
-
   openParents(path);
   scrollItemIntoView(path);
 }
@@ -333,12 +339,31 @@ document.getElementById('content-wrap').addEventListener('click', e => {
     a.target = '_blank'; a.rel = 'noopener';
     return;
   }
-  if (href.startsWith('#') || href.startsWith('mailto:')) return;
+  if (href.startsWith('mailto:')) return;
+  if (href.startsWith('#')) {
+    e.preventDefault();
+    const target = document.getElementById(decodeURIComponent(href.slice(1)));
+    if (target) {
+      const wrap = document.getElementById('content-wrap');
+      const scrollTo = wrap.scrollTop + target.getBoundingClientRect().top - wrap.getBoundingClientRect().top - 16;
+      wrap.scrollTo({ top: scrollTo, behavior: 'smooth' });
+    }
+    return;
+  }
   e.preventDefault();
   const resolved = resolvePath(currentPath, href);
   if (resolved && FILES[resolved] !== undefined) {
     loadFile(resolved);
   }
+});
+
+// Scroll to top button
+const toTop = document.getElementById('to-top');
+document.getElementById('content-wrap').addEventListener('scroll', function() {
+  toTop.classList.toggle('visible', this.scrollTop > 200);
+});
+toTop.addEventListener('click', () => {
+  document.getElementById('content-wrap').scrollTo({ top: 0, behavior: 'smooth' });
 });
 
 // Search
@@ -357,8 +382,14 @@ document.addEventListener('keydown', e => {
   }
 });
 
-// Marked config
-marked.setOptions({ gfm: true, breaks: false });
+function addHeadingIds(html) {
+  return html.replace(/<(h[1-6])>([\s\S]*?)<\/\1>/g, function(_, tag, inner) {
+    const text = inner.replace(/<[^>]+>/g, '');
+    const id = text.toLowerCase()
+      .replace(/[^\w\u0400-\u04ff\s-]/g, '').trim().replace(/\s+/g, '-');
+    return '<' + tag + ' id="' + id + '">' + inner + '</' + tag + '>';
+  });
+}
 
 // Hash routing
 const hash = window.location.hash.slice(1);
@@ -407,6 +438,7 @@ HTML = """<!DOCTYPE html>
     </div>
   </div>
 </div>
+<button id="to-top" title="Наверх">&#8679;</button>
 <script>""" + JS + """</script>
 </body>
 </html>"""
