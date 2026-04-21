@@ -39,14 +39,14 @@
 
 | Файл | Что внутри | Приоритет |
 |------|-----------|-----------|
-| [scheduler-and-preemption.md](../01-go-core/scheduler-and-preemption.md) | GMP-модель, work stealing, preemption points | ★★★ |
-| [garbage-collector.md](../01-go-core/garbage-collector.md) | tri-color mark-and-sweep, GOGC, GC-паузы, GOMEMLIMIT | ★★★ |
-| [interfaces-method-sets-and-nil.md](../01-go-core/interfaces-method-sets-and-nil.md) | iface/eface, nil interface pitfall, method sets | ★★★ |
-| [memory-model.md](../01-go-core/memory-model.md) | happens-before, visibility, sync primitives | ★★★ |
-| [escape-analysis.md](../01-go-core/escape-analysis.md) | stack vs heap, `go build -gcflags=-m` | ★★ |
-| [value-vs-pointer-semantics.md](../01-go-core/value-vs-pointer-semantics.md) | когда копировать, когда брать указатель | ★★ |
-| [primitive-types-and-zero-values.md](../01-go-core/primitive-types-and-zero-values.md) | zero values, string internals | ★ |
-| [numeric-types-integer-sizes-and-overflow.md](../01-go-core/numeric-types-integer-sizes-and-overflow.md) | int sizes, overflow, конверсии | ★ |
+| [01. Primitive Types And Zero Values](../01-go-core/01-primitive-types-and-zero-values.md) | zero values, nil slice/map/chan поведение | ★ |
+| [02. Numeric Types, Sizes And Overflow](../01-go-core/02-numeric-types-integer-sizes-and-overflow.md) | int vs int64, диапазоны, overflow | ★ |
+| [03. Value vs Pointer Semantics](../01-go-core/03-value-vs-pointer-semantics.md) | когда копировать, mutex copy bug, slice aliasing | ★★ |
+| [04. Interfaces, Method Sets And Nil](../01-go-core/04-interfaces-method-sets-and-nil.md) | iface/eface layout, itab vtable, typed nil trap | ★★★ |
+| [05. Escape Analysis](../01-go-core/05-escape-analysis.md) | stack vs heap, причины escape, `-gcflags=-m` | ★★ |
+| [06. Memory Model](../01-go-core/06-memory-model.md) | happens-before, channel/mutex/Once гарантии, data race | ★★★ |
+| [07. Scheduler And Preemption](../01-go-core/07-scheduler-and-preemption.md) | GMP, work stealing, async preemption, GOMAXPROCS | ★★★ |
+| [08. Garbage Collector](../01-go-core/08-garbage-collector.md) | tri-color, write barrier, GOGC, GOMEMLIMIT, gctrace | ★★★ |
 
 #### 09 Concurrency (конспекты в разработке)
 

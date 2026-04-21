@@ -1,35 +1,27 @@
 # Go Core
 
-Сюда складывай материалы по самому языку и runtime.
+Язык и runtime Go. Читать по порядку — каждый файл строится на предыдущем.
 
-Базовые заметки:
-- [Value vs Pointer Semantics](./value-vs-pointer-semantics.md)
-- [Interfaces, Method Sets And Nil Pitfalls](./interfaces-method-sets-and-nil.md)
-- [Escape Analysis](./escape-analysis.md)
-- [Garbage Collector](./garbage-collector.md)
-- [Scheduler And Preemption](./scheduler-and-preemption.md)
-- [Memory Model](./memory-model.md)
-- [Primitive Types And Zero Values](./primitive-types-and-zero-values.md)
-- [Numeric Types, Integer Sizes And Overflow](./numeric-types-integer-sizes-and-overflow.md)
+## Материалы
 
-Темы:
-- указатели, value vs reference semantics;
-- интерфейсы, method sets, nil interface pitfalls;
-- generics и ограничения по их применению;
-- ошибки, wrapping, sentinel errors, `errors.Is` и `errors.As`;
-- контексты, cancellation, deadlines, propagation;
-- modules, versioning, replace, workspace mode;
-- escape analysis, stack vs heap;
-- garbage collector и влияние allocation rate;
-- scheduler, `GOMAXPROCS`, preemption;
-- memory model, happens-before, visibility between goroutines.
+- [01. Primitive Types And Zero Values](./01-primitive-types-and-zero-values.md) — встроенные типы, zero values, поведение nil slice/map/chan
+- [02. Numeric Types, Sizes And Overflow](./02-numeric-types-integer-sizes-and-overflow.md) — int vs int64, диапазоны, overflow
+- [03. Value vs Pointer Semantics](./03-value-vs-pointer-semantics.md) — когда копировать, когда брать указатель; mutex copy bug; slice aliasing
+- [04. Interfaces, Method Sets And Nil](./04-interfaces-method-sets-and-nil.md) — iface/eface layout, itab vtable, typed nil trap, method sets
+- [05. Escape Analysis](./05-escape-analysis.md) — stack vs heap, причины escape, `-gcflags=-m`, inlining
+- [06. Memory Model](./06-memory-model.md) — happens-before, channel/mutex/Once/atomic гарантии, data race, race detector
+- [07. Scheduler And Preemption](./07-scheduler-and-preemption.md) — GMP модель, work stealing, async preemption, syscall handoff, GOMAXPROCS в контейнерах
+- [08. Garbage Collector](./08-garbage-collector.md) — tri-color mark-and-sweep, write barrier, GOGC, GOMEMLIMIT, gctrace
 
-Вопросы для senior-уровня:
-- почему горутина может "утечь" и как это заметить;
-- чем отличается `nil` интерфейс от интерфейса с `nil` внутри;
-- когда generics полезнее интерфейсов, а когда нет;
-- как читать вывод `go build -gcflags=-m`;
-- какие anti-patterns чаще всего встречаются в production Go code.
+## Вопросы senior-уровня
+
+- как GMP модель объясняет, почему миллион горутин не означает миллион threads;
+- что такое write barrier и зачем он нужен при concurrent GC;
+- почему `nil` interface отличается от interface с `nil` внутри;
+- как happens-before объясняет корректность channel-based синхронизации;
+- почему `new(T)` не гарантирует heap allocation;
+- как GOMAXPROCS влияет на CPU throttling в контейнерах;
+- когда `sync.Pool` полезен, а когда нет.
 
 ## Подборка
 
@@ -37,15 +29,5 @@
 - [Effective Go](https://go.dev/doc/effective_go)
 - [Go Language Specification](https://go.dev/ref/spec)
 - [The Go Memory Model](https://go.dev/ref/mem)
-- [Go FAQ](https://go.dev/doc/faq)
 - [A Guide to the Go Garbage Collector](https://go.dev/doc/gc-guide)
-
-## Вопросы
-
-- как работает `interface` под капотом и почему `nil`-ловушка так часто встречается;
-- в каких случаях значение уходит в heap и как это проверить;
-- чем отличается `panic` от обычной ошибки в production-коде;
-- когда стоит использовать generics, а когда они только усложняют API;
-- как scheduler Go влияет на latency и fairness;
-- почему копирование struct иногда безопаснее, чем передача указателя;
-- как бы ты объяснил memory model Go человеку без глубокого runtime-бэкграунда.
+- [Go FAQ](https://go.dev/doc/faq)
