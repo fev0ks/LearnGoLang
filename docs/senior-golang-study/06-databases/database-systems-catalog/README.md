@@ -16,10 +16,13 @@
 - [02 PostgreSQL](./02-postgresql.md)
 - [03 MySQL](./03-mysql.md)
 - [04 MongoDB](./04-mongodb.md)
+- [04a MongoDB: реальные сценарии](./04a-mongodb-real-scenarios.md)
 - [05 Cassandra](./05-cassandra.md)
 - [06 ClickHouse](./06-clickhouse.md)
 - [07 Couchbase](./07-couchbase.md)
 - [08 Redis](./08-redis.md)
+- [08a Redis: реальные сценарии](./08a-redis-real-scenarios.md)
+- [08b Redis: rate limiters](./08b-redis-rate-limiters.md)
 - [09 Elasticsearch And OpenSearch](./09-elasticsearch-and-opensearch.md)
 - [10 DynamoDB](./10-dynamodb.md)
 

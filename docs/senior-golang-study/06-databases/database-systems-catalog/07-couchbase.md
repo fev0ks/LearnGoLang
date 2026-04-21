@@ -1,6 +1,6 @@
 # Couchbase
 
-Couchbase это distributed document database с key-value доступом и дополнительными возможностями для query, search, analytics и mobile sync scenarios.
+Couchbase это distributed document database с key-value доступом и query, search, analytics и mobile sync capabilities.
 
 ## Содержание
 
@@ -15,59 +15,54 @@ Couchbase это distributed document database с key-value доступом и 
 
 ## Где используется
 
-- document data;
-- low-latency key-value access;
-- user profiles;
-- catalogs;
-- session-like data;
+- document data с low-latency key-value access;
+- user profiles и session state;
+- product catalogs;
 - distributed document workloads;
-- mobile/offline sync scenarios.
+- mobile/offline sync scenarios (Couchbase Lite + Sync Gateway).
 
 ## Сильные стороны
 
-- document + key-value model;
-- low-latency access patterns;
-- distributed architecture;
+- document + key-value model в одной системе;
+- sub-millisecond key-value access (данные в managed memory);
 - flexible JSON documents;
-- query capabilities поверх document model;
-- полезен в сценариях, где важны document access and sync.
+- SQL++ (N1QL) поверх document model;
+- distributed architecture с automatic sharding;
+- mobile sync через Couchbase Lite.
 
 ## Слабые стороны
 
-- не полноценная relational DB;
-- сложные relational joins and constraints не основная сила;
-- operational model сложнее простого PostgreSQL;
-- надо проектировать documents and indexes под access patterns.
+- не полноценная relational DB: joins возможны, но дороги;
+- operational model сложнее PostgreSQL;
+- consistency model требует понимания;
+- меньший ecosystem и community, чем у MongoDB или Redis.
 
 ## Когда выбирать
 
 Выбирай Couchbase, если:
-- данные document-like;
-- нужен быстрый key-value/document access;
+- данные document-like и нужен быстрый key-value access;
 - важна distributed document architecture;
-- есть use case вокруг mobile/offline sync или low-latency document workloads.
+- есть mobile/offline sync use case (Couchbase Lite).
 
 ## Когда не выбирать
 
-Лучше подумать о PostgreSQL/MySQL, если:
-- domain strongly relational;
-- нужны strict constraints and transactions around joins;
-- команда не готова к документной модели.
+Лучше подумать о других вариантах, если:
+- domain strongly relational с constraints и joins;
+- нужен pure cache — Redis проще;
+- нужна гибкость MongoDB с более зрелым ecosystem;
+- нет mobile sync — PostgreSQL или MongoDB закроют задачу дешевле.
 
 ## Типичные ошибки
 
 - использовать как SQL DB с JSON;
-- не проектировать ключи и индексы;
-- не понимать consistency trade-offs;
-- выбирать только потому, что "JSON удобнее".
+- не проектировать ключи и индексы под access patterns;
+- выбирать только потому, что "JSON удобнее" — MongoDB или даже PostgreSQL+JSONB могут быть проще в эксплуатации.
 
 ## Interview-ready answer
 
-Couchbase занимает нишу document/key-value систем: хорош для document-centric low-latency workloads, но не заменяет relational database там, где важны constraints, joins and transactional modeling.
+Couchbase занимает нишу document/key-value систем с акцентом на low-latency key-value access и mobile sync. Основное отличие от MongoDB — managed memory cache (данные частично в RAM) и Couchbase Lite для мобильных клиентов с offline-first sync. Для большинства document workloads без mobile sync MongoDB или PostgreSQL+JSONB будут проще в эксплуатации.
 
 ## Query examples
-
-Couchbase поддерживает key-value access и SQL-like язык запросов `SQL++`.
 
 Document example:
 
@@ -76,17 +71,18 @@ Document example:
   "type": "user",
   "email": "user@example.com",
   "status": "active",
-  "created_at": "2026-04-16T10:00:00Z"
+  "created_at": "2026-04-20T10:00:00Z"
 }
 ```
 
-SQL++ запрос:
+SQL++ (N1QL) запрос:
 
 ```sql
 SELECT u.email, u.status
 FROM `users` AS u
 WHERE u.type = "user"
   AND u.status = "active"
+ORDER BY u.created_at DESC
 LIMIT 50;
 ```
 
@@ -98,8 +94,16 @@ ON `users`(status)
 WHERE type = "user";
 ```
 
-Получить документ по ключу обычно делают через SDK key-value API:
+Key-value доступ через SDK (Go):
 
-```text
-bucket.collection("users").get("user::42")
+```go
+collection := cluster.Bucket("users").DefaultCollection()
+
+// get
+result, err := collection.Get("user::42", nil)
+var user UserDocument
+result.Content(&user)
+
+// upsert
+_, err = collection.Upsert("user::42", user, nil)
 ```

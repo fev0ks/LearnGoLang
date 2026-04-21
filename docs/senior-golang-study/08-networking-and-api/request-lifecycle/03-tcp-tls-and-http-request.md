@@ -1,117 +1,176 @@
-# TCP TLS And HTTP Request
+# TCP, TLS и HTTP-запрос
 
-Когда browser получил IP, он еще не "отправил HTTP". Сначала надо установить транспортное и, как правило, TLS-соединение.
+Когда browser получил IP, он ещё не "отправил HTTP". Сначала — транспортное соединение, TLS, и только потом application data.
 
 ## Содержание
 
-- [1. Выбор протокола и порта](#1-выбор-протокола-и-порта)
-- [2. Установка TCP соединения](#2-установка-tcp-соединения)
-- [3. TLS handshake](#3-tls-handshake)
-- [4. Что проверяет браузер](#4-что-проверяет-браузер)
-- [5. Формирование HTTP запроса](#5-формирование-http-запроса)
-- [6. Connection reuse](#6-connection-reuse)
-- [7. Где здесь бывают проблемы](#7-где-здесь-бывают-проблемы)
-- [Почему это важно](#почему-это-важно)
-- [Что могут спросить на интервью](#что-могут-спросить-на-интервью)
+- [TCP three-way handshake](#tcp-three-way-handshake)
+- [TLS 1.2 vs TLS 1.3: стоимость в RTT](#tls-12-vs-tls-13-стоимость-в-rtt)
+- [TLS 1.3 0-RTT resumption](#tls-13-0-rtt-resumption)
+- [Что проверяет браузер в сертификате](#что-проверяет-браузер-в-сертификате)
+- [HTTP/1.1 vs HTTP/2 vs HTTP/3](#http11-vs-http2-vs-http3)
+- [Connection reuse и keep-alive](#connection-reuse-и-keep-alive)
+- [Где здесь бывают проблемы](#где-здесь-бывают-проблемы)
+- [Interview-ready answer](#interview-ready-answer)
 
-## 1. Выбор протокола и порта
+## TCP three-way handshake
 
-Для `https://google.com` обычно используется:
-- TCP как транспорт;
-- порт `443`;
-- поверх него TLS;
-- затем HTTP/2 или HTTP/3, в зависимости от negotiated protocol.
-
-## 2. Установка TCP соединения
-
-Для TCP требуется handshake:
-
-1. client отправляет `SYN`
-2. server отвечает `SYN-ACK`
-3. client отправляет `ACK`
-
-Только после этого появляется установленное TCP connection state.
-
-Цена:
-- минимум один round trip только на transport setup.
-
-## 3. TLS handshake
-
-Потом поднимается TLS:
-- browser проверяет сертификат;
-- сверяет hostname;
-- договаривается о cipher suite и параметрах шифрования;
-- получает session keys.
-
-Здесь важны:
-- certificate chain;
-- trusted CA;
-- срок действия сертификата;
-- SNI, чтобы server понял, для какого hostname нужен сертификат;
-- ALPN, чтобы договориться об HTTP/1.1, HTTP/2 или HTTP/3.
-
-## 4. Что проверяет браузер
-
-Browser должен убедиться:
-- сертификат валиден;
-- сертификат выписан на нужный host;
-- цепочка доверия замыкается на trusted CA;
-- сертификат не просрочен.
-
-Если это не выполняется:
-- пользователь увидит TLS warning или connection error;
-- до application handler запрос вообще не дойдет.
-
-## 5. Формирование HTTP запроса
-
-Только после transport и TLS browser формирует полноценный request:
-
-```http
-GET / HTTP/2
-Host: google.com
-User-Agent: ...
-Accept: text/html,...
-Accept-Language: ...
-Cookie: ...
+```text
+Client          Server
+  │── SYN ──────►│
+  │◄── SYN-ACK ──│   ← 1 RTT
+  │── ACK ───────►│
+  │              │  ← можно начинать TLS
 ```
 
-На практике headers могут быть длиннее:
-- cookies;
-- sec-fetch headers;
-- cache validators;
-- compression negotiation, например `gzip`, `br`, `zstd`.
+Цена: минимум **1 RTT** до того, как TCP connection установлен. При latency 50 ms до сервера — только на TCP уходит 50 ms.
 
-## 6. Connection reuse
+TCP — stream-oriented протокол с гарантией порядка и доставки. Потеря пакета вызывает retransmit и блокирует все данные после него (Head-of-Line blocking на уровне TCP).
 
-Если browser уже имеет открытое соединение:
-- новый request может пойти по reused connection;
-- это экономит latency на TCP и TLS handshake.
+## TLS 1.2 vs TLS 1.3: стоимость в RTT
 
-Это особенно важно для:
-- повторных navigation;
-- загрузки множества subresources;
-- HTTP/2 multiplexing.
+### TLS 1.2 — 2 RTT после TCP
 
-## 7. Где здесь бывают проблемы
+```text
+Client                          Server
+  │── ClientHello ─────────────►│  cipher suites, random
+  │◄── ServerHello + Cert ──────│  [RTT 1] server выбрал cipher, отдал cert
+  │    + ServerHelloDone        │
+  │── ClientKeyExchange ────────►│  pre-master secret (RSA) или DH key share
+  │   + ChangeCipherSpec        │
+  │   + Finished                │
+  │◄── ChangeCipherSpec ─────────│  [RTT 2]
+  │    + Finished               │
+  │              ───────────────── application data
+```
 
-- packet loss на handshake;
-- TLS certificate error;
-- slow TLS negotiation;
-- server не поддерживает ожидаемый protocol;
-- connection timeout;
-- proxy или firewall режет соединение.
+Итого: **TCP (1 RTT) + TLS 1.2 (2 RTT) = 3 RTT** до первого байта ответа.
 
-## Почему это важно
+### TLS 1.3 — 1 RTT после TCP
 
-Когда пользователь говорит "сайт долго открывается", проблема может быть:
-- не в SQL;
-- не в Go handler;
-- а в handshake до того, как backend вообще увидел request.
+TLS 1.3 объединил key exchange и handshake в один round trip: client сразу посылает key share в ClientHello.
 
-## Что могут спросить на интервью
+```text
+Client                          Server
+  │── ClientHello + key_share ─►│  сразу отправляет DH-часть
+  │◄── ServerHello + key_share  │  [RTT 1]
+  │    + Certificate + Finished │  server уже может дешифровать
+  │── Finished ────────────────►│
+  │              ───────────────── application data
+```
 
-- зачем нужен TCP three-way handshake;
-- что проверяется в TLS;
-- зачем нужны SNI и ALPN;
-- почему keep-alive и connection reuse снижают latency;
-- чем отличается latency первого запроса от latency запроса по reused connection.
+Итого: **TCP (1 RTT) + TLS 1.3 (1 RTT) = 2 RTT** до первого байта.
+
+Также убраны устаревшие cipher suites (RC4, MD5, SHA-1) и RSA key exchange (нет forward secrecy).
+
+### Суммарная стоимость соединения
+
+| Сценарий | RTT до первого байта |
+|---|---|
+| TLS 1.2, новое соединение | 3 RTT |
+| TLS 1.3, новое соединение | 2 RTT |
+| TLS 1.3, session resumption | 1 RTT |
+| HTTP/3 (QUIC), новое | 1 RTT |
+| HTTP/3 (QUIC), resumption | 0 RTT |
+
+## TLS 1.3 0-RTT resumption
+
+При повторном подключении клиент может отправить **early data** (application data) вместе с ClientHello — до завершения handshake.
+
+```text
+Client                          Server
+  │── ClientHello + early_data ►│  0-RTT: данные уже летят
+  │◄── ServerHello + Finished ──│  [RTT 1] подтверждение
+```
+
+**Ограничение**: 0-RTT уязвим к **replay attack** — злоумышленник может переслать перехваченный 0-RTT пакет. Сервер должен принять его снова, если не имеет механизма deduplication (one-time token, replay cache).
+
+Правило: 0-RTT допустим только для **идемпотентных** запросов (GET). Никогда для POST/PUT/DELETE, изменяющих состояние.
+
+## Что проверяет браузер в сертификате
+
+1. **Signature chain**: сертификат подписан промежуточным CA, тот — root CA из trust store браузера.
+2. **Hostname match**: `CN` или `SAN` (Subject Alternative Name) совпадает с хостом. Wildcard `*.example.com` покрывает один уровень.
+3. **Validity period**: `notBefore` ≤ now ≤ `notAfter`. Истёкший сертификат → hard error.
+4. **Revocation**: CRL или OCSP. Браузеры часто используют OCSP stapling — сервер сам прикладывает свежий OCSP response к handshake.
+5. **SNI**: client посылает hostname в TLS ClientHello, чтобы сервер знал, какой сертификат отдать (один IP, много доменов).
+6. **ALPN**: client перечисляет протоколы (`h2`, `http/1.1`), сервер выбирает. Именно так браузер договаривается об HTTP/2.
+
+## HTTP/1.1 vs HTTP/2 vs HTTP/3
+
+### HTTP/1.1
+
+- Одно TCP-соединение = один запрос за раз (HOL blocking на application уровне).
+- Браузер открывает **6 соединений на host** как workaround.
+- `Connection: keep-alive` — reuse соединения, не нужен повторный handshake.
+- Pipelining формально существует, но сломан из-за proxy-серверов, почти не используется.
+
+### HTTP/2
+
+- **Multiplexing**: несколько независимых streams поверх одного TCP-соединения. Браузер может слать 100 запросов параллельно.
+- **HPACK**: header compression. Заголовки индексируются — повторные запросы на 40–60% меньше.
+- **Server push**: сервер сам отправляет ресурсы без явного запроса (deprecated в большинстве браузеров из-за race с cache).
+- **Проблема**: TCP HOL blocking. Если один TCP-пакет потерян — все streams ждут retransmit. При 1% packet loss HTTP/2 может быть медленнее HTTP/1.1 (из-за 6 параллельных соединений у 1.1).
+
+### HTTP/3 / QUIC
+
+- Работает поверх **UDP**. QUIC реализует свой stream-multiplexing и reliable delivery.
+- Потеря пакета блокирует только тот stream, которому он принадлежит. Остальные продолжают работу.
+- **0-RTT соединение** для повторных подключений (QUIC TLS 1.3 0-RTT).
+- **Лучше на нестабильных сетях** (mobile, Wi-Fi) — быстрее восстанавливается после смены IP (connection migration по connection ID, а не IP:port).
+- Проблема: часть NAT/firewall блокируют UDP 443. Браузеры fallback на TCP+TLS.
+
+```text
+HTTP/1.1:  [Req1][─────────Resp1─────────][Req2][───Resp2───]
+           ↑ один запрос за раз, HOL blocking
+
+HTTP/2:    [Req1][Req2][Req3]────►  (multiplexed streams)
+           [─Resp1─][─Resp2─][─Resp3─]  но при packet loss все ждут
+
+HTTP/3:    [Req1][Req2][Req3]────►  (QUIC streams over UDP)
+           [─Resp2─][─Resp3─]  Resp1 ждёт retransmit, остальные идут
+```
+
+## Connection reuse и keep-alive
+
+Первый запрос к хосту платит TCP + TLS. Последующие — бесплатно, если соединение живо.
+
+```text
+Первый запрос:  DNS + TCP(1RTT) + TLS1.3(1RTT) + HTTP = 2+ RTT overhead
+Повторный:      HTTP only = минимальная latency
+```
+
+**HTTP/2 multiplexing** делает reuse ещё ценнее: все параллельные запросы к хосту идут по одному соединению.
+
+На backend стороне Go `net/http` поддерживает keep-alive по умолчанию. Для outgoing клиентов важно reuse `http.Client` (не создавать новый на каждый запрос) — иначе каждый запрос платит handshake.
+
+```go
+// правильно: один клиент на весь процесс
+var client = &http.Client{
+    Transport: &http.Transport{
+        MaxIdleConns:        100,
+        MaxIdleConnsPerHost: 20,
+        IdleConnTimeout:     90 * time.Second,
+    },
+    Timeout: 10 * time.Second,
+}
+
+// неправильно: новый клиент — новое соединение каждый раз
+func badCall() {
+    c := &http.Client{}  // теряет connection pool
+    c.Get("https://api.example.com/data")
+}
+```
+
+## Где здесь бывают проблемы
+
+- **packet loss на handshake**: TCP SYN или TLS ClientHello потерян → retransmit timeout (1s, потом 2s, 4s...).
+- **certificate expired**: сразу hard error, до handler не дойдёт. Alert через monitoring cert expiry.
+- **SNI mismatch**: клиент указал один host, сервер вернул сертификат для другого → certificate error.
+- **TLS version mismatch**: клиент требует TLS 1.3, сервер умеет только 1.2 → не согласовали → failure.
+- **proxy/firewall DPI**: deep packet inspection может блокировать необычные TLS extensions (quic, ECH).
+- **QUIC blocked by UDP firewall**: HTTP/3 не работает, нужен fallback. Cloudflare/Google делают alt-svc + fallback автоматически.
+
+## Interview-ready answer
+
+TCP требует 1 RTT handshake. TLS 1.2 добавляет 2 RTT, итого 3 RTT до данных. TLS 1.3 сократил до 1 RTT (key share в ClientHello), итого 2 RTT. 0-RTT session resumption позволяет послать данные без RTT overhead, но уязвим к replay — только для идемпотентных запросов. HTTP/2 решает HOL blocking на application уровне через multiplexing, но TCP HOL blocking остаётся при потере пакетов. HTTP/3/QUIC работает поверх UDP со своим stream-multiplexing, потеря пакета блокирует только один stream. SNI нужен, чтобы сервер знал какой сертификат отдать при shared IP; ALPN — чтобы согласовать h2 vs http/1.1 в TLS handshake.

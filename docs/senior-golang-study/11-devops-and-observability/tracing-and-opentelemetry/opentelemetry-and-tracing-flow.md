@@ -7,6 +7,7 @@
 - [Самая короткая интуиция](#самая-короткая-интуиция)
 - [Базовые сущности](#базовые-сущности)
 - [Что такое OpenTelemetry по сути](#что-такое-opentelemetry-по-сути)
+- [Push model: как traces уходят из backend](#push-model-как-traces-уходят-из-backend)
 - [Как выглядит tracing flow на практике](#как-выглядит-tracing-flow-на-практике)
 - [Что такое OTLP](#что-такое-otlp)
 - [Чем traces отличаются от logs и metrics](#чем-traces-отличаются-от-logs-и-metrics)
@@ -99,6 +100,39 @@ OpenTelemetry = instrumentation + propagation + export
 Tempo = trace storage
 Grafana = UI for investigation
 ```
+
+## Push model: как traces уходят из backend
+
+Traces обычно отправляются из приложения наружу по push-модели.
+
+Это значит:
+- backend создает spans во время обработки request/event;
+- когда span завершается, SDK кладет его в batch;
+- exporter отправляет batch по `OTLP`;
+- принимает это `OpenTelemetry Collector` или сразу trace backend, например `Tempo`.
+
+Упрощенно:
+
+```text
+Go backend -> OpenTelemetry SDK -> OTLP exporter -> OTel Collector -> Tempo -> Grafana
+```
+
+Или локально:
+
+```text
+Go backend -> OTLP exporter -> Tempo -> Grafana
+```
+
+Важное отличие от Prometheus:
+- `Prometheus` часто сам забирает metrics через pull/scrape;
+- traces чаще push'ятся приложением через exporter.
+
+Практический смысл:
+- Tempo обычно не ходит в backend за traces;
+- backend сам отправляет завершенные spans;
+- на shutdown приложения надо делать flush, иначе последние spans можно потерять.
+
+Более приземленный пример с `trace_id`, `span_id`, `traceparent` и деревом spans лежит в [Push Model, TraceId And Spans Example](./01-push-model-traceid-and-spans-example.md).
 
 ## Как выглядит tracing flow на практике
 

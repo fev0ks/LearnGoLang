@@ -1,10 +1,12 @@
 # Elasticsearch And OpenSearch
 
-Elasticsearch и OpenSearch чаще обсуждают как search and analytics engines, а не как обычные transactional databases.
+Elasticsearch и OpenSearch — search and analytics engines на основе Apache Lucene.
 
 ## Содержание
 
 - [Где используется](#где-используется)
+- [Как устроено: inverted index и mapping](#как-устроено-inverted-index-и-mapping)
+- [Derived model: не primary storage](#derived-model-не-primary-storage)
 - [Сильные стороны](#сильные-стороны)
 - [Слабые стороны](#слабые-стороны)
 - [Когда выбирать](#когда-выбирать)
@@ -16,122 +18,145 @@ Elasticsearch и OpenSearch чаще обсуждают как search and analyt
 ## Где используется
 
 - full-text search;
-- log search;
+- log search (ELK stack, OpenSearch Dashboards);
 - observability;
-- filtering and faceting;
-- search relevance;
-- security/event analytics;
-- document search.
+- filtering и faceted search;
+- search relevance scoring;
+- security/event analytics.
+
+## Как устроено: inverted index и mapping
+
+`Inverted index` — основа поиска. Для каждого слова хранится список документов, в которых оно встречается. Поиск "kubernetes" → мгновенно находим все документы с этим словом.
+
+`Mapping` — описание типов полей. Критически важно для производительности:
+
+- `text` — токенизируется, анализируется; подходит для full-text search; НЕ подходит для точного match и aggregation;
+- `keyword` — хранится as-is; для точного match, aggregation, sorting.
+
+Для поля, по которому нужен и full-text search, и aggregation/exact match, нужны оба подтипа:
+
+```json
+"title": {
+  "type": "text",
+  "fields": {
+    "keyword": { "type": "keyword" }
+  }
+}
+```
+
+**Refresh interval**: по умолчанию документ становится searchable через ~1 секунду после записи (refresh). Это eventual consistency для поиска — не подходи к ES/OS с ожиданием мгновенной видимости записи.
+
+**Shards и replicas**: индекс делится на shards (горизонтальное шардирование). Replicas — копии для HA и read throughput. Количество primary shards фиксируется при создании индекса — меняется через reindex.
+
+## Derived model: не primary storage
+
+Elasticsearch/OpenSearch — derived read model, не source of truth:
+
+```text
+Primary DB (PostgreSQL/MongoDB) -> CDC / event stream -> ES index
+```
+
+Преимущества:
+- если ES упадет, данные в primary DB целые;
+- можно перестроить индекс заново из primary DB;
+- primary DB хранит дорогой состояние транзакционно, ES — дешевый индекс для поиска.
+
+Хранить в ES как единственный источник данных нельзя: нет transactions, нет FK, eventual consistency при индексировании.
 
 ## Сильные стороны
 
-- full-text search;
-- inverted indexes;
-- relevance scoring;
-- aggregations;
-- distributed search;
-- удобны для log and event investigation.
+- full-text search с relevance scoring;
+- inverted index — молниеносный поиск по тексту;
+- мощные aggregations (facets, histograms);
+- distributed search по большим объемам;
+- удобен для log investigation.
 
 ## Слабые стороны
 
 - не primary transactional storage;
-- eventual consistency aspects around indexing;
-- mapping and indexing design важны;
-- cluster operations can be non-trivial;
-- storage cost can grow fast.
+- eventual consistency при индексировании (refresh interval);
+- mapping design важен — переделка требует reindex;
+- cluster operations нетривиальны;
+- storage cost при хранении raw logs растет быстро.
 
 ## Когда выбирать
 
 Выбирай Elasticsearch/OpenSearch, если:
-- нужен поиск по тексту;
-- нужны фильтры, facets, relevance;
-- надо искать по логам и событиям;
-- SQL DB плохо подходит для search use case.
+- нужен full-text search с relevance;
+- нужны фильтры, facets, поиск по логам;
+- PostgreSQL full-text search уже не справляется;
+- нужен ELK/observability stack.
 
 ## Когда не выбирать
 
 Не лучший выбор, если:
 - нужен primary source of truth для payments/orders;
 - нужны relational constraints;
-- нужен простой transactional CRUD;
-- workload точечно решается PostgreSQL index или full-text search.
+- задача решается PostgreSQL `tsvector` full-text search.
 
 ## Типичные ошибки
 
 - использовать как единственную базу для бизнес-сущностей;
-- не понимать difference between indexed document and source of truth;
-- не контролировать mappings;
-- создавать слишком много high-cardinality fields;
-- хранить бесконечные логи без retention policy.
+- не понимать разницу `text` vs `keyword` → broken aggregations;
+- не контролировать mappings → mapping explosion при динамических ключах;
+- хранить бесконечные логи без index lifecycle management (ILM) → диск заканчивается;
+- ожидать мгновенную видимость после записи.
 
 ## Interview-ready answer
 
-Elasticsearch/OpenSearch стоит выбирать для search and log analytics. Для transactional state лучше держать primary database отдельно, а search index рассматривать как derived/read model.
+Elasticsearch/OpenSearch — поисковые движки на инвертированном индексе: для каждого слова хранится список документов. Их правильная роль — derived read model: primary DB является source of truth, ES/OS — дешевый индекс для поиска. Mapping критичен: `text` для full-text search, `keyword` для exact match и aggregation. Eventual consistency при индексировании (refresh ~1s). Для logs: обязателен ILM для retention, иначе диск закончится.
 
 ## Query examples
 
 Индексация документа:
 
 ```http
-POST /users/_doc/42
+POST /products/_doc/42
 Content-Type: application/json
 
 {
-  "email": "user@example.com",
+  "title": "MacBook Pro 16-inch",
+  "description": "Apple laptop with M3 chip",
   "status": "active",
-  "created_at": "2026-04-16T10:00:00Z"
+  "price": 2499.00,
+  "tags": ["laptop", "apple"]
 }
 ```
 
-Получить документ по id:
+Full-text search с фильтром:
 
 ```http
-GET /users/_doc/42
-```
-
-Search по exact field:
-
-```http
-GET /users/_search
+GET /products/_search
 Content-Type: application/json
 
 {
   "query": {
-    "term": {
-      "status.keyword": "active"
+    "bool": {
+      "must": {
+        "match": { "title": "macbook" }
+      },
+      "filter": {
+        "term": { "status.keyword": "active" }
+      }
     }
   }
 }
 ```
 
-Full-text search:
+Aggregation (facets):
 
 ```http
-GET /users/_search
-Content-Type: application/json
-
-{
-  "query": {
-    "match": {
-      "email": "example"
-    }
-  }
-}
-```
-
-Aggregation:
-
-```http
-GET /users/_search
+GET /products/_search
 Content-Type: application/json
 
 {
   "size": 0,
   "aggs": {
-    "by_status": {
-      "terms": {
-        "field": "status.keyword"
-      }
+    "by_tag": {
+      "terms": { "field": "tags.keyword" }
+    },
+    "price_range": {
+      "histogram": { "field": "price", "interval": 500 }
     }
   }
 }

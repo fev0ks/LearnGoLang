@@ -7,11 +7,15 @@
 - как расследовать latency и error path через `Grafana + Tempo`.
 
 Как читать:
-- сначала понять общую trace model;
-- потом посмотреть, как `OpenTelemetry` встраивается в Go-сервис;
-- после этого разбирать `Tempo` и trace investigation workflow.
+- сначала открыть practical example про push model, `trace_id` и spans;
+- потом понять общую trace model;
+- после этого посмотреть, как `OpenTelemetry` встраивается в Go-сервис;
+- затем разбирать `Tempo` и trace investigation workflow.
 
 Материалы:
+
+Practical first:
+- [Push Model, TraceId And Spans Example](./01-push-model-traceid-and-spans-example.md)
 
 Foundation:
 - [OpenTelemetry And Tracing Flow](./opentelemetry-and-tracing-flow.md)

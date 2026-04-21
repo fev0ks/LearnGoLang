@@ -14,6 +14,7 @@
 
 Подпакеты:
 - [External Request Flows](./external-request-flows/README.md)
+- [Experimentation And Feature Rollouts](./experimentation-and-feature-rollouts/README.md)
 
 Хорошие тренировочные кейсы:
 - URL shortener;

@@ -9,8 +9,10 @@
 - [Relational Databases And SQL](./relational-databases-and-sql/README.md)
 - [Go Database Libraries](./go-database-libraries/README.md)
 - [Database Systems Catalog](./database-systems-catalog/README.md)
+- [Database Fundamentals](./database-fundamentals/README.md)
 
 Темы:
+- ACID, CAP, BASE, OLTP/OLAP и практические case studies;
 - PostgreSQL internals на практическом уровне;
 - индексы: B-tree, partial, composite, covering;
 - explain plans и оптимизация запросов;

@@ -3,6 +3,7 @@
 Этот раздел нужен, потому что senior backend обычно отвечает и за production readiness.
 
 Базовые заметки:
+- [Linux Internals](./linux/README.md)
 - [Logging And Log Shipping](./logging-and-log-shipping/README.md)
 - [Prometheus And Metrics](./prometheus-and-metrics/README.md)
 - [Tracing And OpenTelemetry](./tracing-and-opentelemetry/README.md)
@@ -31,6 +32,7 @@
 - как деплоить без лишнего риска.
 
 Структура раздела:
+- `linux` - namespaces и cgroups (основа контейнеров), сигналы, PID 1, zombie/orphan процессы
 - `logging-and-log-shipping` - пайплайны логов, log platforms, Kibana/Elasticsearch и log investigation
 - `prometheus-and-metrics` - как работает flow метрик, типы метрик, PromQL и практический metric design
 - `tracing-and-opentelemetry` - как устроены traces, OpenTelemetry instrumentation, propagation и Tempo investigation
