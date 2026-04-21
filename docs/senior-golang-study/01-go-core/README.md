@@ -8,6 +8,7 @@
 - [02. Numeric Types, Sizes And Overflow](./02-numeric-types-integer-sizes-and-overflow.md) — int vs int64, диапазоны, overflow
 - [03. Value vs Pointer Semantics](./03-value-vs-pointer-semantics.md) — когда копировать, когда брать указатель; mutex copy bug; slice aliasing
 - [04. Interfaces, Method Sets And Nil](./04-interfaces-method-sets-and-nil.md) — iface/eface layout, itab vtable, typed nil trap, method sets
+- [05. Slices](./05-slices.md) — slice header (ptr/len/cap), shared backing array, append реаллокация, sub-slice, copy ловушки, nil vs empty, memory retention
 - [06. Memory Model](./06-memory-model.md) — happens-before, channel/mutex/Once/atomic гарантии, data race, race detector
 - [07. Scheduler And Preemption](./07-scheduler-and-preemption.md) — GMP модель, work stealing, async preemption, syscall handoff, GOMAXPROCS в контейнерах
 - [08. Syscall](./08-syscall.md) — entersyscall/exitsyscall, P handoff, sysmon retake, CGo цена, LockOSThread, thread exhaustion
@@ -33,6 +34,11 @@
 
 ## Вопросы senior-уровня
 
+- почему `s2 := s1` не копирует данные slice и как это приводит к неожиданным изменениям
+- когда append создаёт новый backing array, а когда нет — и почему это важно
+- почему `copy(dst, src)` может скопировать 0 элементов даже с непустым src
+- чем nil slice отличается от empty slice и где это важно
+- почему sub-slice может держать большой массив в памяти
 - как GMP модель объясняет, почему миллион горутин не означает миллион threads
 - почему goroutine stack начинается с 2 KB и как растёт
 - как устроен Go аллокатор: mcache/mcentral/mheap
