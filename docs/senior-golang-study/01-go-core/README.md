@@ -12,7 +12,15 @@
 - [07. Scheduler And Preemption](./07-scheduler-and-preemption.md) — GMP модель, work stealing, async preemption, syscall handoff, GOMAXPROCS в контейнерах
 - [08. Syscall](./08-syscall.md) — entersyscall/exitsyscall, P handoff, sysmon retake, CGo цена, LockOSThread, thread exhaustion
 - [09. Netpoller](./09-netpoller.md) — epoll/kqueue интеграция, pollDesc, горутина parking/wakeup, SetDeadline, DNS resolver
+- [Map Internals](./map-internals/) — hmap+bmap (до 1.24), Swiss Tables (1.24+), ctrl bytes, matchH2, tombstones (подраздел)
 - [Memory Internals](./memory-internals/) — стек и heap, аллокатор, escape analysis, GC (подраздел)
+
+## Map Internals (подраздел)
+
+Детальный разбор внутренней реализации map:
+
+- [01. hmap + bmap](./map-internals/01-hmap-before-1.24.md) — до Go 1.24: bucket layout, tophash, overflow chains, incremental evacuation
+- [02. Swiss Tables](./map-internals/02-swiss-tables-since-1.24.md) — с Go 1.24: open addressing, ctrl bytes, matchH2 bitset, directory
 
 ## Memory Internals (подраздел)
 
@@ -36,6 +44,10 @@
 - что происходит с P когда горутина уходит в blocking syscall
 - почему 100k соединений не требуют 100k OS threads
 - когда `sync.Pool` полезен, а когда нет
+- как устроен bucket в hmap: tophash, раздельное хранение ключей и значений
+- почему порядок итерации по map случаен
+- что такое Swiss Tables и чем они лучше chaining через overflow buckets
+- как matchH2 проверяет 8 слотов одной битовой операцией
 
 ## Подборка
 
