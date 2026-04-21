@@ -41,6 +41,27 @@ Sweep-фаза:
 - Белые span-ы помечаются как свободные в heap арене.
 - Происходит **конкурентно** с работой приложения.
 
+```mermaid
+flowchart LR
+    Root(["Roots\ngoroutine stacks\nglobals"])
+    W["⬜ White\nне посещён"]
+    G["▪ Grey\nв work queue"]
+    B["⬛ Black\nпотомки проверены"]
+    F(["🗑 Freed\nнедостижим"])
+
+    Root -->|"mark setup"| G
+    W   -->|"указатель\nиз grey"| G
+    G   -->|"все дочерние\nобработаны"| B
+    W   -->|"конец mark:\nбелый = мусор"| F
+    B   -. "следующий\nGC цикл" .-> W
+
+    style Root fill:#e8f5e8,stroke:#4caf50,color:#1b5e20
+    style W    fill:#fafafa,stroke:#bbb,color:#333
+    style G    fill:#757575,stroke:#424242,color:#fff
+    style B    fill:#212121,stroke:#000,color:#fff
+    style F    fill:#ffebee,stroke:#e53935,color:#b71c1c
+```
+
 ## Проблема concurrent GC и write barrier
 
 Если GC сканирует heap **одновременно** с мутатором (приложением), мутатор может нарушить инвариант:
@@ -70,6 +91,41 @@ writeBarrier(*slot, ptr):
 Write barrier активен только во время mark-фазы. После mark termination он отключается.
 
 Важное следствие: с hybrid write barrier стеки горутин нужно сканировать **только один раз** (в STW mark setup) — это сократило паузы.
+
+**Без write barrier** — гонка между мутатором и GC:
+
+```mermaid
+sequenceDiagram
+    participant M as Мутатор (приложение)
+    participant GC as GC (concurrent mark)
+
+    Note over M,GC: B = black,  C = grey,  A = white
+
+    GC  ->> GC: сканирует C, скоро увидит C.ref→A
+    M   ->> M:  B.ref = A   ← чёрный начал указывать на белый
+    M   ->> M:  C.ref = nil ← единственный путь к A удалён
+    GC  ->> GC: C готов → black (A так и не попал в grey)
+    Note over GC: ❌ A остался white → freed!
+    Note over M:  B.ref → освобождённая память = use-after-free
+```
+
+**С hybrid write barrier** — оба значения красятся в grey:
+
+```mermaid
+sequenceDiagram
+    participant M  as Мутатор (приложение)
+    participant WB as Write Barrier
+    participant GC as GC (concurrent mark)
+
+    Note over M,GC: hybrid write barrier активен во время mark-фазы
+
+    M  ->> WB: хочет записать: B.ref = A
+    WB ->> GC: shade(старый B.ref) → grey   ← Yuasa deletion barrier
+    WB ->> GC: shade(A)            → grey   ← Dijkstra insertion barrier
+    WB ->> M:  B.ref = A  (реальная запись)
+    GC ->> GC: A в work queue → будет проверен
+    Note over GC: ✅ A гарантированно не будет collected
+```
 
 ## Фазы GC в Go
 
@@ -103,6 +159,26 @@ Concurrent Sweep       (параллельно с работой)
 ```
 
 **Паузы**: STW фазы обычно < 1 мс. Concurrent mark не является паузой — приложение работает.
+
+```mermaid
+gantt
+    title Go GC Cycle (схематично, не в масштабе)
+    dateFormat  X
+    axisFormat  %%
+
+    section Приложение
+    Нормальная работа      : a1, 0,  10
+    ⚡ STW pause            : crit, a2, 10, 11
+    Работа  +  GC Assist   : a3, 11, 80
+    ⚡ STW pause            : crit, a4, 80, 81
+    Нормальная работа      : a5, 81, 100
+
+    section GC Workers
+    Mark Setup             : crit,   g1, 10, 11
+    Concurrent Mark        : active, g2, 11, 80
+    Mark Termination       : crit,   g3, 80, 81
+    Concurrent Sweep       : done,   g4, 81, 100
+```
 
 ## GOGC: когда запускается GC
 
