@@ -11,11 +11,12 @@
 
 ## Материалы
 
-- [Kubernetes: зачем нужен backend-разработчику](./01-kubernetes-basics-for-backend.md)
-- [Pod vs Container](./03-pod-vs-container.md)
-- [Core Objects And Deployment Flow](./02-core-objects-and-deployment-flow.md)
-- [Node Failure, Rollout And Config Delivery](./05-node-failure-rollout-and-config-delivery.md)
-- [Probes и Graceful Shutdown в Go](./04-probes-and-graceful-shutdown.md)
+- [01. Kubernetes: зачем нужен backend-разработчику](./01-kubernetes-basics-for-backend.md)
+- [02. Core Objects And Deployment Flow](./02-core-objects-and-deployment-flow.md)
+- [03. Pod vs Container](./03-pod-vs-container.md)
+- [04. Probes и Graceful Shutdown в Go](./04-probes-and-graceful-shutdown.md)
+- [05. Node Failure, Rollout And Config Delivery](./05-node-failure-rollout-and-config-delivery.md)
+- [06. kubectl: команды с примерами](./06-kubectl-commands.md) — контексты/GKE, pods, logs, exec, deployments, port-forward, secrets, top, events, troubleshooting
 
 ## Что важно уметь объяснить
 
