@@ -49,7 +49,7 @@ body{display:flex;height:100vh;overflow:hidden;font-family:-apple-system,BlinkMa
 .file-item.f-readme{font-weight:500;color:#7C8EA5FF}
 
 /* ── Main ── */
-#main{flex:1;display:flex;flex-direction:column;height:100vh;overflow:hidden;min-width:0}
+#main{flex:1;display:flex;flex-direction:column;height:100vh;overflow:hidden;min-width:0;position:relative}
 #breadcrumb{flex-shrink:0;padding:8px 32px;font-size:12px;color:#94a3b8;background:#f1f5f9;border-bottom:1px solid #e2e8f0;display:flex;align-items:center;gap:0;white-space:nowrap;overflow:hidden}
 .bc-sep{margin:0 5px;color:#cbd5e1}
 .bc-last{color:#334155;font-weight:500}
@@ -89,7 +89,7 @@ body{display:flex;height:100vh;overflow:hidden;font-family:-apple-system,BlinkMa
 #welcome p{font-size:1rem;margin-bottom:24px;line-height:1.7}
 #welcome .shortcuts{display:inline-flex;gap:20px;background:#f1f5f9;padding:10px 20px;border-radius:8px;font-size:12px;color:#64748b}
 kbd{background:#e2e8f0;border-radius:4px;padding:1px 6px;font-family:monospace;font-size:.9em;color:#334155;border:1px solid #cbd5e1}
-#to-top{position:fixed;bottom:120px;right:600px;width:50px;height:50px;border-radius:50%;background:#334155;color:#e2e8f0;border:none;cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center;opacity:0;pointer-events:none;transition:opacity .2s,background .15s;z-index:100}
+#to-top{position:absolute;bottom:100px;right:100px;width:50px;height:50px;border-radius:50%;background:#334155;color:#e2e8f0;border:none;cursor:pointer;font-size:18px;display:flex;align-items:center;justify-content:center;opacity:0;pointer-events:none;transition:opacity .2s,background .15s;z-index:100}
 #to-top.visible{opacity:1;pointer-events:auto}
 #to-top:hover{background:#4f6df5}
 </style>
