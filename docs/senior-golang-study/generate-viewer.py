@@ -22,11 +22,11 @@ def viewable(name):
     return any(name.endswith(e) for e in EXTS)
 
 def build_tree(path, rel=''):
-    items = []
     try:
         names = sorted(os.listdir(path))
     except Exception:
-        return items
+        return []
+    readmes, files, dirs = [], [], []
     for name in names:
         if name.startswith('.') or name in SKIP:
             continue
@@ -35,11 +35,15 @@ def build_tree(path, rel=''):
         if os.path.isdir(full):
             children = build_tree(full, rp)
             if children:
-                items.append({"t": "d", "n": name, "p": rp, "c": children})
+                dirs.append({"t": "d", "n": name, "p": rp, "c": children})
         elif viewable(name):
             label = first_h1(full) or name
-            items.append({"t": "f", "n": name, "p": rp, "l": label})
-    return items
+            node  = {"t": "f", "n": name, "p": rp, "l": label}
+            if name == 'README.md':
+                readmes.append(node)
+            else:
+                files.append(node)
+    return readmes + files + dirs
 
 def collect(path):
     out = {}
@@ -108,7 +112,7 @@ body{display:flex;height:100vh;overflow:hidden;font-family:-apple-system,BlinkMa
 .file-item.active{background:#1d3a6b;color:#93c5fd;border-color:#2563eb}
 .file-item.f-go{color:#34d399}
 .file-item.f-go:hover{color:#6ee7b7}
-.file-item.f-readme{font-weight:600}
+.file-item.f-readme{font-weight:500;color:#7C8EA5FF}
 
 /* ── Main ── */
 #main{flex:1;display:flex;flex-direction:column;height:100vh;overflow:hidden;min-width:0}
