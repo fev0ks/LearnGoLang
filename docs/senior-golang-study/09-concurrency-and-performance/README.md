@@ -2,7 +2,23 @@
 
 Это один из самых важных разделов для senior Go.
 
-Темы:
+## Материалы
+
+- [Profiling](./profiling/) — pprof, CPU/memory/goroutine/block/mutex профили, execution tracer, benchmarks, 5 разобранных кейсов (подраздел)
+
+## Профилирование (подраздел)
+
+- [01. pprof: инструменты и workflow](./profiling/01-pprof-tools-and-workflow.md)
+- [02. CPU Profiling](./profiling/02-cpu-profiling.md)
+- [03. Memory Profiling](./profiling/03-memory-profiling.md)
+- [04. Goroutine & Concurrency Profiling](./profiling/04-goroutine-concurrency-profiling.md)
+- [05. Execution Tracer](./profiling/05-execution-tracer.md)
+- [06. Benchmarks](./profiling/06-benchmarks.md)
+- [07. Case Studies](./profiling/07-case-studies.md)
+
+---
+
+Темы (конспекты в разработке):
 - goroutine lifecycle;
 - channels, buffering, cancellation;
 - worker pools и bounded concurrency;
