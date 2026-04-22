@@ -1,24 +1,33 @@
 # Patterns
 
-Этот подпакет про паттерны, которые чаще всего встречаются в Go backend-разработке и на senior-собеседованиях.
+Go-specific паттерны на уровне кода и архитектурные паттерны сервисов.
 
-Главная идея: паттерн полезен только тогда, когда снижает стоимость изменения, тестирования или эксплуатации. Если он добавляет слои без явной причины, это не архитектура, а ceremony.
+Главная идея: паттерн полезен только тогда, когда снижает стоимость изменения, тестирования или эксплуатации. Если он добавляет слои без явной причины — это не архитектура, а ceremony.
 
-Материалы:
-- [01 Go Code Patterns](./01-go-code-patterns.md)
-- [02 Architecture Patterns](./02-architecture-patterns.md)
+## Материалы
 
-Как читать:
-- сначала понять Go-specific паттерны на уровне кода;
-- потом перейти к архитектурным паттернам сервисов;
-- после этого связать тему с [Service Topologies](../service-topologies/README.md), потому что выбор паттерна зависит от формы системы: монолит, modular monolith или микросервисы.
+- [01. Go Code Patterns](./01-go-code-patterns.md) — small interfaces, constructor injection, functional options, middleware, adapter, decorator, strategy, repository, UoW
+- [02. Architecture Patterns](./02-architecture-patterns.md) — layered, hexagonal, clean, DDD lite, CQRS, outbox, saga, idempotency, reconciliation, ACL, strangler fig
+- [03. API Versioning](./03-api-versioning.md) — REST/gRPC versioning, backward compatibility, Protobuf rules, event schema, deprecation lifecycle
+- [04. Background Workers](./04-background-workers.md) — worker pool, graceful shutdown, periodic jobs, distributed lease, idempotent workers, backpressure
 
-Что важно уметь объяснить:
-- зачем нужен паттерн в конкретном контексте;
-- какой trade-off он добавляет;
-- где граница между полезной абстракцией и лишним boilerplate;
-- как это будет тестироваться и поддерживаться через год.
+## Как читать
+
+1. `01` — Go-specific паттерны на уровне кода, основа для всего остального
+2. `02` — архитектурные паттерны сервисов: когда и зачем
+3. `03` — API versioning отдельно, часто спрашивают на интервью
+4. `04` — background workers, тоже отдельная тема с нюансами Go
+
+## Что важно уметь объяснить
+
+- зачем интерфейс объявляет потребитель, а не поставщик
+- чем decorator отличается от adapter
+- когда outbox необходим, а когда избыточен
+- что такое level-triggered reconciliation и чем отличается от event-driven
+- как сделать graceful shutdown воркера под нагрузкой
+- backward compatibility Protobuf: что можно, что нельзя
+- как distributed lease защищает от дублирования periodic jobs
 
 ## Interview-ready answer
 
-Паттерны в Go я воспринимаю не как список классов из GoF, а как набор практик для управления зависимостями, изменениями и отказами. На уровне кода это small interfaces, constructor injection, functional options, middleware, adapter, decorator и strategy. На уровне архитектуры это layered или hexagonal architecture, modular monolith, outbox, saga, idempotency, CQRS, level-triggered reconciliation и anti-corruption layer. Я выбираю паттерн не по названию, а по проблеме: что меняется часто, где граница ответственности, где нужна удобная замена зависимости в тестах, где есть риск дублирования или distributed failure.
+Паттерны в Go я воспринимаю не как список классов из GoF, а как набор практик для управления зависимостями, изменениями и отказами. На уровне кода — small interfaces, constructor injection, functional options, middleware, adapter, decorator, strategy, repository. На уровне архитектуры — layered или hexagonal в зависимости от сложности домена, outbox для надёжного publish, saga для распределённых процессов, idempotency для retries, reconciliation для устойчивости к потере событий. Выбор всегда от проблемы: что меняется часто, где граница ответственности, где нужна удобная замена в тестах.

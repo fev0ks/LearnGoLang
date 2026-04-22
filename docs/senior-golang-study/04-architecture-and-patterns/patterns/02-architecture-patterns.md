@@ -4,6 +4,7 @@
 
 ## Содержание
 
+- [Обзор и когда применять](#обзор-и-когда-применять)
 - [Layered architecture](#layered-architecture)
 - [Hexagonal architecture](#hexagonal-architecture)
 - [Clean architecture](#clean-architecture)
@@ -20,337 +21,459 @@
 - [Typical mistakes](#typical-mistakes)
 - [Interview-ready answer](#interview-ready-answer)
 
+---
+
+## Обзор и когда применять
+
+| Паттерн | Проблема | Цена |
+|---|---|---|
+| Layered | Бизнес-логика смешалась с HTTP/DB | Минимальная — просто слои |
+| Hexagonal | Внешние framework'и проникают в домен | Больше интерфейсов |
+| Clean | Строгие границы зависимостей | Больше файлов и слоёв |
+| DDD lite | Сложная предметная область, много правил | Время на моделирование |
+| CQRS | Read и write требуют разных моделей | Eventual consistency, 2 модели |
+| Outbox | Надёжный publish event после DB commit | Publisher процесс, cleanup |
+| Saga | Длинный процесс через несколько сервисов | Compensation logic, state machine |
+| Idempotency | Дублирующиеся запросы создают side effects | Хранение ключей, TTL |
+| Reconciliation | Состояние может разъехаться при сбоях | Eventual consistency, loop |
+| ACL | Чужая модель протекает в домен | Mapping слой |
+| Strangler fig | Нельзя переписать legacy сразу | Временно 2 системы |
+
+---
+
 ## Layered architecture
 
-Идея: разделить код на слои с направлением зависимостей.
+Разделить код на слои с однонаправленными зависимостями.
 
-Типичный вариант:
+```
+┌───────────────────────────────┐
+│  Transport (HTTP/gRPC/CLI)    │  ← protocol mapping, validation
+├───────────────────────────────┤
+│  Service / Use Case           │  ← бизнес-логика, orchestration
+├───────────────────────────────┤
+│  Repository / Client          │  ← storage, external APIs
+├───────────────────────────────┤
+│  Database / Message Broker    │
+└───────────────────────────────┘
 
-```text
-transport -> service/usecase -> repository/client -> database/external API
+Зависимости: только вниз. Transport не знает о DB.
 ```
 
-Где использовать:
-- большинство CRUD/backend-сервисов;
-- сервисы с понятной бизнес-логикой;
-- команды, которым нужна простая и предсказуемая структура.
+**Правила слоёв:**
 
-Сильные стороны:
-- легко объяснить;
-- быстро стартовать;
-- удобно тестировать service layer;
-- хорошо подходит для монолита и небольшого сервиса.
+| Слой | Отвечает за | Не должен |
+|---|---|---|
+| Transport | Decode request, encode response, validation | Содержать бизнес-правила |
+| Service | Бизнес-решение, orchestration | Знать HTTP коды или SQL |
+| Repository | SQL/Redis/API запросы | Знать о бизнес-правилах |
 
-Слабые стороны:
-- при плохой дисциплине business logic утекает в handlers или repositories;
-- слои могут стать формальными и не нести смысла;
-- общие utils/helpers могут превратиться в скрытую связность.
+**Где использовать:** большинство CRUD/backend-сервисов, небольшие сервисы, команды которым нужна предсказуемая структура.
 
-Практичное правило: handler отвечает за protocol mapping, service/usecase - за бизнес-решение, repository/client - за внешний мир.
+**Слабое место:** без дисциплины business logic утекает в handlers или repositories.
+
+---
 
 ## Hexagonal architecture
 
-Идея: бизнес-ядро не зависит от транспорта, базы и внешних SDK. Внешний мир подключается через ports/adapters.
+Бизнес-ядро не зависит от транспорта, базы и внешних SDK. Внешний мир подключается через ports/adapters.
 
 ```mermaid
 flowchart LR
-    HTTP["HTTP/gRPC Handler"] --> InPort["Input Port / Use Case"]
-    Worker["Worker"] --> InPort
-    InPort --> Domain["Domain Logic"]
-    Domain --> OutPort["Output Port"]
-    OutPort --> DB["DB Adapter"]
-    OutPort --> Broker["Broker Adapter"]
-    OutPort --> API["External API Adapter"]
+    HTTP["HTTP Handler"] --> InPort["Input Port\n(Use Case Interface)"]
+    Worker["Kafka Worker"] --> InPort
+    CLI["CLI Command"] --> InPort
+
+    InPort --> Core["Domain\nLogic"]
+
+    Core --> OutPort1["Output Port\n(Repository)"]
+    Core --> OutPort2["Output Port\n(EventPublisher)"]
+    Core --> OutPort3["Output Port\n(ExternalAPI)"]
+
+    OutPort1 --> DB["PostgreSQL\nAdapter"]
+    OutPort2 --> Broker["Kafka\nAdapter"]
+    OutPort3 --> Stripe["Stripe\nAdapter"]
 ```
 
-Где использовать:
-- важная domain logic;
-- несколько входов в один use case: HTTP, worker, CLI;
-- внешние providers могут меняться;
-- нужны хорошие unit tests без инфраструктуры.
+**Ports vs Adapters:**
 
-Сильные стороны:
-- domain logic не зависит от framework;
-- удобно тестировать;
-- проще менять storage/provider;
-- лучше видны system boundaries.
+| | Port | Adapter |
+|---|---|---|
+| Что это | Интерфейс (Go interface) | Реализация интерфейса |
+| Где живёт | В пакете domain/core | В пакете infrastructure |
+| Пример | `OrderRepository` | `PostgresOrderRepository` |
+| Тип | Input port (UseCase) или Output port | Driven (DB) или Driving (HTTP) |
 
-Слабые стороны:
-- больше интерфейсов и файлов;
-- легко переусложнить простой CRUD;
-- команда должна одинаково понимать границы.
+**Где использовать:** есть важная domain logic, несколько входов в один use case, внешние providers могут меняться.
 
-Когда не выбирать:
-- маленький сервис с тонким CRUD;
-- MVP, где домен еще неизвестен;
-- нет боли от coupling.
+**Когда не выбирать:** простой CRUD, MVP, нет боли от coupling.
+
+---
 
 ## Clean architecture
 
-Clean architecture близка к hexagonal, но сильнее акцентирует направление зависимостей: внутренняя бизнес-логика не знает о внешних слоях.
+Похожа на Hexagonal, но сильнее акцентирует направление зависимостей: внутренние слои не знают о внешних.
 
-Практичная Go-версия обычно выглядит проще, чем схемы из книг:
-- `internal/app` или `internal/usecase` - сценарии;
-- `internal/domain` - модели и правила;
-- `internal/transport/http` - handlers;
-- `internal/storage/postgres` - database adapter;
-- `internal/clients/...` - внешние API.
+```
+          ┌──────────────────────────────────┐
+          │         Frameworks & Drivers      │  ← HTTP, DB drivers, CLI
+          │  ┌────────────────────────────┐   │
+          │  │  Interface Adapters        │   │  ← Controllers, Presenters, Gateways
+          │  │  ┌──────────────────────┐  │   │
+          │  │  │  Application Rules   │  │   │  ← Use Cases
+          │  │  │  ┌────────────────┐  │  │   │
+          │  │  │  │ Enterprise     │  │  │   │  ← Entities, Domain
+          │  │  │  │ Business Rules │  │  │   │
+          │  │  │  └────────────────┘  │  │   │
+          │  │  └──────────────────────┘  │   │
+          │  └────────────────────────────┘   │
+          └──────────────────────────────────┘
 
-Главный trade-off: чистота границ против скорости разработки. Чем меньше доменной сложности, тем меньше пользы от строгой clean architecture.
+Зависимости: только внутрь. Внешний слой знает о внутреннем, не наоборот.
+```
+
+**Практичная Go-структура:**
+
+```
+internal/
+  domain/          ← модели, интерфейсы, domain errors (ни от кого не зависит)
+  usecase/         ← сценарии (зависит только от domain)
+  transport/
+    http/          ← handlers (зависит от usecase)
+    grpc/
+  storage/
+    postgres/      ← реализации repo (зависит от domain)
+  clients/
+    stripe/        ← внешние API адаптеры
+```
+
+**Trade-off:** чем меньше доменной сложности, тем меньше пользы от строгих границ.
+
+---
 
 ## DDD lite
 
-Идея: использовать DDD-подходы без тяжелого enterprise-ритуала.
+Использовать DDD-идеи без тяжёлого enterprise-ритуала.
 
-Что обычно полезно:
-- language of domain в именах типов и методов;
-- aggregate boundaries там, где есть invariants;
-- domain events для важных фактов;
-- bounded contexts на уровне модулей или сервисов.
+**Что обычно полезно:**
 
-Что часто лишнее:
-- фабрики и value objects для каждой мелочи;
-- сложные иерархии ради "правильного DDD";
-- repository на каждую таблицу без доменной причины.
+| Концепция | Когда использовать |
+|---|---|
+| Ubiquitous language | Всегда — имена типов и методов из предметной области |
+| Aggregate boundaries | Есть invariants, которые нужно защищать |
+| Domain events | Важные факты бизнеса (OrderPlaced, PaymentFailed) |
+| Bounded contexts | Разные команды/сервисы используют разные понятия |
+| Value objects | Когда тождество по значению, а не по id |
 
-Где использовать:
-- продукт с реальной бизнес-логикой;
-- много правил и исключений;
-- несколько команд обсуждают один домен.
+**Что часто лишнее:**
+
+| Концепция | Когда избыточно |
+|---|---|
+| Фабрики для каждой мелочи | Простое создание без invariants |
+| Repository на каждую таблицу | Нет domain-причины изолировать |
+| Богатые иерархии агрегатов | CRUD без реальных бизнес-правил |
+
+---
 
 ## Modular monolith
 
-Идея: один deployable artifact, но код разделен на модули с контролируемыми границами.
+Один deployable artifact, но код разделён на модули с контролируемыми границами.
 
-Где использовать:
-- продукт уже вырос из простого монолита;
-- микросервисы пока слишком дорогие;
-- хочется сохранить простой deployment;
-- доменные границы уже частично понятны.
+```
+┌─────────────────────────────────────────────────────┐
+│                   Monolith Process                   │
+│                                                     │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  │
+│  │   Orders    │  │  Payments   │  │    Users    │  │
+│  │   Module    │  │   Module    │  │   Module    │  │
+│  │             │  │             │  │             │  │
+│  │ - service   │  │ - service   │  │ - service   │  │
+│  │ - repo      │  │ - repo      │  │ - repo      │  │
+│  │ - models    │  │ - models    │  │ - models    │  │
+│  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘  │
+│         │                │                │         │
+│  ┌──────▼────────────────▼────────────────▼──────┐  │
+│  │              Shared Infrastructure             │  │
+│  │         (DB pool, logger, metrics)             │  │
+│  └───────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────┘
+```
 
-Сильные стороны:
-- меньше operational complexity, чем у микросервисов;
-- проще локальная разработка;
-- легче потом выделять сервисы;
-- можно ограничивать зависимости между модулями.
+**Правила модульных границ:**
+- Модуль А не импортирует внутренние пакеты модуля Б — только публичный API
+- Взаимодействие через Go interfaces, не прямые зависимости на struct
+- Shared schema отдельно от модульных таблиц
 
-Слабые стороны:
-- нужна дисциплина импорта;
-- база данных часто остается общей;
-- без ownership модулей все снова превращается в большой монолит.
+**Признак зрелости модуля:** его можно удалить, заменить или выделить в сервис с понятным списком зависимостей.
 
-Практичный сигнал зрелости: модуль можно удалить, заменить или выделить в сервис с понятным списком зависимостей.
+---
 
 ## CQRS
 
-Идея: разделить write model и read model.
-
-Где использовать:
-- чтение и запись имеют разные access patterns;
-- read side требует денормализации;
-- много сложных списков, поисков, агрегатов;
-- write model должна защищать invariants.
-
-Сильные стороны:
-- read side можно оптимизировать отдельно;
-- write side остается чище;
-- удобно строить projections.
-
-Слабые стороны:
-- eventual consistency;
-- больше кода и operational complexity;
-- нужно думать о rebuild projections.
-
-Когда не выбирать:
-- обычный CRUD;
-- данные должны быть строго консистентны сразу после записи;
-- команда не готова поддерживать две модели.
-
-## Outbox
-
-Идея: изменение данных и запись сообщения происходят в одной database transaction, а отдельный publisher потом доставляет сообщение в broker.
-
-Где использовать:
-- нужно надежно публиковать events после изменения состояния;
-- нельзя потерять сообщение между DB commit и broker publish;
-- есть интеграция с другими сервисами.
-
-Сильные стороны:
-- убирает dual-write проблему;
-- retry можно делать безопаснее;
-- хорошо работает с idempotent consumers.
-
-Слабые стороны:
-- нужен publisher process;
-- нужно чистить или архивировать outbox table;
-- delivery обычно at-least-once, значит consumers должны быть идемпотентны.
-
-Типичная ошибка: считать outbox exactly-once механизмом. Он снижает риск потери события, но дубликаты все равно возможны.
-
-## Saga / process manager
-
-Идея: длинный бизнес-процесс разбивается на шаги, каждый шаг имеет compensating action или обработку failure state.
-
-Где использовать:
-- distributed transaction невозможна или слишком дорогая;
-- заказ, платеж, доставка, резервация идут через разные сервисы;
-- процесс может длиться секунды, минуты или часы.
-
-Сильные стороны:
-- явное управление workflow;
-- система переживает частичные отказы;
-- проще наблюдать состояние процесса.
-
-Слабые стороны:
-- сложнее reasoning;
-- компенсация не всегда равна rollback;
-- нужны retries, idempotency и state machine discipline.
-
-## Idempotency
-
-Идея: повторный вызов той же операции не создает повторный side effect.
-
-Где использовать:
-- payments;
-- order creation;
-- webhook handlers;
-- message consumers;
-- retryable HTTP APIs.
-
-Техники:
-- idempotency key от клиента;
-- unique constraint в базе;
-- таблица processed messages;
-- state machine с допустимыми переходами;
-- deterministic operation ID.
-
-Trade-off: idempotency требует хранения состояния и политики TTL/cleanup, но без нее retries становятся опасными.
-
-## Level-triggered reconciliation
-
-Идея: система не пытается идеально обработать каждое событие как единственный источник правды. Вместо этого она хранит desired state, периодически читает observed state и приводит реальный мир к желаемому состоянию.
-
-Это часто называют reconciliation loop или control loop.
+Разделить write model (команды) и read model (запросы).
 
 ```mermaid
 flowchart LR
-    Desired["Desired state"] --> Reconcile["Reconcile loop"]
-    Observed["Observed state"] --> Reconcile
-    Reconcile --> Actions["Idempotent actions"]
-    Actions --> External["External system"]
+    Client --> |Command\nCreateOrder| WriteAPI
+    Client --> |Query\nGetOrderDetails| ReadAPI
+
+    WriteAPI --> |validate + business rules| WriteModel
+    WriteModel --> |persist| WriteDB[(Write DB\nPostgreSQL)]
+    WriteModel --> |event| EventBus
+
+    EventBus --> |project| ReadModel
+    ReadModel --> |denormalized view| ReadDB[(Read DB\nRedis / ES)]
+
+    ReadAPI --> ReadDB
+```
+
+**CQRS vs Simple layered:**
+
+| | Simple layered | CQRS |
+|---|---|---|
+| Модели | Одна | Write model + Read model |
+| Consistency | Strong | Eventual (read lag) |
+| Read queries | Из write DB | Из denormalized read DB |
+| Сложность | Низкая | Высокая |
+| Когда | CRUD, стандартный доступ | Сложные read projections, разные access patterns |
+
+**Когда не выбирать:** обычный CRUD, данные должны быть видны сразу после записи, команда не готова поддерживать две модели.
+
+---
+
+## Outbox
+
+Атомарно сохранить изменение и событие в одной DB transaction, отдельный publisher доставляет в broker.
+
+```
+Сервис A
+  │
+  │  BEGIN TRANSACTION
+  ├─── UPDATE orders SET status='completed'
+  ├─── INSERT INTO outbox(event='order.completed', payload='{...}')
+  │  COMMIT
+  │
+  ▼
+Outbox Publisher (background)
+  │
+  ├─── SELECT * FROM outbox WHERE published = false LIMIT 100
+  ├─── Publish to Kafka
+  └─── UPDATE outbox SET published = true
+
+Kafka → Сервис B (consumer)
+```
+
+**Почему outbox решает dual-write:**
+
+```
+Без outbox (проблема):               С outbox (решение):
+  1. UPDATE DB        ← commit OK      1. UPDATE DB         ┐
+  2. Publish Kafka    ← crash!         2. INSERT outbox     ┘ одна транзакция
+                                       3. Publisher → Kafka  ← retry safe
+  → Событие потеряно                  → At-least-once delivery
+```
+
+**Важно:** outbox гарантирует at-least-once, не exactly-once. Consumer должен быть idempotent.
+
+**Операционные требования:**
+- Cleanup job для старых записей
+- Monitoring lag (сколько неопубликованных записей)
+- Retry с backoff для transient broker errors
+
+---
+
+## Saga / process manager
+
+Длинный бизнес-процесс разбивается на шаги, каждый имеет compensating action при failure.
+
+**Choreography saga** (через события):
+```
+OrderService          PaymentService         InventoryService
+      │                     │                      │
+      │── OrderCreated ─────►│                      │
+      │                     │── PaymentProcessed ──►│
+      │                     │                      │── InventoryReserved
+      │◄────────────────────────────────────────────│
+      │
+  При ошибке:
+      │                     │◄─── PaymentFailed ───│
+      │◄── OrderCancelled ──│
+```
+
+**Orchestration saga** (центральный координатор):
+```
+Saga Orchestrator
+  │
+  ├── Step 1: charge payment    → success/failure
+  ├── Step 2: reserve inventory → success/failure
+  ├── Step 3: schedule delivery → success/failure
+  │
+  При failure на шаге N:
+  ├── Compensate Step N-1
+  ├── Compensate Step N-2
+  └── Compensate Step 1
+```
+
+| | Choreography | Orchestration |
+|---|---|---|
+| Координация | Через события | Центральный orchestrator |
+| Наблюдаемость | Сложнее отследить flow | Явный state в одном месте |
+| Coupling | Меньше | Больше (все знают orchestrator) |
+| Debugging | Сложнее | Проще |
+| Когда | Простые 2-3 шага | Сложный многошаговый процесс |
+
+**Компенсация ≠ rollback.** Иногда компенсация — бизнес-действие (вернуть деньги, уведомить пользователя), а не техническая отмена.
+
+---
+
+## Idempotency
+
+Повторный вызов той же операции не создаёт повторный side effect.
+
+```
+Клиент                Server                  DB/External
+  │                      │                        │
+  ├── POST /orders ──────►│                        │
+  │   Idempotency-Key: X  │                        │
+  │                       ├── check key X ────────►│
+  │                       │◄── not found ──────────│
+  │                       ├── process order        │
+  │                       ├── INSERT + save key X ─►│
+  │◄── 200 order_id ──────│                        │
+  │                       │                        │
+  │   (network error)     │                        │
+  ├── POST /orders ──────►│  (retry same key X)    │
+  │   Idempotency-Key: X  │                        │
+  │                       ├── check key X ────────►│
+  │                       │◄── found: cached resp ─│
+  │◄── 200 order_id ──────│  (не обрабатывает!)    │
+```
+
+**Техники:**
+
+| Техника | Когда |
+|---|---|
+| Idempotency key в заголовке | HTTP API, payment |
+| Unique constraint в БД | Создание ресурсов |
+| State machine (допустимые переходы) | Order lifecycle |
+| Таблица processed_messages | Message consumers |
+| Deterministic ID из данных запроса | Batch operations |
+
+---
+
+## Level-triggered reconciliation
+
+Система хранит desired state, периодически сравнивает с observed state и приводит реальный мир к желаемому.
+
+```mermaid
+flowchart LR
+    Desired["Desired State\n(в БД)"] --> Reconcile["Reconcile Loop\n(периодически)"]
+    Observed["Observed State\n(внешняя система)"] --> Reconcile
+    Reconcile --> |"drift?"| Decision{Нужно\nдействие?}
+    Decision --> |да| Action["Idempotent Action\n(API call, DB update)"]
+    Decision --> |нет| Skip["Skip"]
+    Action --> External["External System"]
     External --> Observed
 ```
 
-Пример:
-- в базе написано: `subscription.status = active`;
-- во внешнем billing provider подписка должна быть активна;
-- reconciliation job периодически сравнивает локальное состояние с provider state;
-- если provider еще не активирован, job повторяет activation call или создает repair task;
-- если уже активирован, job ничего не делает.
+**Level-triggered vs Edge-triggered:**
 
-Level-triggered отличается от edge-triggered:
+| | Edge-triggered | Level-triggered |
+|---|---|---|
+| Логика | "Произошло событие → выполни действие" | "Есть desired state → приведи к нему" |
+| Устойчивость | Потеря события = сломанное состояние | Следующий reconcile исправит |
+| Идемпотентность | Требует особой заботы | Встроена в подход |
+| Сложность | Проще при надёжной доставке | Нужен reconcile loop |
+| Применение | Queue consumer, webhook | K8s controllers, sync jobs |
 
-| Подход | Как мыслит система | Главный риск |
-| --- | --- | --- |
-| Edge-triggered | "Произошло событие, надо выполнить действие" | потерянное событие ломает состояние |
-| Level-triggered | "Есть желаемое состояние, надо довести реальность до него" | нужен аккуратный reconcile loop |
+**Практические правила:**
+- Reconcile-функция обязательно идемпотентна
+- Сначала читать observed state, потом решать нужно ли действие
+- Хранить `status`, `last_error`, `next_retry` — для observability
+- Различать transient error (retry) и permanent failure (alert)
+- Backoff + jitter для retry, не сразу снова
 
-Где использовать:
-- Kubernetes controllers/operators;
-- синхронизация с внешними providers;
-- repair jobs после partial failures;
-- обработка webhooks, которые могут потеряться или прийти несколько раз;
-- delivery systems, где состояние важнее факта конкретного event;
-- фоновые воркеры, которые должны восстанавливаться после падения.
-
-Сильные стороны:
-- устойчивее к потерянным, повторным и out-of-order events;
-- хорошо переживает рестарты воркеров;
-- проще делать self-healing;
-- удобно наблюдать drift между desired и observed state.
-
-Слабые стороны:
-- появляется eventual consistency;
-- нужно хранить desired state и status;
-- reconcile loop может создавать лишнюю нагрузку;
-- нужны backoff, rate limit, leases и защита от параллельных reconciler-ов.
-
-Практические правила:
-- reconcile-функция должна быть идемпотентной;
-- не полагаться на "это событие точно придет один раз";
-- хранить status/last error/next retry, чтобы видеть прогресс;
-- делать действия маленькими и повторяемыми;
-- различать transient error и permanent failure;
-- добавлять метрики: reconcile duration, retries, failures, drift count, queue depth.
-
-Типичная ошибка: писать reconciler как event handler, который слепо выполняет side effect на каждое сообщение. Правильный reconciler сначала читает текущее состояние, потом решает, нужно ли что-то делать.
+---
 
 ## Anti-corruption layer
 
-Идея: изолировать свой домен от чужой модели данных или чужого API.
+Изолировать свой домен от чужой модели данных.
 
-Где использовать:
-- интеграция с legacy-системой;
-- внешний provider имеет неудобную модель;
-- миграция со старой системы;
-- разные bounded contexts используют разные понятия.
+```
+Наша система             ACL                 Внешняя система
+─────────────────        ──────────────────  ─────────────────
+Order.Status        ←──  StatusMapper    ←── LegacyOrderState
+Payment.Currency    ←──  CurrencyMapper  ←── MoneyDTO
+Customer            ←──  CustomerMapper  ←── UserRecord (legacy schema)
+```
 
-Сильные стороны:
-- чужая модель не протекает в core;
-- проще заменить внешний источник;
-- mapping ошибок и edge cases собран в одном месте.
+**Где нужен ACL:**
+- Интеграция с legacy-системой
+- Внешний provider с неудобной моделью
+- Два bounded contexts с разными терминами для одного понятия
+- Миграция со старой системы на новую
 
-Слабые стороны:
-- дополнительный слой mapping;
-- риск потерять важные детали внешней системы;
-- нужно поддерживать translation logic.
+---
 
 ## Strangler fig
 
-Идея: постепенно заменять старую систему новой, перехватывая отдельные flows.
+Постепенно заменять старую систему новой, перехватывая отдельные flows.
 
-Где использовать:
-- большой legacy-монолит;
-- нельзя переписать все сразу;
-- нужно снижать migration risk;
-- можно выделять функциональность по маршрутам, модулям или событиям.
+```
+Phase 1: Only legacy
+  Request → Legacy System
 
-Сильные стороны:
-- постепенная миграция;
-- меньше big bang risk;
-- можно получать пользу частями.
+Phase 2: Strangler proxy
+  Request → Proxy → legacy (most)
+                  → new service (feature X)
 
-Слабые стороны:
-- временно существуют две системы;
-- сложнее data synchronization;
-- нужен routing и rollback plan.
+Phase 3: Legacy replaced
+  Request → New System
+  (legacy removed)
+```
+
+**Ключевые шаги:**
+1. Поставить proxy перед legacy
+2. Выделять функциональность по маршрутам/событиям/модулям
+3. Синхронизировать данные bidirectionally во время переходного периода
+4. Удалить legacy когда весь трафик переключён
+
+---
 
 ## Decision guide
 
-| Проблема | Паттерн-кандидат | Главный trade-off |
-| --- | --- | --- |
-| Бизнес-логика смешалась с HTTP/DB | layered или hexagonal | больше структуры, но чище границы |
-| Внешний SDK протек в домен | adapter / anti-corruption layer | mapping code вместо прямого вызова |
-| Нужно надежно публиковать события после записи | outbox | publisher, cleanup, idempotent consumers |
-| Длинный процесс между сервисами | saga / process manager | явный workflow вместо простой транзакции |
-| Повторы создают дубли | idempotency | хранение ключей и состояние операций |
-| Состояние может разъехаться после потери события или partial failure | level-triggered reconciliation | eventual consistency и постоянный reconcile loop |
-| Чтение и запись требуют разных моделей | CQRS | eventual consistency и больше кода |
-| Монолит растет, но микросервисы еще рано | modular monolith | discipline boundaries внутри одного deploy |
-| Legacy нельзя переписать сразу | strangler fig | временная сложность миграции |
+| Проблема | Паттерн | Главный trade-off |
+|---|---|---|
+| Бизнес-логика смешалась с HTTP/DB | Layered / Hexagonal | Больше структуры, но чище границы |
+| Внешний SDK протек в домен | Adapter / ACL | Mapping code вместо прямого вызова |
+| Несколько входов в один use case | Hexagonal | Интерфейсы для каждого порта |
+| Надёжно публиковать события | Outbox | Publisher процесс + cleanup |
+| Длинный процесс между сервисами | Saga | Compensation logic + state machine |
+| Повторы создают дубли | Idempotency | Хранение ключей + состояния |
+| Состояние разъезжается при сбоях | Reconciliation | Eventual consistency + loop |
+| Разные access patterns read/write | CQRS | Eventual consistency + 2 модели |
+| Монолит растёт, микросервисы рано | Modular monolith | Дисциплина модульных границ |
+| Legacy нельзя переписать сразу | Strangler fig | Временная двойная система |
+
+---
 
 ## Typical mistakes
 
-- Выбирать паттерн по названию, а не по проблеме.
-- Делать clean architecture для простого CRUD и терять скорость.
-- Называть любую папку `domain`, хотя бизнес-правил там нет.
-- Использовать repository как механическую обертку над каждой таблицей.
-- Внедрять CQRS без реального различия read/write access patterns.
-- Делать saga без явной state machine и idempotency.
-- Считать outbox заменой idempotent consumers.
-- Писать reconciler как обычный event handler и не проверять observed state перед side effect.
-- Разделять сервисы раньше, чем понятны ownership и data boundaries.
+- **Паттерн по названию, не по проблеме.** "Нам нужен hexagonal" без понимания где боль.
+- **Clean architecture для CRUD.** 5 слоёв для `GET /users` — это ceremony, не архитектура.
+- **Папка `domain` без domain-логики.** Просто переложить structs — не DDD.
+- **Repository = обёртка над таблицей.** `GetAll`, `UpdateById` — это не repository, это DAO.
+- **CQRS без разных access patterns.** Eventual consistency за просто так.
+- **Saga без state machine и idempotency.** Partial failure → непредсказуемое состояние.
+- **Outbox = exactly-once.** Нет, это at-least-once. Consumer должен быть idempotent.
+- **Reconciler как event handler.** Не проверять observed state перед side effect.
+- **Микросервисы раньше понятых границ.** Потом склеить обратно дороже, чем разделить.
+
+---
 
 ## Interview-ready answer
 
-Я выбираю архитектурный паттерн от проблемы. Если сервис простой, layered architecture обычно достаточно. Если есть сложная domain logic и несколько внешних входов или providers, я смотрю в сторону hexagonal/clean architecture, но без лишнего boilerplate. Если нужно надежно связать DB update и event publish, использую outbox. Если процесс распределенный и транзакция невозможна, нужна saga или process manager. Если есть retries, webhooks или broker consumers, обязательно проектирую idempotency. Если события могут теряться или состояние внешней системы может разъехаться с нашим desired state, использую level-triggered reconciliation: периодически сравниваю desired и observed state и выполняю только идемпотентные repair-действия. Для растущего продукта часто предпочту modular monolith перед ранними микросервисами, потому что он дешевле в эксплуатации и оставляет путь к выделению сервисов позже.
+> "Я выбираю паттерн от проблемы. Если сервис простой — layered достаточно. Если есть сложная domain-логика или несколько входных каналов — hexagonal. Если нужно надёжно связать DB update с event publish — outbox. Если процесс распределённый — saga с явным state machine и idempotency.
+>
+> Два паттерна которые часто недооценивают: level-triggered reconciliation — когда нужна устойчивость к потере событий и partial failures, и strangler fig — когда нельзя переписать legacy сразу.
+>
+> Ключевой принцип: паттерн должен снижать стоимость изменений и эксплуатации, а не добавлять церемонию ради правильного названия."
