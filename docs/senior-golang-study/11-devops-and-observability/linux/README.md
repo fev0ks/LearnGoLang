@@ -9,6 +9,7 @@
 - [File Descriptors и I/O модели](./02-file-descriptors-and-io.md) — fd таблицы; ulimit; blocking / select / poll / epoll; Go netpoller на базе epoll; io_uring
 - [Virtual Memory](./01-virtual-memory.md) — page tables; page fault; mmap; page cache; copy-on-write; OOM killer; overcommit; Go heap и GOMEMLIMIT
 - [TCP Сокеты](./03-tcp-sockets.md) — socket lifecycle; TCP states; accept backlog; TIME_WAIT; CLOSE_WAIT; SO_REUSEPORT; Nagle / TCP_NODELAY; socket buffers; sysctl tuning
+- [Команды для диагностики](./06-linux-commands.md) — ps, lsof, ss, tcpdump, strace, iostat, vmstat, journalctl с примерами вывода; troubleshooting workflow по симптомам
 
 ## Что важно уметь объяснить
 
