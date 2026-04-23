@@ -13,7 +13,7 @@
 | [01 Go Core](../01-go-core/README.md) | scheduler, GC, interfaces/nil, memory model, escape analysis | ✅ 8 файлов |
 | [02 Go Stdlib](../02-go-stdlib-and-tools/README.md) | net/http, context, sync, encoding/json, pprof | темы + ссылки |
 | [03 Go Libraries](../03-go-libraries-and-ecosystem/README.md) | chi, pgx, zap, testify, wire/fx — сравнения | темы + ссылки |
-| [04 Architecture](../04-architecture-and-patterns/README.md) | Go patterns, service topologies, idempotency, outbox | ✅ 4 файла |
+| [04 Architecture](../04-architecture-and-patterns/README.md) | Go patterns, service topologies, DDD, SOLID, API versioning, background workers | ✅ 10 файлов |
 | [05 System Design](../05-system-design/README.md) | request flows, feature flags, A/B tests, edge proxy | ✅ 16 файлов |
 | [06 Databases](../06-databases/README.md) | SQL/NoSQL, indexes, transactions, Redis, Go DB libraries | ✅ 29 файлов |
 | [07 Message Brokers](../07-message-brokers-and-streaming/README.md) | Kafka, RabbitMQ, NATS, delivery semantics | темы + ссылки |
@@ -22,8 +22,9 @@
 | [10 Testing](../10-testing-and-quality/README.md) | unit/integration/e2e, test doubles, race/fuzz, linters | ✅ 7 файлов |
 | [11 DevOps & Observability](../11-devops-and-observability/README.md) | Linux, Docker, Kubernetes, metrics, traces, logs, profiling | ✅ 40+ файлов |
 | [12 Security](../12-security/README.md) | secrets, TLS/mTLS, CORS, DDoS protection | ✅ 8 файлов |
-| [13 Interview Practice](../13-interview-practice/README.md) | алгоритмы, behavioral кейсы, system design drills | ✅ 2 файла |
+| [13 Interview Practice](../13-interview-practice/README.md) | behavioral кейсы, system design drills | темы + ссылки |
 | [16 Go Version Differences](../16-go-version-differences/README.md) | Go 1.24, 1.25, 1.26 — что изменилось | ✅ 3 файла |
+| [17 Algorithms And Data Structures](../17-algorithms-and-data-structures/README.md) | O-нотация, two pointers, binary search, DP, graphs, heap, backtracking | ✅ 8 файлов |
 
 > **Разделы "темы + ссылки"** — содержат только README с темами и внешними ссылками; конспекты для них еще не написаны.
 
@@ -73,8 +74,14 @@
 |------|-----------|-----------|
 | [01-go-code-patterns.md](../04-architecture-and-patterns/patterns/01-go-code-patterns.md) | functional options, small interfaces, middleware, decorator | ★★★ |
 | [02-architecture-patterns.md](../04-architecture-and-patterns/patterns/02-architecture-patterns.md) | hexagonal, DDD lite, layered, clean arch — trade-offs | ★★★ |
+| [05-ddd-in-go.md](../04-architecture-and-patterns/patterns/05-ddd-in-go.md) | Entity, Value Object, Aggregate, Domain Events, Repository, Application Service | ★★★ |
+| [06-solid-in-go.md](../04-architecture-and-patterns/patterns/06-solid-in-go.md) | SRP, OCP, LSP, ISP, DIP — с Go-примерами | ★★★ |
+| [03-api-versioning.md](../04-architecture-and-patterns/patterns/03-api-versioning.md) | REST/gRPC versioning, Protobuf rules, deprecation lifecycle | ★★ |
+| [04-background-workers.md](../04-architecture-and-patterns/patterns/04-background-workers.md) | worker pool, graceful shutdown, distributed lease, idempotent workers | ★★ |
 | [01-monolith-vs-modular-monolith-vs-microservices.md](../04-architecture-and-patterns/service-topologies/01-monolith-vs-modular-monolith-vs-microservices.md) | когда что выбирать, стоимость распределенности | ★★★ |
 | [02-typical-problems-and-how-to-mitigate-them.md](../04-architecture-and-patterns/service-topologies/02-typical-problems-and-how-to-mitigate-them.md) | outbox, saga, idempotency, retry storms, distributed tx | ★★★ |
+| [04-modular-monolith-in-depth.md](../04-architecture-and-patterns/service-topologies/04-modular-monolith-in-depth.md) | module.go паттерн, cross-module коммуникация, enforcement, эволюция | ★★ |
+| [03-go-project-layout.md](../04-architecture-and-patterns/service-topologies/03-go-project-layout.md) | структура папок для layered/hexagonal/modular/monorepo | ★★ |
 
 #### 05 System Design: External Request Flows
 
@@ -306,16 +313,24 @@
 
 ---
 
-### Финал — Подготовка к интервью
+### Финал — Алгоритмы и подготовка к интервью
 
-**Цель:** собрать рассказ о себе, отработать алгоритмические задачи, сделать design drills.
+**Цель:** отработать алгоритмические задачи, собрать рассказ о себе, сделать design drills.
 
-#### 13 Interview Practice
+#### 17 Algorithms And Data Structures
 
 | Файл | Что внутри | Приоритет |
 |------|-----------|-----------|
-| [01-time-and-space-complexity.md](../13-interview-practice/algorithms-and-complexity/01-time-and-space-complexity.md) | big O, примеры, как объяснять | ★★ |
-| [02-common-algorithm-patterns-and-examples-in-go.md](../13-interview-practice/algorithms-and-complexity/02-common-algorithm-patterns-and-examples-in-go.md) | sliding window, two pointers, binary search на Go | ★★ |
+| [01-time-and-space-complexity.md](../17-algorithms-and-data-structures/01-time-and-space-complexity.md) | O-нотация, таблица классов, диаграммы роста, амортизированная сложность | ★★★ |
+| [02-patterns-overview.md](../17-algorithms-and-data-structures/02-patterns-overview.md) | таблица распознавания паттернов, фреймворк для интервью | ★★★ |
+| [03-two-pointers-and-sliding-window.md](../17-algorithms-and-data-structures/03-two-pointers-and-sliding-window.md) | opposite ends, fast/slow, variable window с 9 задачами | ★★★ |
+| [04-binary-search.md](../17-algorithms-and-data-structures/04-binary-search.md) | classic, lower/upper bound, rotated array, binary search on answer | ★★★ |
+| [05-trees-and-graphs.md](../17-algorithms-and-data-structures/05-trees-and-graphs.md) | обходы дерева, BFS/DFS, топосортировка, Union-Find | ★★★ |
+| [06-dynamic-programming.md](../17-algorithms-and-data-structures/06-dynamic-programming.md) | memoization vs tabulation, 1D/2D DP, knapsack | ★★ |
+| [07-sorting-and-heap.md](../17-algorithms-and-data-structures/07-sorting-and-heap.md) | merge/quick sort, container/heap, top-K задачи | ★★ |
+| [08-backtracking-and-linked-list.md](../17-algorithms-and-data-structures/08-backtracking-and-linked-list.md) | backtracking шаблон, permutations, операции со списками | ★★ |
+
+#### 13 Interview Practice
 
 → [README раздела](../13-interview-practice/README.md) — рекомендации по behavioral вопросам, storytelling, design drills.
 
@@ -332,7 +347,8 @@
 5. **Kubernetes** — probes, graceful shutdown, Deployment rollout `→ 11/kubernetes`
 6. **Observability** — RED metrics, histogram_quantile, structured logs, tracing `→ 11/prometheus + tracing + logging`
 7. **Linux** — namespaces/cgroups, signals/PID1, epoll, OOM killer `→ 11/linux`
-8. **Architecture** — monolith vs microservices, outbox, idempotency `→ 04`
+8. **Architecture** — monolith vs microservices, outbox, idempotency, DDD, SOLID `→ 04`
+9. **Algorithms** — two pointers, binary search, BFS/DFS, DP basics `→ 17`
 
 ---
 
