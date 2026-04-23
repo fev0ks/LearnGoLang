@@ -17,7 +17,7 @@
 - лидерские и ownership-кейсы.
 
 Подпакеты:
-- [Algorithms And Complexity](./algorithms-and-complexity/README.md)
+- [Algorithms And Data Structures](../17-algorithms-and-data-structures/README.md) — теория алгоритмов вынесена в отдельный раздел
 
 ## Подборка
 
