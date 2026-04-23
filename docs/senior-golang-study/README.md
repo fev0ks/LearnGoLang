@@ -23,26 +23,28 @@
 8. `10-testing-and-quality`
 9. `11-devops-and-observability`
 10. `12-security`
-11. `13-interview-practice`
+11. `17-algorithms-and-data-structures`
+12. `13-interview-practice`
 
 Разделы:
 - `00-roadmap` - приоритеты, план подготовки, чек-листы
 - `01-go-core` - язык, runtime, memory model, idiomatic Go
 - `02-go-stdlib-and-tools` - стандартная библиотека и инструменты Go
 - `03-go-libraries-and-ecosystem` - популярные библиотеки и сравнения
-- `04-architecture-and-patterns` - архитектура backend-сервисов
-- `05-system-design` - high-level и low-level design
+- `04-architecture-and-patterns` - архитектура backend-сервисов: паттерны, DDD, SOLID, API versioning
+- `05-system-design` - high-level и low-level design, interview cases
 - `06-databases` - SQL, NoSQL, индексы, транзакции, масштабирование
 - `07-message-brokers-and-streaming` - очереди, стриминг, delivery semantics
 - `08-networking-and-api` - HTTP, gRPC, API contracts, retries, timeouts
 - `09-concurrency-and-performance` - конкурентность, профилирование, оптимизация
 - `10-testing-and-quality` - тестирование, линтеры, качество кода
-- `11-devops-and-observability` - CI/CD, Docker, Kubernetes, monitoring
+- `11-devops-and-observability` - CI/CD, Docker, Kubernetes, Linux, monitoring
 - `12-security` - безопасность приложений и инфраструктуры
 - `13-interview-practice` - вопросы, ответы, сторителлинг, мок-интервью
 - `14-hands-on-labs` - практические мини-проекты и drill-задачи
 - `15-notes-and-links` - быстрые заметки, ссылки, статьи, backlog тем
 - `16-go-version-differences` - ключевые изменения между версиями Go и влияние на кодовую базу
+- `17-algorithms-and-data-structures` - O-нотация, паттерны алгоритмов, структуры данных с Go-примерами
 
 ## Базовая подборка
 
