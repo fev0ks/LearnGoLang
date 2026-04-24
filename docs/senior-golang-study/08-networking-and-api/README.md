@@ -9,6 +9,7 @@
 - [HTTP Client in Go](./http-client-in-go.md) — Transport, connection pooling, таймауты, retry с backoff, circuit breaker
 - [WebSocket](./websocket.md) — Upgrade handshake, framing, opcodes, read/write goroutine паттерн, Hub, pub/sub backplane
 - [Webhooks](./webhooks.md) — механика, at-least-once, HMAC-SHA256 signature, idempotency key, outbox паттерн
+- [Idempotency](./idempotency.md) — Idempotency-Key header, генерация (UUID/hash), Redis SETNX, PostgreSQL ON CONFLICT, concurrent safety, consumer dedup, TTL стратегии
 - [GraphQL](./graphql.md) — schema/query/mutation/subscription, N+1 + DataLoader, gqlgen, introspection, GraphQL vs REST
 - [WebRTC](./webrtc.md) — signaling, ICE/STUN/TURN, SDP offer/answer, Pion в Go, P2P vs SFU
 - [SOAP](./soap.md) — WSDL, конверт, заголовки, Fault, SOAP из Go (ручной + gowsdl), почему проиграл
