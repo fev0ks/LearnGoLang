@@ -6,7 +6,7 @@
 
 - [Типы фоновых задач](#типы-фоновых-задач)
 - [Worker pool](#worker-pool)
-- [Graceful shutdown](#graceful-shutdown)
+- [Graceful shutdown](#graceful-shutdown) → [подробнее](./08-graceful-shutdown.md)
 - [Periodic jobs (cron-style)](#periodic-jobs-cron-style)
 - [Distributed lease: один воркер в кластере](#distributed-lease-один-воркер-в-кластере)
 - [Idempotent workers](#idempotent-workers)
@@ -100,93 +100,9 @@ func (p *WorkerPool) Shutdown() {
 
 ## Graceful shutdown
 
-Один из самых частых вопросов на интервью про воркеры.
+Воркер слушает `ctx.Done()` — при отмене заканчивает текущую задачу и выходит. `sync.WaitGroup` фиксирует полное завершение. `signal.NotifyContext` ловит SIGTERM/SIGINT.
 
-```go
-type Worker struct {
-    db      *pgxpool.Pool
-    broker  MessageBroker
-    log     *slog.Logger
-    wg      sync.WaitGroup
-}
-
-func (w *Worker) Run(ctx context.Context) {
-    // Запустить N воркеров
-    for i := 0; i < 5; i++ {
-        w.wg.Add(1)
-        go func() {
-            defer w.wg.Done()
-            w.processLoop(ctx)
-        }()
-    }
-}
-
-func (w *Worker) processLoop(ctx context.Context) {
-    for {
-        select {
-        case <-ctx.Done():
-            w.log.Info("worker stopping")
-            return
-        default:
-        }
-
-        msg, err := w.broker.Receive(ctx)  // blocking с timeout
-        if err != nil {
-            if errors.Is(err, context.Canceled) {
-                return
-            }
-            w.log.Error("receive error", "err", err)
-            time.Sleep(1 * time.Second)  // backoff при ошибке
-            continue
-        }
-
-        if err := w.handle(ctx, msg); err != nil {
-            w.log.Error("handle error", "err", err, "msg_id", msg.ID)
-            w.broker.Nack(msg)
-        } else {
-            w.broker.Ack(msg)
-        }
-    }
-}
-
-// Wait ждёт завершения всех воркеров
-func (w *Worker) Wait() {
-    w.wg.Wait()
-}
-```
-
-**Интеграция с OS сигналами:**
-
-```go
-func main() {
-    ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
-    defer stop()
-
-    worker := NewWorker(db, broker, logger)
-    worker.Run(ctx)
-
-    // Ждём сигнала
-    <-ctx.Done()
-    logger.Info("shutdown signal received")
-
-    // Даём воркерам время завершить текущие задачи
-    shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-    defer cancel()
-
-    done := make(chan struct{})
-    go func() {
-        worker.Wait()
-        close(done)
-    }()
-
-    select {
-    case <-done:
-        logger.Info("graceful shutdown complete")
-    case <-shutdownCtx.Done():
-        logger.Warn("shutdown timeout, forcing exit")
-    }
-}
-```
+Подробно: паттерны, оркестрация нескольких компонентов (HTTP + gRPC + workers), таймауты, частые ошибки — в [08. Graceful Shutdown](./08-graceful-shutdown.md).
 
 ---
 
