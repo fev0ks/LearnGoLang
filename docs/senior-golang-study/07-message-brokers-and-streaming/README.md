@@ -8,6 +8,7 @@
 - [02. RabbitMQ](./02-rabbitmq.md) — exchange/queue/binding, типы exchange (fanout/direct/topic/headers), ack/nack/prefetch, DLQ, Go publisher/subscriber
 - [03. Redis Streams](./03-redis-streams.md) — XADD/XREADGROUP/XACK, consumer groups, PEL, XCLAIM для failover, Go producer/consumer
 - [04. Redis Pub/Sub](./04-redis-pubsub.md) — PUBLISH/SUBSCRIBE/PSUBSCRIBE, at-most-once, backplane паттерн, Go publisher/subscriber
+- [05. Cloud Pub/Sub](./05-cloud-pubsub.md) — Google Cloud Pub/Sub (topics/subscriptions/ack deadline/DLT), AWS SNS+SQS (fan-out), cloud vs self-hosted
 - [06. gRPC Streaming](./06-grpc-streaming.md) — bidirectional stream как transport, server registry, multi-broker Redis backplane, backpressure
 - [07. Comparison](./07-comparison.md) — большая таблица, decision tree, типичные ошибки выбора
 

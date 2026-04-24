@@ -217,7 +217,7 @@
 - [x] 08. RabbitMQ → `07-message-brokers-and-streaming/02-rabbitmq.md`
 - [x] 09. Redis Streams → `07-message-brokers-and-streaming/03-redis-streams.md`
 - [x] 10. Redis Pub/Sub → `07-message-brokers-and-streaming/04-redis-pubsub.md`
-- [ ] 11. Cloud Pub/Sub
+- [x] 11. Cloud Pub/Sub → `07-message-brokers-and-streaming/05-cloud-pubsub.md`
 - [x] 12. gRPC Streaming (07-message-brokers) → `07-message-brokers-and-streaming/06-grpc-streaming.md`
 - [x] 13. Brokers Comparison → `07-message-brokers-and-streaming/07-comparison.md`
 - [x] 14. gRPC Overview + Go (08-networking) → `08-networking-and-api/grpc-overview.md`
@@ -226,6 +226,6 @@
 - [x] 17. WebSocket → `08-networking-and-api/websocket.md`
 - [x] 18. Webhooks → `08-networking-and-api/webhooks.md`
 - [x] 19. GraphQL → `08-networking-and-api/graphql.md`
-- [ ] 20. WebRTC
-- [ ] 21. SOAP
+- [x] 20. WebRTC → `08-networking-and-api/webrtc.md`
+- [x] 21. SOAP → `08-networking-and-api/soap.md`
 - [x] 22. Protocol Comparison → `08-networking-and-api/protocol-comparison.md`

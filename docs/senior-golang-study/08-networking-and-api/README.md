@@ -10,6 +10,8 @@
 - [WebSocket](./websocket.md) — Upgrade handshake, framing, opcodes, read/write goroutine паттерн, Hub, pub/sub backplane
 - [Webhooks](./webhooks.md) — механика, at-least-once, HMAC-SHA256 signature, idempotency key, outbox паттерн
 - [GraphQL](./graphql.md) — schema/query/mutation/subscription, N+1 + DataLoader, gqlgen, introspection, GraphQL vs REST
+- [WebRTC](./webrtc.md) — signaling, ICE/STUN/TURN, SDP offer/answer, Pion в Go, P2P vs SFU
+- [SOAP](./soap.md) — WSDL, конверт, заголовки, Fault, SOAP из Go (ручной + gowsdl), почему проиграл
 - [Protocol Comparison](./protocol-comparison.md) — большая таблица REST/gRPC/GraphQL/WebSocket/Webhooks/WebRTC/SOAP, decision tree
 - [Rate Limiting](./01-rate-limiting.md) — алгоритмы, token bucket, sliding window
 - [Rate Limiting Examples](./rate-limiting-examples/README.md)
