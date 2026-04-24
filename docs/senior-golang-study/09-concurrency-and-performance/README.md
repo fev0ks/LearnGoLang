@@ -4,6 +4,10 @@
 
 ## Материалы
 
+- [01. Goroutines And Channels](./01-goroutines-and-channels.md) — lifecycle, unbuffered/buffered, pipeline, fan-out/fan-in, done-channel, goroutine leak, select
+- [02. Sync Primitives](./02-sync-primitives.md) — Mutex/RWMutex, WaitGroup, Once, Cond, Pool, Map, atomic
+- [03. Worker Pool](./03-worker-pool.md) — разбор task_before.go (5 багов), правильная реализация, errCh паттерн, graceful shutdown, semaphore
+- [04. Context Patterns](./04-context-patterns.md) — Background/TODO, WithCancel/Timeout/Deadline, propagation, context.Value anti-patterns, defer cancel()
 - [Profiling](./profiling/) — pprof, CPU/memory/goroutine/block/mutex профили, execution tracer, benchmarks, 5 разобранных кейсов (подраздел)
 
 ## Профилирование (подраздел)

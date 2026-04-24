@@ -13,6 +13,8 @@
 - [07. Scheduler And Preemption](./07-scheduler-and-preemption.md) — GMP модель, work stealing, async preemption, syscall handoff, GOMAXPROCS в контейнерах
 - [08. Syscall](./08-syscall.md) — entersyscall/exitsyscall, P handoff, sysmon retake, CGo цена, LockOSThread, thread exhaustion
 - [09. Netpoller](./09-netpoller.md) — epoll/kqueue интеграция, pollDesc, горутина parking/wakeup, SetDeadline, DNS resolver
+- [10. Error Handling](./10-error-handling.md) — errors.Is/As, wrapping chain, sentinel vs typed errors, errgroup, errCh паттерн, errors.Join
+- [11. Generics](./11-generics.md) — type parameters, constraints, any/comparable, ~underlying type, слайс-утилиты, stdlib slices/maps/cmp, подводные камни, производительность
 - [Map Internals](./map-internals/) — hmap+bmap (до 1.24), Swiss Tables (1.24+), ctrl bytes, matchH2, tombstones (подраздел)
 - [Memory Internals](./memory-internals/) — стек и heap, аллокатор, escape analysis, GC (подраздел)
 
