@@ -4,17 +4,22 @@
 
 ## Материалы
 
-- [gRPC Overview](./grpc-overview.md) — Protobuf, 4 типа RPC, кодогенерация, interceptors, health check, reflection, gRPC vs REST
-- [HTTP Server in Go](./http-server-in-go.md) — `net/http` server, middleware chain, timeouts, graceful shutdown
-- [HTTP Client in Go](./http-client-in-go.md) — Transport, connection pooling, таймауты, retry с backoff, circuit breaker
-- [WebSocket](./websocket.md) — Upgrade handshake, framing, opcodes, read/write goroutine паттерн, Hub, pub/sub backplane
-- [Webhooks](./webhooks.md) — механика, at-least-once, HMAC-SHA256 signature, idempotency key, outbox паттерн
-- [Idempotency](./idempotency.md) — Idempotency-Key header, генерация (UUID/hash), Redis SETNX, PostgreSQL ON CONFLICT, concurrent safety, consumer dedup, TTL стратегии
-- [GraphQL](./graphql.md) — schema/query/mutation/subscription, N+1 + DataLoader, gqlgen, introspection, GraphQL vs REST
-- [WebRTC](./webrtc.md) — signaling, ICE/STUN/TURN, SDP offer/answer, Pion в Go, P2P vs SFU
-- [SOAP](./soap.md) — WSDL, конверт, заголовки, Fault, SOAP из Go (ручной + gowsdl), почему проиграл
-- [Protocol Comparison](./protocol-comparison.md) — большая таблица REST/gRPC/GraphQL/WebSocket/Webhooks/WebRTC/SOAP, decision tree
-- [Rate Limiting](./01-rate-limiting.md) — алгоритмы, token bucket, sliding window
+### [Протоколы и паттерны](./protocols/)
+
+- [01. gRPC](./protocols/01-grpc.md) — Protobuf, 4 типа RPC, кодогенерация, interceptors, health check, reflection, gRPC vs REST
+- [02. HTTP Server in Go](./protocols/02-http-server.md) — `net/http` server, middleware chain, timeouts, graceful shutdown
+- [03. HTTP Client in Go](./protocols/03-http-client.md) — Transport, connection pooling, таймауты, retry с backoff, circuit breaker
+- [04. Rate Limiting](./protocols/04-rate-limiting.md) — алгоритмы, token bucket, sliding window
+- [05. WebSocket](./protocols/05-websocket.md) — Upgrade handshake, framing, opcodes, read/write goroutine паттерн, Hub, pub/sub backplane
+- [06. Webhooks](./protocols/06-webhooks.md) — механика, at-least-once, HMAC-SHA256 signature, idempotency key, outbox паттерн
+- [07. Idempotency](./protocols/07-idempotency.md) — Idempotency-Key header, генерация (UUID/hash), Redis SETNX, PostgreSQL ON CONFLICT, concurrent safety, consumer dedup
+- [08. GraphQL](./protocols/08-graphql.md) — schema/query/mutation/subscription, N+1 + DataLoader, gqlgen, introspection, GraphQL vs REST
+- [09. WebRTC](./protocols/09-webrtc.md) — signaling, ICE/STUN/TURN, SDP offer/answer, Pion в Go, P2P vs SFU
+- [10. SOAP](./protocols/10-soap.md) — WSDL, конверт, заголовки, Fault, SOAP из Go (ручной + gowsdl), почему проиграл
+- [11. Protocol Comparison](./protocols/11-protocol-comparison.md) — большая таблица REST/gRPC/GraphQL/WebSocket/Webhooks/WebRTC/SOAP, decision tree
+
+### Подразделы
+
 - [Rate Limiting Examples](./rate-limiting-examples/README.md)
 - [What Happens When You Open google.com](./request-lifecycle/README.md)
 
