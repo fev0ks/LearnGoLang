@@ -4,23 +4,37 @@
 
 ## Таблица типов и zero values
 
-| Тип | Zero value | Пример |
-|-----|-----------|--------|
-| `bool` | `false` | `var b bool` |
-| `string` | `""` | `var s string` |
-| `int`, `int8/16/32/64` | `0` | `var n int` |
-| `uint`, `uint8/16/32/64` | `0` | `var u uint64` |
-| `float32`, `float64` | `0` | `var f float64` |
-| `complex64`, `complex128` | `0+0i` | `var c complex128` |
-| `*T` (pointer) | `nil` | `var p *int` |
-| `[]T` (slice) | `nil` | `var s []int` |
-| `map[K]V` | `nil` | `var m map[string]int` |
-| `chan T` | `nil` | `var ch chan int` |
-| `func(...)` | `nil` | `var fn func()` |
-| `interface{}` / `any` | `nil` | `var i any` |
-| `struct{}` | all fields zero | `var s MyStruct` |
+| Тип | Размер | Zero value | Пример |
+|-----|--------|-----------|--------|
+| `bool` | 1 байт | `false` | `var b bool` |
+| `string` | 16 байт ¹ | `""` | `var s string` |
+| `int` | 4 / 8 байт ² | `0` | `var n int` |
+| `int8` | 1 байт | `0` | `var n int8` |
+| `int16` | 2 байта | `0` | `var n int16` |
+| `int32` / `rune` | 4 байта | `0` | `var n int32` |
+| `int64` | 8 байт | `0` | `var n int64` |
+| `uint` | 4 / 8 байт ² | `0` | `var u uint` |
+| `uint8` / `byte` | 1 байт | `0` | `var u uint8` |
+| `uint16` | 2 байта | `0` | `var u uint16` |
+| `uint32` | 4 байта | `0` | `var u uint32` |
+| `uint64` | 8 байт | `0` | `var u uint64` |
+| `uintptr` | 4 / 8 байт ² | `0` | `var u uintptr` |
+| `float32` | 4 байта | `0` | `var f float32` |
+| `float64` | 8 байт | `0` | `var f float64` |
+| `complex64` | 8 байт | `0+0i` | `var c complex64` |
+| `complex128` | 16 байт | `0+0i` | `var c complex128` |
+| `*T` (pointer) | 4 / 8 байт ² | `nil` | `var p *int` |
+| `[]T` (slice) | 24 байта ¹ | `nil` | `var s []int` |
+| `map[K]V` | 8 байт ² | `nil` | `var m map[string]int` |
+| `chan T` | 8 байт ² | `nil` | `var ch chan int` |
+| `func(...)` | 8 байт ² | `nil` | `var fn func()` |
+| `interface{}` / `any` | 16 байт | `nil` | `var i any` |
+| `struct{}` | 0 байт | all fields zero | `var s MyStruct` |
 
-Псевдонимы: `byte` = `uint8`, `rune` = `int32`.
+¹ — заголовок структуры: `string` = `{*byte, int}`, `[]T` = `{*T, int, int}` (ptr + len + cap).  
+² — зависит от платформы: 4 байта на 32-bit, 8 байт на 64-bit (обычно).
+
+Проверить размер любого типа: `unsafe.Sizeof(x)`.
 
 ## Критически важное поведение nil-типов
 
