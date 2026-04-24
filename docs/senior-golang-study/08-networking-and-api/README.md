@@ -9,6 +9,8 @@
 - [HTTP Client in Go](./http-client-in-go.md) — Transport, connection pooling, таймауты, retry с backoff, circuit breaker
 - [WebSocket](./websocket.md) — Upgrade handshake, framing, opcodes, read/write goroutine паттерн, Hub, pub/sub backplane
 - [Webhooks](./webhooks.md) — механика, at-least-once, HMAC-SHA256 signature, idempotency key, outbox паттерн
+- [GraphQL](./graphql.md) — schema/query/mutation/subscription, N+1 + DataLoader, gqlgen, introspection, GraphQL vs REST
+- [Protocol Comparison](./protocol-comparison.md) — большая таблица REST/gRPC/GraphQL/WebSocket/Webhooks/WebRTC/SOAP, decision tree
 - [Rate Limiting](./01-rate-limiting.md) — алгоритмы, token bucket, sliding window
 - [Rate Limiting Examples](./rate-limiting-examples/README.md)
 - [What Happens When You Open google.com](./request-lifecycle/README.md)
