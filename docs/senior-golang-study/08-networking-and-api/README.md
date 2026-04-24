@@ -2,8 +2,14 @@
 
 Сюда собирай темы про протоколы, API и сетевое поведение сервисов.
 
-Базовые заметки:
-- [Rate Limiting](./01-rate-limiting.md)
+## Материалы
+
+- [gRPC Overview](./grpc-overview.md) — Protobuf, 4 типа RPC, кодогенерация, interceptors, health check, reflection, gRPC vs REST
+- [HTTP Server in Go](./http-server-in-go.md) — `net/http` server, middleware chain, timeouts, graceful shutdown
+- [HTTP Client in Go](./http-client-in-go.md) — Transport, connection pooling, таймауты, retry с backoff, circuit breaker
+- [WebSocket](./websocket.md) — Upgrade handshake, framing, opcodes, read/write goroutine паттерн, Hub, pub/sub backplane
+- [Webhooks](./webhooks.md) — механика, at-least-once, HMAC-SHA256 signature, idempotency key, outbox паттерн
+- [Rate Limiting](./01-rate-limiting.md) — алгоритмы, token bucket, sliding window
 - [Rate Limiting Examples](./rate-limiting-examples/README.md)
 - [What Happens When You Open google.com](./request-lifecycle/README.md)
 
