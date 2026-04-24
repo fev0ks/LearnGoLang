@@ -2,7 +2,15 @@
 
 Этот раздел нужен для понимания асинхронной обработки и интеграций.
 
-Темы:
+## Материалы
+
+- [01. Kafka](./01-kafka.md) — архитектура (topic/partition/offset/ISR/consumer group), delivery semantics, producer acks/batching, consumer poll loop, franz-go vs sarama, DLQ, log compaction
+- [02. RabbitMQ](./02-rabbitmq.md) — exchange/queue/binding, типы exchange (fanout/direct/topic/headers), ack/nack/prefetch, DLQ, Go publisher/subscriber
+- [03. Redis Streams](./03-redis-streams.md) — XADD/XREADGROUP/XACK, consumer groups, PEL, XCLAIM для failover, Go producer/consumer
+- [04. Redis Pub/Sub](./04-redis-pubsub.md) — PUBLISH/SUBSCRIBE/PSUBSCRIBE, at-most-once, backplane паттерн, Go publisher/subscriber
+- [07. Comparison](./07-comparison.md) — большая таблица, decision tree, типичные ошибки выбора
+
+## Темы
 - RabbitMQ, Kafka, NATS, Redis Streams, SQS/SNS;
 - at-most-once, at-least-once, effectively-once;
 - ordering, partitions, consumer groups;
