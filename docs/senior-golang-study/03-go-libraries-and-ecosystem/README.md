@@ -9,9 +9,15 @@
 - [samber/lo](./03-samber-lo.md) — generics-утилиты для коллекций: Map, Filter, GroupBy, Chunk
 - [pkg/errors](./04-pkg-errors.md) — ошибки со стектрейсом; совместимость с errors.Is
 
-## Категории (материалы готовятся)
+## HTTP Servers
 
-- **HTTP routers:** `chi`, `gin`, `echo`, stdlib router
+- [HTTP Servers →](./http-servers/README.md)
+  - stdlib net/http (Go 1.22+)
+  - chi, gin, echo, fiber
+  - gorilla/mux legacy
+  - Таблица сравнения и когда что выбирать
+
+## Категории (материалы готовятся)
 - **Config:** `envconfig`, `viper`, manual parsing
 - **Logging:** `slog`, `zap`, `zerolog`
 - **Database access:** `sqlx`, `pgx`, `gorm`, `bun`, `ent` → см. [06-databases/go-database-libraries](../06-databases/go-database-libraries/)
