@@ -13,6 +13,7 @@
 - observability как часть дизайна, а не постфактум.
 
 Подпакеты:
+- [Reliability Patterns](./reliability-patterns/README.md) — timeouts, retries, circuit breaker, rate limiting, backpressure, idempotency, bulkhead
 - [External Request Flows](./external-request-flows/README.md)
 - [Experimentation And Feature Rollouts](./experimentation-and-feature-rollouts/README.md)
 - [Interview Cases](./interview-cases/README.md) — разборы популярных задач по фазам интервью

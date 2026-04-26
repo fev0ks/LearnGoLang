@@ -16,6 +16,7 @@ PostgreSQL — open-source relational database, основной выбор дл
 - [09 Connection Pooling](./09-connection-pooling.md) — PgBouncer режимы, pgxpool, расчёт числа соединений
 - [10 Мониторинг и Диагностика](./10-monitoring-and-diagnostics.md) — pg_stat_* представления, bloat, production checklist
 - [11 Паттерны в Go](./11-go-patterns.md) — pgx v5, транзакции, batch, COPY, обработка ошибок
+- [12 Шардирование](./12-sharding.md) — партиционирование vs шардирование, application-level sharding, Citus, FDW, resharding
 
 ## Официальная документация
 
