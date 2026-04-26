@@ -9,13 +9,23 @@
 - [samber/lo](./03-samber-lo.md) — generics-утилиты для коллекций: Map, Filter, GroupBy, Chunk
 - [pkg/errors](./04-pkg-errors.md) — ошибки со стектрейсом; совместимость с errors.Is
 
-## HTTP Servers
+## HTTP и RPC
+
+### HTTP Servers
 
 - [HTTP Servers →](./http-servers/README.md)
   - stdlib net/http (Go 1.22+)
   - chi, gin, echo, fiber
   - gorilla/mux legacy
   - Таблица сравнения и когда что выбирать
+
+### gRPC
+
+- [gRPC →](./grpc/README.md)
+  - Protobuf и кодогенерация (buf)
+  - grpc-go: сервер, клиент, interceptors, streaming
+  - connect-go: три протокола на одном порту, браузерный клиент
+  - gRPC vs REST, grpc-go vs connect-go
 
 ## Категории (материалы готовятся)
 - **Config:** `envconfig`, `viper`, manual parsing
