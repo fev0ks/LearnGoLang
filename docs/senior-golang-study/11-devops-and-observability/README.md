@@ -3,6 +3,7 @@
 Этот раздел нужен, потому что senior backend обычно отвечает и за production readiness.
 
 Базовые заметки:
+- [CI/CD](./ci-cd/README.md)
 - [Linux Internals](./linux/README.md)
 - [Logging And Log Shipping](./logging-and-log-shipping/README.md)
 - [Prometheus And Metrics](./prometheus-and-metrics/README.md)
