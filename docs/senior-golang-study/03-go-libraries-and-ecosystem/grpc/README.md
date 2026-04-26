@@ -8,6 +8,7 @@ gRPC — бинарный RPC-протокол поверх HTTP/2 с кодог
 - [02 grpc-go](./02-grpc-go.md) — сервер и клиент, interceptors, streaming, metadata, error handling
 - [03 connect-go](./03-connect-go.md) — Connect/gRPC/gRPC-Web на одном порту, browser-friendly RPC
 - [04 Сравнение и выбор](./04-comparison.md) — grpc-go vs connect-go, gRPC vs REST, когда что
+- [05 grpc-gateway](./05-grpc-gateway.md) — REST proxy поверх gRPC, google.api.http аннотации, OpenAPI генерация
 
 ## Вопросы
 
@@ -17,3 +18,4 @@ gRPC — бинарный RPC-протокол поверх HTTP/2 с кодог
 - почему connect-go проще деплоить чем grpc-go без proxy
 - как обрабатывать ошибки в gRPC — Status vs стандартные Go errors
 - что такое buf и почему protoc один стал неудобен
+- когда grpc-gateway, а когда connect-go — в чём принципиальная разница подходов

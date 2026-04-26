@@ -1,5 +1,20 @@
 # Сравнение и выбор: gRPC vs REST, grpc-go vs connect-go
 
+## Три варианта дать REST-доступ к gRPC
+
+| | grpc-gateway | connect-go | grpc-go + Envoy |
+|---|---|---|---|
+| Подход | сгенерированный reverse-proxy | один сервер, 3 протокола | внешний proxy |
+| URL маппинг | произвольный (аннотации в .proto) | фиксированный | произвольный (Envoy config) |
+| OpenAPI | да (protoc-gen-openapiv2) | нет | нет |
+| Browser TypeScript client | curl/fetch, кастомные URL | connect-es, codegen | grpc-web клиент |
+| Инфраструктура | +1 процесс или порт | один процесс | +Envoy sidecar |
+| Сложность | средняя | низкая | высокая |
+
+Подробнее: [05-grpc-gateway.md](./05-grpc-gateway.md)
+
+---
+
 ## grpc-go vs connect-go
 
 | | grpc-go | connect-go |
