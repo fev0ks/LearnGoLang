@@ -92,7 +92,7 @@ CREATE INDEX idx_orders_created ON orders(created_at DESC);
 CREATE INDEX idx_active_users ON users(email) WHERE status = 'active';
 ```
 
-`GIN` (Generalized Inverted Index): массивы, JSONB, полнотекстовый поиск. Индексирует элементы внутри значения.
+`GIN` (Generalized Inverted Index): массивы, JSONB, полнотекстовый поиск. Индексирует элементы внутри значения. Схема типов индексов: [pg_indexes.png](./02a-pg_indexes.png).
 
 ```sql
 -- быстрый поиск по JSONB полю

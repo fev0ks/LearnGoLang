@@ -13,7 +13,7 @@
 
 Материалы:
 - [01 Comparison Table](./01-comparison-table.md)
-- [02 PostgreSQL](./02-postgresql.md)
+- [02 PostgreSQL](./postgresql/README.md)
 - [03 MySQL](./03-mysql.md)
 - [04 MongoDB](./04-mongodb.md)
 - [04a MongoDB: реальные сценарии](./04a-mongodb-real-scenarios.md)
