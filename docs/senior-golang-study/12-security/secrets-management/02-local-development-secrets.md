@@ -1,73 +1,150 @@
-# Local Development Secrets
+# Секреты в local development
 
-Local dev почти всегда требует компромисса между удобством и безопасностью. Цель не в том, чтобы локальная среда была enterprise-grade, а в том, чтобы:
-- не утекали реальные production secrets;
-- новый разработчик мог быстро стартовать;
-- значения не коммитились случайно в git.
+Цель: не коммитить реальные секреты, быстрый старт для нового разработчика, изоляция от production credentials.
 
-## Что обычно работает лучше всего
+## Содержание
 
-### `.env.example`
+- [Базовый паттерн: .env.example](#базовый-паттерн-envexample)
+- [direnv — автозагрузка в shell](#direnv--автозагрузка-в-shell)
+- [Загрузка .env в Go без внешних библиотек](#загрузка-env-в-go-без-внешних-библиотек)
+- [godotenv](#godotenv)
+- [Чего не делать](#чего-не-делать)
 
-Хороший базовый паттерн:
-- в репозитории лежит `.env.example`;
-- там только имена переменных и безопасные заглушки;
-- реальные значения разработчик кладет в `.env.local` или `.env`.
+---
 
-Пример:
+## Базовый паттерн: .env.example
 
-```env
+В репозитории — только `env.example` с именами переменных и dev-заглушками. Реальные значения разработчик кладёт локально.
+
+```bash
+# .env.example — коммитится в git
 APP_ENV=local
-POSTGRES_DSN=postgres://app:app@localhost:5432/app?sslmode=disable
-JWT_SECRET=change-me-local-only
+DATABASE_URL=postgres://app:app@localhost:5432/app?sslmode=disable
+JWT_SECRET=dev-only-change-me-in-production
+REDIS_ADDR=localhost:6379
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
 ```
 
-Важно:
-- реальные production keys в такой файл не кладут;
-- `.env.local` должен быть в `.gitignore`.
+```bash
+# .gitignore
+.env
+.env.local
+.env.*.local
+```
 
-### `direnv`
+Разработчик копирует и заполняет:
+```bash
+cp .env.example .env.local
+# Заполнить GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET для своего dev OAuth приложения
+```
 
-Подходит, когда:
-- хочется автоматическую загрузку env vars в shell;
-- команда комфортно работает через CLI.
+**Правило:** в `.env.example` никогда не должно быть реальных значений — только `change-me-local-only`, пустые строки, или сгенерированные безопасные dev-дефолты.
 
-Плюсы:
-- быстро;
-- удобно локально;
-- не требует тащить секреты в Docker image.
+---
 
-### Local secret manager / password manager
+## direnv — автозагрузка в shell
 
-Примеры:
-- `1Password`
-- `Bitwarden`
-- локальный `Vault` dev setup
+[direnv](https://direnv.net/) автоматически загружает `.envrc` при переходе в директорию и выгружает при выходе.
 
-Подходит, когда:
-- команда уже живет в password manager;
-- секретов много;
-- хочется не раздавать их по чатам и wiki.
+```bash
+# .envrc
+dotenv .env.local
+```
+
+```bash
+direnv allow .  # разрешить один раз
+# Теперь при cd в проект — переменные автоматически в shell
+```
+
+Удобно когда несколько проектов с разными конфигами — не нужно вручную `source .env`.
+
+---
+
+## Загрузка .env в Go без внешних библиотек
+
+```go
+// Простой loader для local dev — в production .env файла нет
+func loadDotEnv(path string) error {
+    f, err := os.Open(path)
+    if errors.Is(err, os.ErrNotExist) {
+        return nil  // в production файла нет — это нормально
+    }
+    if err != nil {
+        return err
+    }
+    defer f.Close()
+
+    scanner := bufio.NewScanner(f)
+    for scanner.Scan() {
+        line := strings.TrimSpace(scanner.Text())
+        if line == "" || strings.HasPrefix(line, "#") {
+            continue
+        }
+        k, v, ok := strings.Cut(line, "=")
+        if !ok {
+            continue
+        }
+        // Не перезаписывать уже установленные переменные (env > .env файл)
+        if os.Getenv(strings.TrimSpace(k)) == "" {
+            os.Setenv(strings.TrimSpace(k), strings.Trim(strings.TrimSpace(v), `"`))
+        }
+    }
+    return scanner.Err()
+}
+
+func main() {
+    // Загрузить только в dev, проигнорировать если файла нет
+    if err := loadDotEnv(".env.local"); err != nil {
+        log.Fatalf("load .env: %v", err)
+    }
+    cfg, err := LoadConfig()
+    // ...
+}
+```
+
+---
+
+## godotenv
+
+Если не хочется писать самому:
+
+```go
+import "github.com/joho/godotenv"
+
+func main() {
+    // Загрузить .env.local если существует, не падать если нет
+    _ = godotenv.Load(".env.local")
+
+    cfg, err := LoadConfig()
+    // ...
+}
+```
+
+```go
+// Для тестов: установить переменные из файла
+func TestMain(m *testing.M) {
+    _ = godotenv.Load("../../.env.test")
+    os.Exit(m.Run())
+}
+```
+
+---
 
 ## Чего не делать
 
-- не хранить production secrets в `.env`;
-- не коммитить `.env`;
-- не копировать токены в README;
-- не использовать один и тот же long-lived secret для local, staging и prod.
+```bash
+# Коммитить .env с реальными значениями
+git add .env  # НИКОГДА
 
-## Practical rule
+# Хранить production credentials в local .env
+DATABASE_URL=postgres://prod-user:real-prod-pass@prod-db:5432/prod
 
-Для local dev обычно достаточно:
-- `.env.example` в репозитории;
-- `.env.local` в `.gitignore`;
-- dev-only credentials и отдельные local keys.
+# Копировать production secrets в personal tools
+# (Slack, заметки, почта) — они там хранятся бессрочно
 
-Если проект серьезнее:
-- секреты для dev уже лучше раздавать через password manager или dev secret store.
+# Один shared long-lived token для всей команды
+# — невозможно ротировать, невозможно отозвать для одного разработчика
+```
 
-## Что важно проговорить
-
-- local convenience не оправдывает утечку production credentials;
-- local dev secrets должны быть отдельны от production;
-- onboarding должен быть удобным, но управляемым.
+**Практика:** dev credentials должны быть отдельными от production. Для OAuth — создать отдельное dev-приложение у провайдера. Для DB — отдельная локальная или shared dev база, не staging/production.

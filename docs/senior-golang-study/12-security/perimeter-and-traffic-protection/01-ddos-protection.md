@@ -1,248 +1,262 @@
-# DDoS Protection
+# DDoS защита и Rate Limiting
 
-Эта заметка нужна, чтобы понимать `DDoS protection` не как абстрактную галочку, а как конкретный класс perimeter-защиты.
+DDoS (Distributed Denial of Service) — атака на доступность: цель не украсть данные, а сделать сервис недоступным. Rate limiting — смежный механизм на уровне приложения, который ограничивает злоупотребление API.
 
 ## Содержание
 
-- [Самая короткая интуиция](#самая-короткая-интуиция)
-- [Почему это perimeter-задача](#почему-это-perimeter-задача)
-- [Какие бывают DDoS-атаки](#какие-бывают-ddos-атаки)
-- [Чем DDoS protection отличается от rate limiting](#чем-ddos-protection-отличается-от-rate-limiting)
-- [Что обычно делает DDoS protection слой](#что-обычно-делает-ddos-protection-слой)
-- [Какую проблему это решает для backend](#какую-проблему-это-решает-для-backend)
-- [Как DDoS защита сочетается с другими слоями](#как-ddos-защита-сочетается-с-другими-слоями)
-- [Как выглядит нормальная layered защита](#как-выглядит-нормальная-layered-защита)
-- [Что важно уметь объяснить на интервью](#что-важно-уметь-объяснить-на-интервью)
-- [Practical Rule](#practical-rule)
+- [Слои защиты](#слои-защиты)
+- [Rate limiting в Go](#rate-limiting-в-go)
+- [Rate limiting по IP](#rate-limiting-по-ip)
+- [Rate limiting по пользователю](#rate-limiting-по-пользователю)
+- [Ответ при превышении лимита](#ответ-при-превышении-лимита)
+- [DDoS на уровне инфраструктуры](#ddos-на-уровне-инфраструктуры)
 
-## Самая короткая интуиция
+---
 
-`DDoS` = `Distributed Denial of Service`.
+## Слои защиты
 
-Цель атаки:
-- не украсть данные;
-- не обойти auth;
-- а сделать сервис недоступным или сильно деградировавшим.
-
-То есть атакующий хочет:
-- занять канал;
-- занять соединения;
-- перегрузить edge/LB/app;
-- выбить сервис по latency или availability.
-
-## Почему это perimeter-задача
-
-`DDoS protection` почти всегда должна стоять раньше backend-сервисов.
-
-Почему:
-- если мусорный трафик уже дошел до приложения, ты уже потратил часть CPU, памяти, connection slots и bandwidth;
-- backend — слишком дорогая точка для первой линии защиты;
-- на edge проще отбросить заведомо вредный traffic раньше, чем он займет внутренние ресурсы.
-
-Полезная mental model:
-
-```text
-internet traffic
-  -> edge / CDN / cloud perimeter
-  -> load balancer / proxy
-  -> gateway / ingress
-  -> backend service
+```
+Internet traffic
+  → CDN / Cloud DDoS shield     ← volumetric, SYN flood, L3/L4
+  → Load balancer / Proxy       ← connection limits, slow clients
+  → API Gateway / Ingress       ← rate limits, auth, WAF
+  → Application                 ← per-endpoint limits, backpressure
 ```
 
-Чем раньше ты останавливаешь атаку, тем меньше blast radius.
+Каждый слой дешевле отбрасывает трафик чем следующий. Backend — последний рубеж, не первый.
 
-## Какие бывают DDoS-атаки
+**DDoS vs Rate limiting:**
+- DDoS — перегрузить инфраструктуру потоком трафика (миллионы rps, volumetric)
+- Rate limiting — ограничить API usage: 100 req/min per user, throttling дорогих endpoints
 
-### Volumetric
+Rate limit помогает против части abuse, но не заменяет DDoS protection на уровне CDN/перimetра.
 
-Это атаки на объем:
-- слишком много пакетов;
-- слишком много байтов;
-- забивают канал или инфраструктуру на уровне сети.
+---
 
-Что страдает:
-- bandwidth;
-- edge capacity;
-- network appliances.
+## Rate limiting в Go
 
-Это часто не про приложение как таковое, а про инфраструктуру до него.
+Стандартный инструмент — `golang.org/x/time/rate` (token bucket алгоритм):
 
-### Protocol-level
+```go
+import "golang.org/x/time/rate"
 
-Это атаки на сетевые или транспортные особенности:
-- SYN flood;
-- connection exhaustion;
-- malformed protocol traffic.
+// rate.NewLimiter(r, b): r — токенов в секунду, b — burst (максимальный всплеск)
+limiter := rate.NewLimiter(rate.Limit(100), 200)  // 100 rps, burst до 200
 
-Что страдает:
-- load balancer;
-- TCP stack;
-- connection tables;
-- reverse proxy.
-
-### L7 / application-layer DDoS
-
-Это уже похоже на “обычные HTTP запросы”, но в разрушительном количестве.
-
-Примеры:
-- огромное число `GET /search`;
-- дорогие запросы к тяжелому endpoint;
-- flood на login/register/search API;
-- трафик, который выглядит как “легитимный HTTP”, но по объему/паттерну разрушителен.
-
-Это особенно неприятно, потому что:
-- traffic может выглядеть почти нормальным;
-- защита сложнее, чем просто фильтр по IP.
-
-## Чем DDoS protection отличается от rate limiting
-
-Это важное различие.
-
-### DDoS protection
-
-Решает perimeter-level задачу:
-- как не дать разрушительному traffic вообще убить систему.
-
-Обычно живет на:
-- CDN;
-- edge;
-- cloud perimeter;
-- L4/L7 DDoS appliances.
-
-### Rate limiting
-
-Решает API/business-level задачу:
-- как ограничить честный и нечестный usage одного endpoint-а.
-
-Обычно живет на:
-- gateway;
-- ingress;
-- application;
-- specific API route.
-
-Пример:
-- `100 req/min per IP on create endpoint` — это rate limiting;
-- “в нас внезапно летит 500k rps мусорного traffic” — это уже DDoS problem.
-
-То есть rate limit помогает против части abuse, но не заменяет DDoS protection.
-
-## Что обычно делает DDoS protection слой
-
-### 1. Early drop suspicious traffic
-
-Самая базовая задача:
-- отбрасывать traffic до того, как он дойдет до origin.
-
-### 2. Traffic shaping
-
-Например:
-- ограничить бурст;
-- ввести challenge;
-- перераспределить или absorb load на edge.
-
-### 3. Network and protocol filtering
-
-Особенно важно для:
-- SYN floods;
-- malformed packets;
-- weird connection behavior.
-
-### 4. Reputation-based filtering
-
-Например:
-- suspicious ASNs;
-- known bad IP ranges;
-- obvious malicious sources.
-
-### 5. Shielding expensive origins
-
-Если origin дорогой:
-- тяжелый search backend;
-- payment API;
-- login flow;
-
-то perimeter защита особенно важна, потому что дорогой backend ломается быстрее.
-
-## Какую проблему это решает для backend
-
-Без perimeter DDoS защиты backend сталкивается с такими рисками:
-- рост latency;
-- saturation thread/connection pools;
-- timeout cascade;
-- отказ health checks;
-- auto-scaling не успевает;
-- полная потеря доступности.
-
-С нормальной perimeter-защитой:
-- значительная часть мусорного traffic вообще не доходит до backend;
-- edge или cloud perimeter absorbit нагрузку;
-- внутренний трафик остается ближе к нормальному профилю.
-
-## Как DDoS защита сочетается с другими слоями
-
-### CDN / Edge
-
-Очень хороший первый слой:
-- absorb traffic;
-- cache static content;
-- challenge suspicious clients;
-- block obvious volumetric attacks.
-
-### WAF
-
-Полезен рядом, но это не одно и то же.
-
-`WAF`:
-- ловит подозрительные application patterns;
-- защищает от типовых web attack vectors.
-
-`DDoS protection`:
-- в первую очередь защищает availability и capacity.
-
-### API Gateway
-
-Gateway помогает:
-- quotas;
-- API-specific rate limits;
-- auth;
-- policy controls.
-
-Но это не главный DDoS shield.
-
-### Application
-
-Приложение тоже может помогать:
-- дешево отвечать на overload;
-- ограничивать дорогие path;
-- иметь graceful degradation.
-
-Но оно не должно быть первой линией обороны.
-
-## Как выглядит нормальная layered защита
-
-Примерно так:
-
-```text
-edge / CDN / cloud DDoS shield
-  -> reverse proxy / LB
-  -> gateway / ingress rate limits
-  -> application-level abuse controls
+// В хэндлере
+if !limiter.Allow() {
+    http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
+    return
+}
 ```
 
-Это важно, потому что одна мера почти никогда не закрывает все сценарии.
+**Token bucket:** каждую секунду в корзину добавляется `r` токенов (максимум `b`). Каждый запрос тратит 1 токен. Если корзина пуста — запрос отклоняется.
 
-## Что важно уметь объяснить на интервью
+---
 
-- `DDoS protection` — это про availability, а не про auth.
-- Ее лучше ставить раньше приложения.
-- Volumetric и L7 DDoS — разные вещи.
-- Rate limiting полезен, но это не полноценная замена DDoS protection.
-- Backend должен быть защищен несколькими слоями, а не одним magical control.
+## Rate limiting по IP
 
-## Practical Rule
+Глобальный лимитер не подходит — один быстрый клиент не должен блокировать остальных. Нужен лимитер на IP.
 
-Если коротко:
-- `DDoS protection` нужна, чтобы не пустить разрушительный traffic внутрь системы;
-- это perimeter concern;
-- edge/CDN/cloud shield почти всегда лучшее место для такой защиты;
-- gateway и app могут помогать, но не должны быть первой и единственной линией обороны.
+```go
+import (
+    "sync"
+    "time"
+    "golang.org/x/time/rate"
+)
+
+type IPRateLimiter struct {
+    mu       sync.Mutex
+    limiters map[string]*rate.Limiter
+    r        rate.Limit
+    b        int
+}
+
+func NewIPRateLimiter(r rate.Limit, b int) *IPRateLimiter {
+    rl := &IPRateLimiter{
+        limiters: make(map[string]*rate.Limiter),
+        r:        r,
+        b:        b,
+    }
+    // Очищать устаревшие записи
+    go rl.cleanup()
+    return rl
+}
+
+func (rl *IPRateLimiter) Allow(ip string) bool {
+    rl.mu.Lock()
+    l, ok := rl.limiters[ip]
+    if !ok {
+        l = rate.NewLimiter(rl.r, rl.b)
+        rl.limiters[ip] = l
+    }
+    rl.mu.Unlock()
+    return l.Allow()
+}
+
+func (rl *IPRateLimiter) cleanup() {
+    ticker := time.NewTicker(10 * time.Minute)
+    for range ticker.C {
+        rl.mu.Lock()
+        for ip, l := range rl.limiters {
+            // Удалить если лимитер не использовался (корзина полна)
+            if l.Tokens() == float64(rl.b) {
+                delete(rl.limiters, ip)
+            }
+        }
+        rl.mu.Unlock()
+    }
+}
+
+// Middleware
+func RateLimitByIP(rl *IPRateLimiter) func(http.Handler) http.Handler {
+    return func(next http.Handler) http.Handler {
+        return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+            ip := clientIP(r)
+            if !rl.Allow(ip) {
+                w.Header().Set("Retry-After", "1")
+                http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
+                return
+            }
+            next.ServeHTTP(w, r)
+        })
+    }
+}
+
+func clientIP(r *http.Request) string {
+    // За proxy — брать из X-Forwarded-For или X-Real-IP
+    if ip := r.Header.Get("X-Real-IP"); ip != "" {
+        return ip
+    }
+    if fwd := r.Header.Get("X-Forwarded-For"); fwd != "" {
+        // Первый IP в списке — клиент (остальные — proxy)
+        return strings.Split(fwd, ",")[0]
+    }
+    host, _, _ := net.SplitHostPort(r.RemoteAddr)
+    return host
+}
+```
+
+**Важно:** `X-Forwarded-For` можно подделать. Доверять только если трафик приходит через контролируемый proxy. Если есть сомнения — использовать `RemoteAddr`.
+
+---
+
+## Rate limiting по пользователю
+
+Для аутентифицированных API — лимит по `user_id`, а не по IP (пользователи за NAT делят один IP):
+
+```go
+func RateLimitByUser(rl *IPRateLimiter) func(http.Handler) http.Handler {
+    return func(next http.Handler) http.Handler {
+        return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+            // Взять user ID из контекста (после auth middleware)
+            userID, ok := r.Context().Value(userIDKey).(string)
+            if !ok || userID == "" {
+                // Анонимные запросы — по IP
+                userID = clientIP(r)
+            }
+
+            if !rl.Allow(userID) {
+                http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
+                return
+            }
+            next.ServeHTTP(w, r)
+        })
+    }
+}
+```
+
+### Redis-based rate limiting (распределённый)
+
+In-memory лимитер не работает при нескольких репликах — каждая реплика считает свой лимит. Для горизонтально масштабируемого сервиса нужен Redis:
+
+```go
+import "github.com/redis/go-redis/v9"
+
+// Lua скрипт — атомарная операция (не нужен WATCH/MULTI)
+const rateLimitScript = `
+local key = KEYS[1]
+local limit = tonumber(ARGV[1])
+local window = tonumber(ARGV[2])
+
+local current = redis.call("INCR", key)
+if current == 1 then
+    redis.call("EXPIRE", key, window)
+end
+if current > limit then
+    return 0
+end
+return 1
+`
+
+type RedisRateLimiter struct {
+    client *redis.Client
+    limit  int
+    window time.Duration
+}
+
+func (rl *RedisRateLimiter) Allow(ctx context.Context, key string) (bool, error) {
+    result, err := rl.client.Eval(ctx, rateLimitScript,
+        []string{"ratelimit:" + key},
+        rl.limit,
+        int(rl.window.Seconds()),
+    ).Int()
+    if err != nil {
+        // Redis недоступен — fail open (пропустить запрос)
+        return true, err
+    }
+    return result == 1, nil
+}
+```
+
+**Sliding window vs fixed window:**  
+Код выше использует fixed window (сбрасывается каждые N секунд). Пользователь может сделать двойной burst на границе окон. Для строгих лимитов — sliding window через Redis sorted sets.
+
+---
+
+## Ответ при превышении лимита
+
+RFC 6585 определяет `429 Too Many Requests`. Полезные заголовки:
+
+```go
+func rateLimitExceeded(w http.ResponseWriter, retryAfter int) {
+    w.Header().Set("Retry-After", strconv.Itoa(retryAfter))
+    w.Header().Set("X-RateLimit-Limit", "100")
+    w.Header().Set("X-RateLimit-Remaining", "0")
+    w.Header().Set("X-RateLimit-Reset", strconv.FormatInt(time.Now().Add(time.Duration(retryAfter)*time.Second).Unix(), 10))
+    http.Error(w, `{"error":"rate_limit_exceeded"}`, http.StatusTooManyRequests)
+}
+```
+
+---
+
+## DDoS на уровне инфраструктуры
+
+Go-код не поможет при volumetric DDoS — трафик забивает сеть до сервера. Это решается инфраструктурно:
+
+| Слой | Инструменты |
+|---|---|
+| CDN + edge | Cloudflare, Fastly, Akamai — absorb volumetric |
+| Cloud perimeter | GCP Cloud Armor, AWS Shield, Azure DDoS Protection |
+| L4 балансировщик | TCP connection limits, SYN cookies |
+| Ingress | nginx rate_limit_zone, Envoy rate limiting filter |
+
+**Что должен делать Go-сервис при перегрузке:**
+
+```go
+// Graceful degradation — быстро отвечать при перегрузке вместо зависания
+func overloadMiddleware(next http.Handler) http.Handler {
+    sem := make(chan struct{}, 1000)  // максимум 1000 параллельных запросов
+    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        select {
+        case sem <- struct{}{}:
+            defer func() { <-sem }()
+            next.ServeHTTP(w, r)
+        default:
+            // Немедленно отвечать 503 вместо накопления goroutine-ов
+            w.Header().Set("Retry-After", "5")
+            http.Error(w, "service overloaded", http.StatusServiceUnavailable)
+        }
+    })
+}
+```

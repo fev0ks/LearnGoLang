@@ -1,128 +1,158 @@
-# Docker Compose And Container Secrets
-
-Этот файл про практический вопрос: как передавать секреты в контейнеры, особенно в local dev и production-like container setups.
+# Секреты в Docker Compose и контейнерах
 
 ## Содержание
 
-- [Самая частая ошибка](#самая-частая-ошибка)
-- [Что можно делать в local dev](#что-можно-делать-в-local-dev)
-- [Когда env vars нормальны](#когда-env-vars-нормальны)
-- [Когда env vars уже не лучший вариант](#когда-env-vars-уже-не-лучший-вариант)
-- [Compose `secrets`](#compose-secrets)
-- [Practical rule](#practical-rule)
-- [Что могут спросить на интервью](#что-могут-спросить-на-интервью)
+- [Чего не делать](#чего-не-делать)
+- [env_file и подстановка из shell](#env_file-и-подстановка-из-shell)
+- [Mounted files для TLS и ключей](#mounted-files-для-tls-и-ключей)
+- [Compose secrets](#compose-secrets)
+- [Образ не должен содержать секреты](#образ-не-должен-содержать-секреты)
 
-## Самая частая ошибка
+---
 
-Вот так делать плохо:
+## Чего не делать
 
 ```yaml
-environment:
-  DB_PASSWORD: super-secret-prod-password
-  JWT_SECRET: prod-jwt-secret
+# НЕЛЬЗЯ — секрет прямо в compose файле, попадёт в git
+services:
+  api:
+    environment:
+      DATABASE_PASSWORD: super-secret-prod-password
+      JWT_SECRET: prod-jwt-secret-12345
 ```
 
-Проблемы:
-- секрет прямо лежит в compose-файле;
-- его легко случайно закоммитить;
-- он будет жить в истории git;
-- его увидит каждый, у кого есть доступ к репозиторию.
+```dockerfile
+# НЕЛЬЗЯ — секрет в образе, виден в docker history
+ENV JWT_SECRET=prod-secret
+RUN echo "DB_PASS=secret" >> /app/.env
+```
 
-## Что можно делать в local dev
+---
 
-### `env_file`
+## env_file и подстановка из shell
 
-Пример:
+**env_file** — compose читает переменные из файла, который не коммитится:
 
 ```yaml
 services:
   api:
+    build: .
     env_file:
-      - .env.local
+      - .env.local     # для local dev, в .gitignore
+    ports:
+      - "8080:8080"
 ```
 
-Плюсы:
-- удобно;
-- compose-файл остается чистым;
-- local значения можно держать вне git.
-
-Минусы:
-- это local convenience, а не полноценная production secret strategy.
-
-### `environment` + подстановка из shell
-
-Пример:
+**Подстановка из shell** — значения берутся из окружения где запускается compose:
 
 ```yaml
-environment:
-  DB_PASSWORD: ${DB_PASSWORD}
-  JWT_SECRET: ${JWT_SECRET}
+services:
+  api:
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      JWT_SECRET: ${JWT_SECRET}
+      REDIS_ADDR: ${REDIS_ADDR:-localhost:6379}   # default если не задан
 ```
 
-Плюсы:
-- compose не хранит сами значения;
-- можно подставлять из shell, `direnv`, CI variables.
+```bash
+# В shell установить перед запуском
+export DATABASE_URL=postgres://app:app@db:5432/app
+docker compose up
+```
 
-Минусы:
-- секрет все еще идет через env;
-- удобство зависит от shell setup.
+Хорошо работает с direnv или CI/CD переменными — compose файл чистый, значения снаружи.
 
-### Mounted secret files
+---
 
-Пример:
+## Mounted files для TLS и ключей
+
+Для TLS-сертификатов, private keys, JSON credentials — файлы лучше чем env:
 
 ```yaml
-volumes:
-  - ./secrets/dev-jwt.pem:/run/secrets/jwt.pem:ro
+services:
+  api:
+    volumes:
+      - ./secrets/dev-tls.crt:/run/secrets/tls.crt:ro
+      - ./secrets/dev-tls.key:/run/secrets/tls.key:ro
+      - ./secrets/google-credentials.json:/run/secrets/gcp.json:ro
+    environment:
+      TLS_CERT_FILE: /run/secrets/tls.crt
+      TLS_KEY_FILE: /run/secrets/tls.key
+      GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/gcp.json
 ```
 
-Это особенно полезно для:
-- certs;
-- private keys;
-- multiline secrets.
+```bash
+# secrets/ в .gitignore, только dev-сертификаты
+secrets/
+```
 
-## Когда env vars нормальны
+Go читает путь из env:
+```go
+certFile := os.Getenv("TLS_CERT_FILE")
+keyFile  := os.Getenv("TLS_KEY_FILE")
+cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+```
 
-Для local dev и части production setups env vars это нормальный practical choice, если:
-- секреты не зашиты в image;
-- значения не лежат в git;
-- логирование и debug tooling не сливают env;
-- секреты можно заменять при deploy.
+---
 
-## Когда env vars уже не лучший вариант
+## Compose secrets
 
-- большие multiline secrets;
-- TLS private keys;
-- JSON credentials;
-- секреты, которые хочется меньше светить в process environment;
-- сценарии с частой ротацией и runtime refresh.
+Docker Compose имеет встроенный механизм `secrets` — монтирует содержимое в `/run/secrets/<name>`:
 
-В этих случаях файлы или внешний secret manager часто лучше.
+```yaml
+services:
+  api:
+    secrets:
+      - db_password
+      - jwt_secret
 
-## Compose `secrets`
+secrets:
+  db_password:
+    file: ./secrets/db_password.txt   # local dev: читать из файла
+  jwt_secret:
+    file: ./secrets/jwt_secret.txt
+```
 
-У `docker compose` есть отдельная концепция `secrets`, но на практике:
-- в local dev многие команды чаще используют `env_file` или mount files;
-- для production orchestration обычно уходят в `Kubernetes`, Swarm или внешний secret manager.
+```go
+// Приложение читает из фиксированного пути
+dbPass, err := os.ReadFile("/run/secrets/db_password")
+```
 
-То есть знать `secrets:` полезно, но не стоит строить на этом единственную mental model.
+На практике в local dev команды чаще используют `env_file` или `${VAR}` подстановку. `secrets:` полезнее в Docker Swarm или как явная документация что именно является секретом.
 
-## Practical rule
+---
 
-Для local compose:
-- `.env.local` в `.gitignore`;
-- `env_file` или `${VAR}` substitutions;
-- file mounts для certs/keys;
-- никаких реальных production secrets в compose yaml.
+## Образ не должен содержать секреты
 
-Для production-like containers:
-- секреты должны приходить при deploy/run time;
-- image не должен содержать секреты;
-- лучше отделять config, artifact и secrets.
+Один образ должен работать во всех средах с разными секретами:
 
-## Что могут спросить на интервью
+```dockerfile
+# Правильный Dockerfile
+FROM golang:1.24-alpine AS builder
+WORKDIR /app
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN go build -o /app/server ./cmd/server
 
-- почему плохо держать секреты прямо в compose yaml;
-- чем `env_file` отличается от хардкода;
-- когда лучше использовать mounted file вместо env var;
-- почему container image должен быть одинаковым для разных сред, а секреты нет.
+FROM gcr.io/distroless/base-debian12
+COPY --from=builder /app/server /server
+EXPOSE 8080
+ENTRYPOINT ["/server"]
+# Никаких ENV с секретами, никаких COPY .env
+```
+
+```bash
+# Проверить что образ не содержит секреты
+docker history myapp:latest
+docker run --rm myapp:latest env | grep -i secret  # должно быть пусто
+```
+
+**Разные среды — разный способ инжекта, один образ:**
+```bash
+# local
+docker run -e DATABASE_URL=postgres://local... myapp:latest
+
+# production (из secret manager через CI/CD)
+docker run -e DATABASE_URL=$PROD_DB_URL myapp:latest
+```

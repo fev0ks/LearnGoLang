@@ -1,106 +1,223 @@
-# Kubernetes Secrets And External Managers
+# Kubernetes Secrets и External Managers
 
 ## Содержание
 
-- [`Kubernetes Secret` как базовый минимум](#kubernetes-secret-как-базовый-минимум)
-- [Как секрет попадает в Pod](#как-секрет-попадает-в-pod)
-- [Когда обычного `Secret` уже мало](#когда-обычного-secret-уже-мало)
-- [Частые варианты](#частые-варианты)
-- [Practical rule](#practical-rule)
-- [Что важно уметь сказать на интервью](#что-важно-уметь-сказать-на-интервью)
+- [Kubernetes Secret: базовый минимум](#kubernetes-secret-базовый-минимум)
+- [Ограничения нативного Secret](#ограничения-нативного-secret)
+- [External Secrets Operator](#external-secrets-operator)
+- [Sealed Secrets и SOPS для GitOps](#sealed-secrets-и-sops-для-gitops)
+- [Vault](#vault)
+- [Практическая стратегия](#практическая-стратегия)
 
-## `Kubernetes Secret` как базовый минимум
+---
 
-В `Kubernetes` базовый способ передать секрет в Pod:
-- объект `Secret`;
-- потом инжект через env vars или mounted files.
+## Kubernetes Secret: базовый минимум
 
-Это useful baseline, но важно понимать ограничения:
-- `Secret` в k8s не равен полноценному secret manager;
-- сам по себе это еще не стратегия ротации и аудита;
-- безопасность зависит от RBAC, etcd encryption, доступа к namespace и cluster policy.
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: app-secrets
+  namespace: production
+type: Opaque
+stringData:                          # base64 кодирует автоматически
+  DATABASE_URL: "postgres://user:pass@db:5432/app"
+  JWT_SECRET: "my-signing-key"
+```
 
-## Как секрет попадает в Pod
+**Инжект как env vars:**
 
-Обычно двумя способами.
+```yaml
+containers:
+  - name: app
+    envFrom:
+      - secretRef:
+          name: app-secrets          # все ключи → env vars
+    # или отдельные ключи:
+    env:
+      - name: DATABASE_URL
+        valueFrom:
+          secretKeyRef:
+            name: app-secrets
+            key: DATABASE_URL
+```
 
-### Через env vars
+**Инжект как файлы (предпочтительно для TLS, крупных секретов):**
 
-Плюсы:
-- просто;
-- удобно для небольших значений.
+```yaml
+containers:
+  - name: app
+    volumeMounts:
+      - name: secrets-vol
+        mountPath: /run/secrets
+        readOnly: true
+    env:
+      - name: TLS_CERT_FILE
+        value: /run/secrets/tls.crt
+volumes:
+  - name: secrets-vol
+    secret:
+      secretName: app-tls-secrets
+      items:
+        - key: tls.crt
+          path: tls.crt
+        - key: tls.key
+          path: tls.key
+```
 
-Минусы:
-- process environment;
-- не лучший вариант для certs/keys;
-- приложение обычно читает значение только на старте.
+---
 
-### Через mounted volume
+## Ограничения нативного Secret
 
-Плюсы:
-- удобно для файлов;
-- лучше для certs, keys, multiline secrets;
-- часто более практично для runtime file-based конфигурации.
+- **Plaintext в etcd** — без дополнительной настройки (`EncryptionConfiguration`) секреты в etcd не зашифрованы
+- **Нет аудита доступа** — стандартный Kubernetes audit log не отслеживает кто читал Secret
+- **Нет ротации** — изменение Secret не перезапускает Pod автоматически (нужен `reloader`)
+- **Нет GitOps** — хранить plaintext YAML с секретами в git нельзя
 
-## Когда обычного `Secret` уже мало
+---
 
-Если нужны:
-- централизованное хранение;
-- rotation workflows;
-- audit access;
-- GitOps-friendly управление без хранения plaintext secrets в git;
+## External Secrets Operator
 
-то обычно добавляют другой слой.
+[external-secrets.io](https://external-secrets.io) — CRD, который синхронизирует секреты из внешнего хранилища в Kubernetes Secret:
 
-## Частые варианты
+```yaml
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: app-secrets
+spec:
+  refreshInterval: 1h              # как часто синхронизировать
+  secretStoreRef:
+    name: gcp-secret-manager       # источник
+    kind: ClusterSecretStore
+  target:
+    name: app-secrets              # создать/обновить этот Secret
+  data:
+    - secretKey: DATABASE_URL
+      remoteRef:
+        key: prod-database-url     # имя в Google Secret Manager
+    - secretKey: JWT_SECRET
+      remoteRef:
+        key: prod-jwt-secret
+```
 
-### `External Secrets Operator`
+```yaml
+apiVersion: external-secrets.io/v1beta1
+kind: ClusterSecretStore
+metadata:
+  name: gcp-secret-manager
+spec:
+  provider:
+    gcpsm:
+      projectID: my-gcp-project
+      auth:
+        workloadIdentity:
+          clusterLocation: europe-west1
+          clusterName: my-cluster
+          serviceAccountRef:
+            name: external-secrets-sa
+            namespace: external-secrets
+```
 
-Идея:
-- секрет хранится во внешнем manager;
-- в кластер подтягивается автоматически.
+**Плюсы:** централизованное хранение, аудит в Secret Manager, ротация через обновление секрета в SM.
 
-Подходит, когда:
-- есть `AWS Secrets Manager`, `SSM`, `Google Secret Manager`, `Vault`;
-- хочется declarative sync в k8s.
+---
 
-### `Sealed Secrets`
+## Sealed Secrets и SOPS для GitOps
 
-Идея:
-- можно хранить encrypted secret manifest в git;
-- расшифровка происходит уже в кластере.
+Когда нужно хранить секреты в git:
 
-Подходит, когда:
-- нужен GitOps flow;
-- команда хочет encrypted secrets в repo вместо plaintext.
+**Sealed Secrets** ([bitnami-labs/sealed-secrets](https://github.com/bitnami-labs/sealed-secrets)):
 
-### `SOPS`
+```bash
+# Зашифровать
+kubectl create secret generic app-secrets \
+  --from-literal=JWT_SECRET=my-secret \
+  --dry-run=client -o yaml | \
+  kubeseal --controller-name=sealed-secrets > sealed-secret.yaml
+# sealed-secret.yaml коммитится в git — расшифровать может только кластер
+```
 
-Идея:
-- секреты шифруются и хранятся в git;
-- расшифровка идет через KMS/PGP/age-based workflow.
+```yaml
+# sealed-secret.yaml (безопасно коммитить)
+apiVersion: bitnami.com/v1alpha1
+kind: SealedSecret
+metadata:
+  name: app-secrets
+spec:
+  encryptedData:
+    JWT_SECRET: AgBy3i4OJSWK+PiTySYZZA9rO...
+```
 
-Подходит, когда:
-- команда уже живет в GitOps;
-- нужен более контролируемый encrypted-manifest подход.
+**SOPS** ([mozilla/sops](https://github.com/mozilla/sops)) — шифрует YAML/JSON через KMS/PGP/age:
 
-### `Vault`
+```bash
+sops --encrypt --gcp-kms projects/my-project/locations/global/keyRings/my-ring/cryptoKeys/my-key \
+  secrets.yaml > secrets.enc.yaml
+# secrets.enc.yaml → в git
+# secrets.yaml → в .gitignore
+```
 
-Полезен, когда:
-- нужна сильная централизованная secret platform;
-- важны lease, dynamic secrets, audit, short-lived credentials.
+---
 
-## Practical rule
+## Vault
 
-Маленький или несложный кластер:
-- `Kubernetes Secret` + нормальный RBAC + etcd encryption + file/env injection может быть достаточным минимумом.
+[HashiCorp Vault](https://www.vaultproject.io/) — полноценный secret management platform:
 
-Серьезная production эксплуатация:
-- часто уже лучше `External Secrets`, `Vault`, `SOPS` или `Sealed Secrets`.
+**Dynamic secrets** — Vault генерирует временные credentials специально для конкретного Pod:
 
-## Что важно уметь сказать на интервью
+```go
+import vault "github.com/hashicorp/vault/api"
 
-- `Kubernetes Secret` это useful primitive, но не вся secret strategy;
-- env injection и file mounts решают разные задачи;
-- GitOps требует отдельного подхода к encrypted secrets;
-- внешний secret manager обычно лучше для централизованной ротации и аудита.
+func loadFromVault(addr, token, path string) (map[string]string, error) {
+    cfg := vault.DefaultConfig()
+    cfg.Address = addr
+
+    client, err := vault.NewClient(cfg)
+    if err != nil {
+        return nil, err
+    }
+    client.SetToken(token)
+
+    secret, err := client.Logical().Read(path)
+    if err != nil {
+        return nil, fmt.Errorf("vault read %q: %w", path, err)
+    }
+    if secret == nil {
+        return nil, fmt.Errorf("vault: no secret at %q", path)
+    }
+
+    result := make(map[string]string)
+    for k, v := range secret.Data {
+        if s, ok := v.(string); ok {
+            result[k] = s
+        }
+    }
+    return result, nil
+}
+```
+
+В Kubernetes — Vault Agent Sidecar или Vault Secrets Operator инжектят секреты как файлы без изменений в Go-коде.
+
+---
+
+## Практическая стратегия
+
+```
+Маленький кластер, нет GitOps:
+  Kubernetes Secret + RBAC + etcd encryption at rest
+
+GitOps (ArgoCD/Flux):
+  Sealed Secrets или SOPS — секреты шифруются и хранятся в git
+
+Несколько кластеров или облако:
+  External Secrets Operator → Google Secret Manager / AWS Secrets Manager
+
+Высокие требования (финтех, HIPAA):
+  HashiCorp Vault — dynamic secrets, audit, short-lived credentials
+```
+
+**Независимо от варианта:**
+- etcd encryption at rest включить (`EncryptionConfiguration`)
+- RBAC: ограничить `get secret` только нужным ServiceAccount
+- `reloader` ([stakater/Reloader](https://github.com/stakater/Reloader)) — автоперезапуск Pod при изменении Secret

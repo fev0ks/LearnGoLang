@@ -1,220 +1,232 @@
-# TLS Termination, Re-encryption And mTLS
-
-Эта заметка нужна, чтобы не путать три разные модели:
-- `TLS termination`
-- `re-encryption`
-- `mTLS`
+# TLS termination, Re-encryption и mTLS
 
 ## Содержание
 
-- [Самая короткая интуиция](#самая-короткая-интуиция)
-- [Что такое TLS termination](#что-такое-tls-termination)
-- [Что такое re-encryption](#что-такое-re-encryption)
-- [Нужны ли сертификаты внутренним сервисам](#нужны-ли-сертификаты-внутренним-сервисам)
-- [Что такое mTLS](#что-такое-mtls)
-- [Когда plain HTTP внутри еще встречается](#когда-plain-http-внутри-еще-встречается)
-- [Откуда берутся внутренние сертификаты](#откуда-берутся-внутренние-сертификаты)
-- [Где тут service mesh](#где-тут-service-mesh)
-- [Как думать про выбор модели](#как-думать-про-выбор-модели)
-- [Practical Rule](#practical-rule)
+- [Три модели](#три-модели)
+- [TLS в Go: http.Server](#tls-в-go-httpserver)
+- [mTLS: взаимная аутентификация](#mtls-взаимная-аутентификация)
+- [mTLS клиент в Go](#mtls-клиент-в-го)
+- [Откуда брать внутренние сертификаты](#откуда-брать-внутренние-сертификаты)
+- [Когда какую модель выбрать](#когда-какую-модель-выбрать)
 
-## Самая короткая интуиция
+---
 
-### TLS termination at edge
+## Три модели
 
-```text
-client --TLS--> edge --HTTP--> backend
+**TLS termination at edge:**
+```
+client ──TLS──▶ edge/proxy ──HTTP──▶ backend
+```
+Внешний HTTPS заканчивается на прокси, внутри — незашифрованный HTTP. Упрощает certificate management — сертификат только на proxy.
+
+**Re-encryption:**
+```
+client ──TLS──▶ edge/proxy ──TLS──▶ backend
+```
+Внешний TLS завершается, но к backend открывается новый TLS соединение. Backend должен иметь серверный сертификат. Нужен при compliance-требованиях или zero-trust сети.
+
+**mTLS (mutual TLS):**
+```
+service A ──TLS + client cert──▶ service B
+```
+Обе стороны предъявляют сертификаты. Сервер не только шифрует трафик, но и аутентифицирует клиента. Это workload identity — сервис A доказывает что он действительно A.
+
+---
+
+## TLS в Go: http.Server
+
+```go
+import "crypto/tls"
+
+func newTLSServer(certFile, keyFile string) *http.Server {
+    tlsCfg := &tls.Config{
+        MinVersion: tls.VersionTLS12,
+        // TLS 1.3 предпочтительнее — только современные шифры, нет negotiation
+        // MinVersion: tls.VersionTLS13,
+
+        // Безопасные cipher suites (Go выбирает автоматически для TLS 1.3)
+        // Для TLS 1.2 явно ограничить при необходимости:
+        CipherSuites: []uint16{
+            tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+            tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+            tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+        },
+
+        // ALPN — объявить поддержку HTTP/2
+        NextProtos: []string{"h2", "http/1.1"},
+    }
+
+    return &http.Server{
+        Addr:      ":8443",
+        TLSConfig: tlsCfg,
+    }
+}
+
+// Запуск
+srv := newTLSServer("cert.pem", "key.pem")
+log.Fatal(srv.ListenAndServeTLS("cert.pem", "key.pem"))
 ```
 
-Снаружи трафик шифруется, внутри после edge может идти обычный HTTP.
+### Автоматический Let's Encrypt (golang.org/x/crypto/acme/autocert)
 
-### Re-encryption
+```go
+import "golang.org/x/crypto/acme/autocert"
 
-```text
-client --TLS--> edge --TLS--> backend
+m := &autocert.Manager{
+    Cache:      autocert.DirCache("/var/cache/autocert"),
+    Prompt:     autocert.AcceptTOS,
+    HostPolicy: autocert.HostWhitelist("example.com", "www.example.com"),
+}
+
+srv := &http.Server{
+    Addr:      ":443",
+    TLSConfig: m.TLSConfig(),
+}
+// Отдельный сервер для HTTP→HTTPS редиректа
+go http.ListenAndServe(":80", m.HTTPHandler(nil))
+log.Fatal(srv.ListenAndServeTLS("", ""))
 ```
 
-На edge внешний TLS заканчивается, но дальше начинается новый внутренний TLS hop.
+---
 
-### mTLS
+## mTLS: взаимная аутентификация
 
-```text
-service A --TLS + client cert--> service B
+```go
+// Сервер: требовать клиентский сертификат
+func newMTLSServer(certFile, keyFile, caCertFile string) (*http.Server, error) {
+    // Загрузить CA cert для верификации клиентов
+    caCert, err := os.ReadFile(caCertFile)
+    if err != nil {
+        return nil, fmt.Errorf("read CA cert: %w", err)
+    }
+    caCertPool := x509.NewCertPool()
+    if !caCertPool.AppendCertsFromPEM(caCert) {
+        return nil, errors.New("failed to parse CA cert")
+    }
+
+    tlsCfg := &tls.Config{
+        MinVersion: tls.VersionTLS12,
+        ClientAuth: tls.RequireAndVerifyClientCert,  // обязательный клиентский cert
+        ClientCAs:  caCertPool,                       // кому доверяем
+    }
+
+    srv := &http.Server{
+        Addr:      ":8443",
+        TLSConfig: tlsCfg,
+    }
+    return srv, nil
+}
+
+// Получить identity клиента из запроса
+func clientIdentityFromTLS(r *http.Request) string {
+    if r.TLS == nil || len(r.TLS.PeerCertificates) == 0 {
+        return ""
+    }
+    return r.TLS.PeerCertificates[0].Subject.CommonName
+}
+
+// Middleware: проверить что клиент — разрешённый сервис
+func requireServiceCert(allowedCNs []string) func(http.Handler) http.Handler {
+    allowed := make(map[string]struct{})
+    for _, cn := range allowedCNs {
+        allowed[cn] = struct{}{}
+    }
+
+    return func(next http.Handler) http.Handler {
+        return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+            cn := clientIdentityFromTLS(r)
+            if _, ok := allowed[cn]; !ok {
+                http.Error(w, "forbidden", http.StatusForbidden)
+                return
+            }
+            next.ServeHTTP(w, r)
+        })
+    }
+}
 ```
 
-Обе стороны предъявляют сертификаты и аутентифицируют друг друга.
+---
 
-## Что такое TLS termination
+## mTLS клиент в Go
 
-`TLS termination` значит:
-- клиент устанавливает защищенное соединение с edge/proxy/gateway;
-- edge расшифровывает трафик;
-- дальше может отправить его в backend.
+```go
+func newMTLSClient(certFile, keyFile, caCertFile string) (*http.Client, error) {
+    // Клиентский сертификат — наша identity
+    clientCert, err := tls.LoadX509KeyPair(certFile, keyFile)
+    if err != nil {
+        return nil, fmt.Errorf("load client cert: %w", err)
+    }
 
-Это полезно, когда:
-- не хочется держать внешний TLS на каждом приложении;
-- сертификаты, renewal и policy удобнее централизовать;
-- нужен единый perimeter для публичного traffic.
+    // CA cert для верификации сервера
+    caCert, err := os.ReadFile(caCertFile)
+    if err != nil {
+        return nil, fmt.Errorf("read CA: %w", err)
+    }
+    caCertPool := x509.NewCertPool()
+    caCertPool.AppendCertsFromPEM(caCert)
 
-Что это решает:
-- упрощает certificate management;
-- снимает TLS overhead и config complexity с приложений;
-- дает единый внешний security policy.
+    tlsCfg := &tls.Config{
+        Certificates: []tls.Certificate{clientCert},  // наш cert
+        RootCAs:      caCertPool,                      // доверенные CA
+        MinVersion:   tls.VersionTLS12,
+    }
 
-Чего это не гарантирует:
-- что внутри сети теперь можно не шифровать вообще;
-- что east-west traffic автоматически безопасен;
-- что внутренние hop'ы не надо защищать.
-
-## Что такое re-encryption
-
-`Re-encryption` значит:
-- внешний TLS заканчивается на edge;
-- edge открывает новый TLS к внутреннему сервису.
-
-То есть:
-
-```text
-client --TLS--> edge
-edge decrypts
-edge --new TLS--> backend
+    return &http.Client{
+        Transport: &http.Transport{TLSClientConfig: tlsCfg},
+        Timeout:   10 * time.Second,
+    }, nil
+}
 ```
 
-Когда это делают:
-- внутренняя сеть не считается доверенной;
-- есть cloud/zero-trust требования;
-- есть compliance требования шифровать трафик end-to-end по всем hop'ам;
-- platform team не хочет передавать sensitive traffic по plain HTTP внутри кластера/VPC.
+### Тестирование mTLS с самоподписными сертификатами
 
-Что это решает:
-- трафик внутри тоже шифруется;
-- меньше риск утечки/inspection на внутренней сети;
-- проще соответствовать security/compliance правилам.
+```bash
+# Сгенерировать CA
+openssl genrsa -out ca.key 4096
+openssl req -new -x509 -days 365 -key ca.key -out ca.crt -subj "/CN=test-ca"
 
-Что важно:
-- backend в этом случае тоже должен уметь принимать TLS;
-- значит ему уже нужен серверный сертификат.
+# Сгенерировать серверный cert
+openssl genrsa -out server.key 2048
+openssl req -new -key server.key -out server.csr -subj "/CN=localhost"
+openssl x509 -req -days 365 -in server.csr -CA ca.crt -CAkey ca.key -CAcreateserial -out server.crt
 
-## Нужны ли сертификаты внутренним сервисам
+# Сгенерировать клиентский cert
+openssl genrsa -out client.key 2048
+openssl req -new -key client.key -out client.csr -subj "/CN=service-a"
+openssl x509 -req -days 365 -in client.csr -CA ca.crt -CAkey ca.key -CAcreateserial -out client.crt
+```
 
-Да, если есть `re-encryption` или `mTLS`, то внутренним сервисам нужны сертификаты.
+---
 
-Почему:
-- сервис должен предъявить себя как TLS server;
-- вызывающая сторона должна проверить, что подключилась к правильному сервису;
-- без сертификата полноценного TLS hop не получится.
+## Откуда брать внутренние сертификаты
 
-То есть:
+В продакшне сертификаты не генерируются вручную — это platform concern:
 
-### При plain HTTP внутри
+| Способ | Где используется |
+|---|---|
+| `cert-manager` (Kubernetes) | автовыпуск через Let's Encrypt или internal CA |
+| Cloud PKI (GCP Certificate Authority Service, AWS ACM PCA) | управляемый internal CA |
+| HashiCorp Vault PKI | динамические short-lived certs |
+| SPIRE / SPIFFE | workload identity в zero-trust средах |
+| Service mesh (Istio/Linkerd) | автоматический mTLS между всеми сервисами |
 
-- сертификат внутреннему сервису не нужен.
+Service mesh — самый распространённый подход в Kubernetes: mTLS включается на уровне sidecar, Go-код ничего не меняет.
 
-### При re-encryption
+---
 
-- внутреннему сервису нужен серверный сертификат.
+## Когда какую модель выбрать
 
-### При mTLS
+```
+TLS termination at edge
+  → небольшой сервис, operational simplicity важнее
+  → edge/CDN уже делает TLS termination
 
-- обеим сторонам нужны сертификаты.
+Re-encryption
+  → compliance требует шифрование на всех hop-ах
+  → внутренняя сеть не считается доверенной
 
-## Что такое mTLS
-
-`mTLS` = `mutual TLS`.
-
-В обычном TLS:
-- клиент проверяет сервер;
-- сервер не обязательно проверяет клиента через сертификат.
-
-В `mTLS`:
-- клиент тоже предъявляет сертификат;
-- сервер проверяет его;
-- получается взаимная аутентификация.
-
-Это полезно для:
-- service-to-service auth;
-- zero-trust;
-- platform-level identity between workloads;
-- internal APIs, где хочется не только encryption, но и strong workload identity.
-
-Что это решает:
-- сервис знает, кто к нему пришел;
-- можно строить auth policy на workload identity;
-- уменьшается риск lateral movement внутри сети.
-
-## Когда plain HTTP внутри еще встречается
-
-Да, это до сих пор бывает.
-
-Например:
-- маленький internal system в одной доверенной сети;
-- локальная dev среда;
-- старый datacenter stack;
-- простой perimeter security model.
-
-Почему так делают:
-- проще;
-- меньше operational overhead;
-- не надо управлять внутренним PKI.
-
-Почему это может быть плохим решением:
-- “внутренняя сеть безопасна” часто ложное допущение;
-- lateral movement после компрометации становится проще;
-- сложнее соответствовать zero-trust и compliance требованиям.
-
-## Откуда берутся внутренние сертификаты
-
-Частые варианты:
-- internal CA;
-- cert-manager в Kubernetes;
-- cloud/private PKI;
-- service mesh;
-- SPIRE/SPIFFE-like identity systems.
-
-Главная идея:
-- внутренние certs не должны обычно выпускаться вручную руками разработчика;
-- это platform/security automation concern.
-
-## Где тут service mesh
-
-Service mesh часто берет на себя:
-- автоматическую выдачу сертификатов;
-- rotation;
-- `mTLS` между сервисами;
-- policy enforcement.
-
-То есть mesh не “изобретает TLS заново”, а автоматизирует внутренний TLS/mTLS lifecycle.
-
-## Как думать про выбор модели
-
-### TLS only at edge
-
-Подходит, если:
-- система небольшая;
-- внутренний risk acceptably low;
-- operational simplicity важнее.
-
-### Re-encryption
-
-Подходит, если:
-- нужен encrypted traffic внутри;
-- но mutual identity еще не обязательна.
-
-### mTLS
-
-Подходит, если:
-- нужен и encryption, и service identity;
-- zero-trust model;
-- много сервисов и высокий security bar.
-
-## Practical Rule
-
-Запомнить полезно так:
-
-- `TLS termination` отвечает на вопрос: где заканчивается внешний HTTPS?
-- `re-encryption` отвечает на вопрос: шифруем ли мы внутренний hop заново?
-- `mTLS` отвечает на вопрос: аутентифицируют ли сервисы друг друга через сертификаты?
-
-И самое важное:
-- если внутри есть новый TLS hop, внутренним сервисам тоже нужны сертификаты;
-- если есть `mTLS`, сертификаты нужны обеим сторонам.
+mTLS
+  → zero-trust, нужна workload identity
+  → много сервисов, критичная инфраструктура
+  → service mesh берёт это на себя прозрачно
+```

@@ -1,141 +1,177 @@
-# Secrets Delivery Options
+# Способы доставки секретов
 
-Главный practical вопрос не "где лежит секрет", а:
-- кто может его прочитать;
-- как он попадает в runtime;
-- где он может случайно утечь;
-- как его ротировать.
+Секрет — любое значение которое не должно утечь: DB password, API key, JWT signing key, TLS private key. Главный вопрос не "где лежит", а как попадает в runtime и где может случайно утечь.
 
 ## Содержание
 
-- [Что считается секретом](#что-считается-секретом)
-- [Чего делать не стоит](#чего-делать-не-стоит)
-- [Основные способы доставки](#основные-способы-доставки)
-- [Быстрый выбор](#быстрый-выбор)
-- [Важный practical rule](#важный-practical-rule)
-- [Что могут спросить на интервью](#что-могут-спросить-на-интервью)
+- [Способы доставки](#способы-доставки)
+- [Загрузка конфига в Go](#загрузка-конфига-в-go)
+- [Blast radius при утечке](#blast-radius-при-утечке)
+- [Чего никогда не делать](#чего-никогда-не-делать)
 
-## Что считается секретом
+---
 
-Обычно это:
-- DB passwords;
-- API keys;
-- JWT signing keys;
-- broker credentials;
-- cloud access keys;
-- TLS private keys;
-- webhook secrets.
+## Способы доставки
 
-## Чего делать не стоит
+### Environment variables
 
-Плохие варианты:
-- хардкодить секреты в исходники;
-- коммитить `.env` с реальными значениями;
-- зашивать секреты в Docker image;
-- писать секреты в логи;
-- отдавать один и тот же shared secret всем средам.
+Самый распространённый способ для Cloud/12-factor приложений.
 
-## Основные способы доставки
+```go
+db, err := pgxpool.New(ctx, os.Getenv("DATABASE_URL"))
+```
 
-### 1. Environment variables
+**Плюсы:** простота, поддерживается везде, хорошо с 12-factor config.  
+**Минусы:** значения видны в `/proc/<pid>/environ`, могут попасть в crash dumps, debug-вывод, `docker inspect`. Не подходят для multiline (TLS private key).
 
-Примеры:
-- `DB_PASSWORD`
-- `JWT_SECRET`
-- `REDIS_PASSWORD`
+### Файлы (mounted secrets)
 
-Плюсы:
-- очень просто;
-- хорошо поддерживается всеми платформами;
-- удобно для 12-factor style конфигурации.
+Предпочтительны для TLS-ключей, JSON credentials, multiline-секретов.
 
-Минусы:
-- секреты часто светятся в process environment;
-- могут попасть в debug output, crash dumps, tooling и accidental logs;
-- плохо подходят для больших multiline secrets, cert bundles и key files;
-- ротация сложнее, если приложение читает значение только на старте.
+```go
+certPEM, err := os.ReadFile(os.Getenv("TLS_CERT_FILE"))
+keyPEM, err := os.ReadFile(os.Getenv("TLS_KEY_FILE"))
+```
 
-Практически:
-- для небольших runtime secrets это нормальный вариант;
-- но не надо считать `env` автоматически "безопасным".
+Kubernetes монтирует Secrets как файлы в `/run/secrets/` — приложение читает файл, путь берёт из env.
 
-### 2. Secret files / mounted files
+**Плюсы:** подходят для крупных секретов, не светятся в env.  
+**Минусы:** нужно управлять путями и правами на файлы.
 
-Примеры:
-- TLS key/cert как файлы;
-- cloud credentials json;
-- mounted secret volume;
-- docker/k8s secrets as files.
+### External secret manager
 
-Плюсы:
-- лучше для multiline content;
-- удобнее для certs и private keys;
-- приложение может читать секреты из конкретных файлов, а не из process env.
+Приложение само вызывает хранилище при старте или на лету:
 
-Минусы:
-- чуть сложнее wiring;
-- нужно аккуратно управлять путями, правами и lifecycle файлов.
+```go
+import secretmanager "cloud.google.com/go/secretmanager/apiv1"
 
-### 3. External secret manager
+func loadSecret(ctx context.Context, name string) (string, error) {
+    client, err := secretmanager.NewClient(ctx)
+    if err != nil {
+        return "", err
+    }
+    defer client.Close()
 
-Примеры:
-- `HashiCorp Vault`
-- `AWS Secrets Manager`
-- `AWS SSM Parameter Store`
-- `Google Secret Manager`
-- `1Password Secrets Automation`
+    req := &secretmanagerpb.AccessSecretVersionRequest{
+        Name: name,  // "projects/my-project/secrets/db-password/versions/latest"
+    }
+    result, err := client.AccessSecretVersion(ctx, req)
+    if err != nil {
+        return "", fmt.Errorf("access secret %q: %w", name, err)
+    }
+    return string(result.Payload.Data), nil
+}
+```
 
-Плюсы:
-- централизованное хранение;
-- аудит доступа;
-- лучше с ротацией;
-- нормальный контроль прав.
+**Плюсы:** централизованный аудит доступа, ротация, версионирование, fine-grained permissions.  
+**Минусы:** зависимость от внешней системы при старте, сложнее local dev.
 
-Минусы:
-- сложнее интеграция;
-- нужен runtime access path;
-- появляется зависимость от внешней системы.
+---
 
-### 4. Kubernetes Secret и производные
+## Загрузка конфига в Go
 
-Примеры:
-- `Secret`
-- `External Secrets Operator`
-- `Sealed Secrets`
-- `SOPS` + GitOps flow
+**Паттерн: Config struct + envconfig:**
 
-Это не отдельный тип секрета, а способ встроить secret delivery в k8s ecosystem.
+```go
+import "github.com/kelseyhightower/envconfig"
 
-## Быстрый выбор
+type Config struct {
+    DatabaseURL  string `envconfig:"DATABASE_URL" required:"true"`
+    JWTSecret    string `envconfig:"JWT_SECRET" required:"true"`
+    RedisAddr    string `envconfig:"REDIS_ADDR" default:"localhost:6379"`
+    TLSCertFile  string `envconfig:"TLS_CERT_FILE"`
+    TLSKeyFile   string `envconfig:"TLS_KEY_FILE"`
+}
 
-Local dev:
-- `.env.local`, `direnv`, локальный secret store, dev-only файлы.
+func LoadConfig() (Config, error) {
+    var cfg Config
+    if err := envconfig.Process("", &cfg); err != nil {
+        return Config{}, fmt.Errorf("load config: %w", err)
+    }
+    return cfg, nil
+}
+```
 
-Docker Compose:
-- `env_file` для local dev;
-- mounted secret files;
-- не коммитить реальные значения.
+**Паттерн: явная проверка при старте:**
 
-Kubernetes:
-- `Secret` как базовый минимум;
-- при серьезной эксплуатации часто `External Secrets`, `Vault`, `SOPS`, `Sealed Secrets`.
+```go
+func main() {
+    cfg, err := LoadConfig()
+    if err != nil {
+        log.Fatalf("config: %v", err)  // упасть сразу, не в runtime
+    }
 
-Production outside k8s:
-- чаще внешний secret manager + env/file injection при deploy.
+    // Не логировать сами секреты — только факт что загрузились
+    slog.Info("config loaded",
+        "db_url_set", cfg.DatabaseURL != "",
+        "jwt_secret_set", cfg.JWTSecret != "",
+    )
+}
+```
 
-## Важный practical rule
+**Паттерн: секрет из файла с fallback на env:**
 
-Build artifact должен быть отделен от секрета.
+```go
+func secretFromFileOrEnv(fileEnv, valueEnv string) (string, error) {
+    if path := os.Getenv(fileEnv); path != "" {
+        data, err := os.ReadFile(path)
+        if err != nil {
+            return "", fmt.Errorf("read secret file %q: %w", path, err)
+        }
+        return strings.TrimSpace(string(data)), nil
+    }
+    val := os.Getenv(valueEnv)
+    if val == "" {
+        return "", fmt.Errorf("neither %s nor %s is set", fileEnv, valueEnv)
+    }
+    return val, nil
+}
 
-То есть:
-- image собирается без production secrets;
-- секреты подставляются на deploy/run time;
-- одна и та же сборка едет в разные среды с разными secret values.
+// Использование:
+// JWT_SECRET_FILE=/run/secrets/jwt-key  → читает файл
+// JWT_SECRET=...                        → читает env
+jwtSecret, err := secretFromFileOrEnv("JWT_SECRET_FILE", "JWT_SECRET")
+```
 
-## Что могут спросить на интервью
+---
 
-- почему не стоит хранить секреты в репозитории;
-- когда `env vars` нормальны, а когда уже нет;
-- почему build и secret injection должны быть разделены;
-- как ты бы организовал ротацию секретов;
-- как уменьшить blast radius при утечке секрета.
+## Blast radius при утечке
+
+Минимизировать ущерб при компрометации:
+
+**Short-lived credentials** — Database password на 1 час (Vault dynamic secrets) вместо статического пароля на годы.
+
+**Разные секреты на среду** — production и staging никогда не шарят один ключ. Если staging скомпрометирован — production не затронут.
+
+**Scope минимален** — DB user для сервиса A имеет доступ только к схеме сервиса A, не ко всей базе.
+
+**Ротация** — секреты меняются по расписанию, не только при инциденте.
+
+---
+
+## Чего никогда не делать
+
+```go
+// Хардкодить секрет в коде
+const dbPassword = "super-secret-123"  // уходит в git, в бинарь
+
+// Логировать секрет
+slog.Info("connecting", "password", cfg.DatabaseURL)  // URL содержит пароль
+
+// Хранить в git
+// .env с реальными значениями закоммиченный в repo
+
+// Один секрет на все среды
+// DATABASE_URL одинаковый для prod, staging, local
+
+// Секреты в образе
+// RUN echo "JWT_SECRET=..." > /app/.env  ← видно в docker history
+```
+
+```bash
+# Проверить git history на секреты
+git log --all --full-history -- "*.env"
+# Инструменты: trufflesecurity/trufflehog, Yelp/detect-secrets, gitleaks
+```
+
+**Build artifact должен быть отделён от секретов:** один и тот же Docker image едет в staging и production с разными секретами, подставленными при запуске.
