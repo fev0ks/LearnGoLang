@@ -10,9 +10,11 @@
 Материалы:
 - [CORS Basics And Where To Configure It](./01-cors-basics-and-where-to-configure-it.md)
 - [CORS Middleware Example](./02-cors-middleware-example.md)
+- [CSRF](./03-csrf.md)
 
 Что важно уметь объяснить:
 - что `CORS` — это часть browser security model, а не perimeter defense;
 - почему `CORS` не заменяет auth, CSRF protection или rate limiting;
 - что такое preflight `OPTIONS`;
-- когда `CORS` стоит настраивать на gateway/proxy, а когда в приложении.
+- когда `CORS` стоит настраивать на gateway/proxy, а когда в приложении;
+- чем CSRF отличается от CORS и почему Bearer token в заголовке защищает от CSRF автоматически.
