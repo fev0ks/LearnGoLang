@@ -3,6 +3,7 @@
 Сюда собирай практические темы по безопасности backend-сервисов.
 
 Базовые заметки:
+- [Authentication](./authentication/README.md) — password hashing, sessions, OAuth 2.0 / OIDC, audit logging
 - [Secrets Management](./secrets-management/README.md)
 - [Service To Service TLS](./service-to-service-tls/README.md)
 - [Perimeter And Traffic Protection](./perimeter-and-traffic-protection/README.md)
@@ -26,10 +27,11 @@
 - какие меры обязательны по умолчанию в новых сервисах.
 
 Структура раздела:
+- `authentication` — password hashing, opaque sessions, OAuth 2.0 + OIDC, аудит-логирование
 - `secrets-management` - где хранить секреты, как передавать их в сервис и как не утекать в git, CI, images и логи
 - `service-to-service-tls` - как устроены `TLS termination`, `re-encryption`, `mTLS` и зачем внутренним сервисам могут понадобиться сертификаты
 - `perimeter-and-traffic-protection` - как думать про DDoS, perimeter filters и почему backend не должен быть первой линией защиты
-- `cors-and-browser-api-security` - как работает `CORS`, что такое preflight и где эту политику обычно держат
+- `cors-and-browser-api-security` - как работает `CORS`, что такое preflight, CSRF и где эту политику обычно держат
 
 ## Подборка
 
