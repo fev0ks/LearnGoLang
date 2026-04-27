@@ -13,6 +13,7 @@
 - [Docker](./docker/README.md)
 - [Docker Compose](./docker-compose/README.md)
 - [Dockerfiles For Go](./dockerfiles-for-go/README.md)
+- [Terraform](./terraform/README.md)
 
 Темы:
 - Docker multi-stage builds;
@@ -42,6 +43,7 @@
 - `docker` - image/container model, сети, volumes, runtime-практика для Go-сервисов
 - `docker-compose` - локальные multi-service стеки, profiles, healthchecks, примеры compose-файлов
 - `dockerfiles-for-go` - production/dev Dockerfile patterns для Go-проектов
+- `terraform` - IaC с Terraform и Terragrunt: HCL синтаксис, state, модули, workflow, GCP паттерны
 
 ## Подборка
 
