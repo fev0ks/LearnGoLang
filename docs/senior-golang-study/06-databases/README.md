@@ -10,6 +10,7 @@
 - [Go Database Libraries](./go-database-libraries/README.md)
 - [Database Systems Catalog](./database-systems-catalog/README.md)
 - [Database Fundamentals](./database-fundamentals/README.md)
+- [Caching](./caching/) — Redis как кэш, cache-aside, TTL, инвалидация, cache stampede
 
 Темы:
 - ACID, CAP, BASE, OLTP/OLAP и практические case studies;

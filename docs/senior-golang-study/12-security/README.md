@@ -3,7 +3,8 @@
 Сюда собирай практические темы по безопасности backend-сервисов.
 
 Базовые заметки:
-- [Authentication](./authentication/README.md) — password hashing, sessions, OAuth 2.0 / OIDC, audit logging
+- [Authentication](./authentication/README.md) — password hashing, sessions, OAuth 2.0 / OIDC, JWT, RBAC, audit logging
+- [OWASP Top 10](./owasp-top10/) — SQL injection, XSS, SSRF
 - [Secrets Management](./secrets-management/README.md)
 - [Service To Service TLS](./service-to-service-tls/README.md)
 - [Perimeter And Traffic Protection](./perimeter-and-traffic-protection/README.md)
@@ -27,7 +28,8 @@
 - какие меры обязательны по умолчанию в новых сервисах.
 
 Структура раздела:
-- `authentication` — password hashing, opaque sessions, OAuth 2.0 + OIDC, аудит-логирование
+- `authentication` — password hashing, opaque sessions, OAuth 2.0 + OIDC, JWT, авторизация и RBAC, аудит-логирование
+- `owasp-top10` — SQL injection, XSS, SSRF — атаки, защита, известные инциденты
 - `secrets-management` - где хранить секреты, как передавать их в сервис и как не утекать в git, CI, images и логи
 - `service-to-service-tls` - как устроены `TLS termination`, `re-encryption`, `mTLS` и зачем внутренним сервисам могут понадобиться сертификаты
 - `perimeter-and-traffic-protection` - как думать про DDoS, perimeter filters и почему backend не должен быть первой линией защиты
