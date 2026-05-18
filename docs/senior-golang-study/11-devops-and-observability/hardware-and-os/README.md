@@ -20,10 +20,10 @@
 - [01. CPU architecture](./01-cpu-architecture.md) — pipeline, superscalar, OoO, branch prediction (с примером sorted/unsorted), speculative execution и Spectre, SIMD, SMT/Hyperthreading
 - [04. Atomics и memory ordering](./04-atomics-and-memory-ordering.md) — store buffers, StoreLoad reordering (с примером (0,0)), x86 TSO vs ARM weak, fences, LOCK prefix, CAS, acquire/release, sync/atomic в Go, как Mutex использует atomics
 
-### Группа 3 — OS threading (planned)
+### Группа 3 — OS threading
 
-- 06. Processes и threads — PID/TID, fork/clone, kernel-level threads, kernel vs user mode
-- 07. Context switching и scheduling — CFS, preemption, Go scheduler M:N поверх OS
+- [06. Процессы и потоки](./06-processes-and-threads.md) — PID/TID, fork/exec/clone, kernel vs user mode, syscalls, task_struct, /proc, goroutines vs threads vs processes, когда Go создаёт OS thread, LockOSThread
+- [07. Context switching и scheduling](./07-context-switching-and-scheduling.md) — что сохраняется при switch, стоимость через cold cache, CFS, nice values, I/O vs CPU bound, Go M:N scheduler, async preemption в 1.14+, когда goroutine паркуется, GOMAXPROCS в контейнерах
 
 ## Что должен знать senior
 
