@@ -45,6 +45,7 @@
 - `15-notes-and-links` - быстрые заметки, ссылки, статьи, backlog тем
 - `16-go-version-differences` - ключевые изменения между версиями Go и влияние на кодовую базу
 - `17-algorithms-and-data-structures` - O-нотация, паттерны алгоритмов, структуры данных с Go-примерами
+- `18-llm-and-ai-integration` - интеграция LLM в backend-сервисы, RAG, vector БД, embeddings
 
 ## Базовая подборка
 
