@@ -15,10 +15,10 @@
 - [05. Виртуальная память и paging](./05-virtual-memory-and-paging.md) — VA → PA, page tables, MMU, TLB, page faults, COW, mmap, swap, huge pages, VIRT/RSS/USS
 - [03. Cache coherence и MESI](./03-cache-coherence-and-mesi.md) — cache lines, MESI protocol, cache coherence traffic, false sharing с demo в Go, padding, NUMA
 
-### Группа 2 — CPU и concurrency (planned)
+### Группа 2 — CPU и concurrency
 
-- 01. CPU architecture — регистры, instruction pipeline, branch prediction, speculative execution
-- 04. Atomics и memory ordering — store buffers, StoreLoad reordering (с примером (0,0)), LOCK prefix, fences
+- [01. CPU architecture](./01-cpu-architecture.md) — pipeline, superscalar, OoO, branch prediction (с примером sorted/unsorted), speculative execution и Spectre, SIMD, SMT/Hyperthreading
+- [04. Atomics и memory ordering](./04-atomics-and-memory-ordering.md) — store buffers, StoreLoad reordering (с примером (0,0)), x86 TSO vs ARM weak, fences, LOCK prefix, CAS, acquire/release, sync/atomic в Go, как Mutex использует atomics
 
 ### Группа 3 — OS threading (planned)
 
