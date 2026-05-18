@@ -4,6 +4,7 @@
 
 Базовые заметки:
 - [CI/CD](./ci-cd/README.md)
+- [Hardware And OS](./hardware-and-os/README.md)
 - [Linux Internals](./linux/README.md)
 - [Logging And Log Shipping](./logging-and-log-shipping/README.md)
 - [Prometheus And Metrics](./prometheus-and-metrics/README.md)
@@ -34,6 +35,7 @@
 - как деплоить без лишнего риска.
 
 Структура раздела:
+- `hardware-and-os` - CPU, иерархия памяти, виртуальная память, cache coherence/MESI, atomics на уровне CPU, процессы и потоки в OS
 - `linux` - namespaces и cgroups (основа контейнеров), сигналы, PID 1, zombie/orphan процессы
 - `logging-and-log-shipping` - пайплайны логов, log platforms, Kibana/Elasticsearch и log investigation
 - `prometheus-and-metrics` - как работает flow метрик, типы метрик, PromQL и практический metric design
