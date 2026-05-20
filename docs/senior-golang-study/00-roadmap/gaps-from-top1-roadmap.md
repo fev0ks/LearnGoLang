@@ -19,9 +19,11 @@
 
 **Закрыто высокого приоритета:** Redis cache, OWASP Top 10 (SQL injection, XSS, SSRF), SLO/SLI/error budgets, постмортемы.
 
+**Закрыто среднего приоритета:** SSE/realtime, OpenAPI/Swagger, AWS core services, cloud cost and architecture, chaos engineering.
+
 **Сверх плана:** раздел `hardware-and-os/` целиком (7 файлов про CPU, память, atomics, scheduling), JWT/RBAC, начат раздел `18-llm-and-ai-integration/` с RAG fundamentals.
 
-**Осталось:** 7 файлов среднего приоритета + 8 файлов низкого (LLM API, RAG детали, serverless, chaos engineering).
+**Осталось:** 2 файла среднего приоритета (Git) + 8 файлов низкого (LLM API, RAG детали, serverless).
 
 ---
 
@@ -51,7 +53,7 @@
 | 6 | Аутентификация (OAuth 2.0, bcrypt, JWT refresh, CSRF, session fixation) | ✅ | `12-security/authentication/` (01–07) |
 | 7 | Async, очереди, фоновые задачи (горутины, Redis Streams, Kafka, воркеры) | ✅ | `09-concurrency-and-performance/`, `07-message-brokers-and-streaming/`, `04-architecture-and-patterns/patterns/04-background-workers.md` |
 | 8 | Тесты (unit, интеграционные, API, моки внешних сервисов) | ✅ | `10-testing-and-quality/` (01–11) |
-| 9 | **Реалтайм-протоколы** (WebSockets, SSE, long polling — когда что выбирать) | 🟡 | WebSocket есть: `08-networking-and-api/protocols/05-websocket.md`. **Создать:** SSE и long polling, сравнение протоколов реалтайма |
+| 9 | Реалтайм-протоколы (WebSockets, SSE, long polling — когда что выбирать) | ✅ | WebSocket: `08-networking-and-api/protocols/05-websocket.md`. SSE и long polling: `08-networking-and-api/protocols/12-sse-and-realtime.md` |
 | 10 | Docker — контейнеризуй всё (Dockerfile, Compose, multi-stage, слои) | ✅ | `11-devops-and-observability/docker*/`, `dockerfiles-for-go/`, `docker-compose/` |
 
 ---
@@ -62,12 +64,12 @@
 |---|---|---|---|
 | 1 | CI/CD пайплайны (GitHub Actions/GitLab CI, тесты на PR, secrets, zero-downtime) | ✅ | `11-devops-and-observability/ci-cd/` (GitHub Actions, GitLab CI) |
 | 2 | Логи и observability (JSON, correlation IDs, уровни, Grafana+Loki/Datadog, алерты) | ✅ | `11-devops-and-observability/logging-and-log-shipping/`, `tracing-and-opentelemetry/`, `prometheus-and-metrics/` |
-| 3 | **Облако — одна платформа** (AWS: EC2, RDS, S3, SQS, IAM, VPC, security groups, managed vs self-hosted) | ❌ | **Создать:** `11-devops-and-observability/cloud/` — AWS (или GCP) как платформа. Terraform есть (GCP), но нет AWS-обзора |
+| 3 | Облако — одна платформа (AWS: EC2, RDS, S3, SQS, IAM, VPC, security groups, managed vs self-hosted) | ✅ | `11-devops-and-observability/cloud/01-aws-core-services.md` + `02-cloud-cost-and-architecture.md` |
 | 4 | Профилировка и нагрузка (flame graphs, slow query log, p95/p99) | ✅ | `09-concurrency-and-performance/profiling/`, `11-devops-and-observability/incident-investigation-and-profiling/` |
 | 4a | **Нагрузочное тестирование** (k6/Locust, bottleneck → фикс → перетест) | ❌ | **Создать:** `10-testing-and-quality/12-load-testing.md` — k6 примеры, интерпретация результатов, p95/p99 |
 | 5 | Безопасность вглубь — OWASP Top 10 (SQL injection, XSS, SSRF, IDOR + AI-аудит) | ✅ | `12-security/owasp-top10/` (SQL injection, XSS, SSRF). IDOR — в `authentication/07-authorization-and-rbac.md` |
 | 6 | **Edge и Serverless** (Cloudflare Workers, AWS Lambda, cold start, лимиты, биллинг) | ❌ | **Создать:** `11-devops-and-observability/serverless/` или `05-system-design/edge-and-serverless/` |
-| 7 | **API-дизайн на масштаб** (idempotency, webhook design, версионирование, OpenAPI spec, backward compatibility) | 🟡 | Idempotency: `05-system-design/reliability-patterns/06-idempotency.md`. Webhooks: `08-networking-and-api/protocols/06-webhooks.md`. Версионирование: `04-architecture-and-patterns/patterns/03-api-versioning.md`. **Создать:** `08-networking-and-api/protocols/12-openapi-and-api-spec.md` — OpenAPI/Swagger spec, codegen |
+| 7 | API-дизайн на масштаб (idempotency, webhook design, версионирование, OpenAPI spec, backward compatibility) | ✅ | Idempotency: `05-system-design/reliability-patterns/06-idempotency.md`. Webhooks: `08-networking-and-api/protocols/06-webhooks.md`. Версионирование: `04-architecture-and-patterns/patterns/03-api-versioning.md`. OpenAPI: `08-networking-and-api/protocols/13-openapi-and-swagger.md` |
 
 ---
 
@@ -82,7 +84,7 @@
 | 5 | Очереди и event streaming (Kafka: партиции, consumer groups, exactly-once, event sourcing, DLQ) | ✅ | `07-message-brokers-and-streaming/01-kafka.md` |
 | 6 | Микросервисы — когда и как (gRPC vs REST, service mesh, distributed tracing, "монолит сначала") | ✅ | `04-architecture-and-patterns/service-topologies/`, `03-go-libraries-and-ecosystem/grpc/`, `11-devops-and-observability/tracing-and-opentelemetry/` |
 | 7 | Kubernetes — основы (pods, services, deployments, ingress, ConfigMaps, secrets, HPA) | ✅ | `11-devops-and-observability/kubernetes/` (01–07) |
-| 8 | **Reliability engineering** (SLO, SLI, error budgets, circuit breakers, chaos engineering, graceful degradation, постмортемы) | 🟡 | Есть: `08-slo-sli-error-budgets.md`, `09-postmortem.md`, circuit breaker/retries/backoff/idempotency. **Создать:** `10-chaos-engineering.md` |
+| 8 | Reliability engineering (SLO, SLI, error budgets, circuit breakers, chaos engineering, graceful degradation, постмортемы) | ✅ | `05-system-design/reliability-patterns/` — все включая `08-slo-sli-error-budgets.md`, `09-postmortem.md`, `10-chaos-engineering.md`, circuit breaker, retries, backoff, idempotency |
 
 ---
 
@@ -121,17 +123,13 @@
 
 ## Итоговый список файлов к созданию
 
-### Средний приоритет (7 файлов)
+### Средний приоритет (3 файла осталось)
 
 | Файл | Раздел | Что покрывает |
 |---|---|---|
 | `11-devops-and-observability/git/01-branching-and-workflow.md` | DevOps | Trunk-based, gitflow, branching стратегии, rebase vs merge, git bisect |
 | `11-devops-and-observability/git/02-advanced-git.md` | DevOps | Interactive rebase, cherry-pick, reflog, коммит-сообщения |
-| `08-networking-and-api/protocols/12-sse-and-realtime.md` | Networking | SSE vs WebSocket vs long polling, когда что выбирать, SSE в Go |
 | `10-testing-and-quality/12-load-testing.md` | Testing | k6 basics, сценарии, интерпретация p95/p99, bottleneck → фикс → перетест |
-| `08-networking-and-api/protocols/13-openapi-and-swagger.md` | Networking | OpenAPI 3.0 spec, swagger codegen в Go, contract testing |
-| `11-devops-and-observability/cloud/01-aws-core-services.md` | DevOps | EC2, RDS, S3, SQS, IAM, VPC, security groups, managed vs self-hosted |
-| `11-devops-and-observability/cloud/02-cloud-cost-and-architecture.md` | DevOps | Стоимость инфры, выбор типа инстанса, reserved vs spot, cost optimization |
 
 ### Низкий приоритет — LLM и AI (7 файлов)
 
@@ -154,12 +152,11 @@
 | `18-llm-and-ai-integration/rag/05-hybrid-search.md` | Vector + BM25, reranking |
 | `18-llm-and-ai-integration/rag/06-rag-pitfalls.md` | Стейл-данные, prompt injection через документы, галлюцинации, evaluation |
 
-### Низкий приоритет — прочее (2 файла)
+### Низкий приоритет — прочее (1 файл)
 
 | Файл | Раздел | Что покрывает |
 |---|---|---|
 | `11-devops-and-observability/serverless/01-edge-and-serverless.md` | DevOps | Cloudflare Workers, AWS Lambda, cold start, лимиты, когда VPS избыточен |
-| `05-system-design/reliability-patterns/10-chaos-engineering.md` | System Design | Chaos Monkey, fault injection, gamedays, инструменты |
 
 ---
 
@@ -176,4 +173,5 @@
 - **Изначальная версия** — гэп-анализ по PDF, 15 файлов в плане
 - **После высокого приоритета** — закрыто 6 файлов: Redis cache, OWASP (SQL/XSS/SSRF), SLO/SLI, postmortems
 - **После hardware-and-os** — добавлен сверх-плановый раздел из 7 файлов про CPU/память/OS
-- **После RAG fundamentals** — начат раздел `18-llm-and-ai-integration/`, осталось 7 файлов по LLM/RAG + 2 прочее + 7 среднего приоритета
+- **После RAG fundamentals** — начат раздел `18-llm-and-ai-integration/`
+- **После среднего приоритета** — закрыто 5 файлов: SSE/realtime, OpenAPI, chaos engineering, AWS core, cloud cost. Осталось 3 средних (Git × 2, k6) + 7 LLM/RAG + 1 serverless

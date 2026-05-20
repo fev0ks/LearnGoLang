@@ -13,6 +13,7 @@
 - [07 Bulkhead](./07-bulkhead.md) — изоляция пулов по зависимостям, semaphore per downstream
 - [08 SLO/SLI и Error Budgets](./08-slo-sli-error-budgets.md) — SLI/SLO/SLA, error budget, burn rate alerting, multi-window alerts
 - [09 Постмортемы](./09-postmortem.md) — blameless culture, 5 Whys, структура и шаблон, action items
+- [10 Chaos Engineering](./10-chaos-engineering.md) — намеренные сбои в prod, blast radius, game days, инструменты (Chaos Monkey, Toxiproxy), Go-примеры
 
 ## Вопросы
 
@@ -26,3 +27,5 @@
 - зачем нужен burn rate alerting вместо threshold-алертов
 - почему blameless подход в постмортемах эффективнее наказаний
 - как 5 Whys помогает дойти до root cause
+- зачем намеренно ломать production и как контролировать blast radius
+- что такое game day и чем он отличается от обычного chaos test
