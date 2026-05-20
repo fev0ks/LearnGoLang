@@ -1,7 +1,7 @@
 # Гэп-анализ: Топ-1% Backend Roadmap 2026
 
 Сравнение тем из PDF-роадмэпа с текущими материалами.
-Документ создан для планирования новых файлов.
+Документ обновляется по мере закрытия гэпов.
 
 ---
 
@@ -10,6 +10,18 @@
 - ✅ Есть — тема покрыта
 - 🟡 Частично — тема есть, но неполно
 - ❌ Нет — тема отсутствует, нужно создать
+
+---
+
+## Сводка прогресса
+
+**Закрыто полностью (✅):** все темы из фаз 01-02 (кроме Git), почти вся фаза 03, большая часть фазы 04.
+
+**Закрыто высокого приоритета:** Redis cache, OWASP Top 10 (SQL injection, XSS, SSRF), SLO/SLI/error budgets, постмортемы.
+
+**Сверх плана:** раздел `hardware-and-os/` целиком (7 файлов про CPU, память, atomics, scheduling), JWT/RBAC, начат раздел `18-llm-and-ai-integration/` с RAG fundamentals.
+
+**Осталось:** 7 файлов среднего приоритета + 8 файлов низкого (LLM API, RAG детали, serverless, chaos engineering).
 
 ---
 
@@ -22,7 +34,7 @@
 | 3 | Сырой HTTP-сервер | ✅ | `08-networking-and-api/protocols/02-http-server.md`, `03-go-libraries-and-ecosystem/http-servers/` |
 | 4 | Linux и командная строка (SSH, права, cron, grep, curl, jq) | ✅ | `11-devops-and-observability/linux/` (01–06) |
 | 5 | SQL и базы данных (PostgreSQL, EXPLAIN, индексы) | ✅ | `06-databases/` — очень глубоко |
-| 6 | **Git глубже базы** (branching, rebase, merge conflicts, git bisect) | ❌ | **Создать:** `02-go-stdlib-and-tools/git/` — отдельный раздел или файлы в `11-devops-and-observability/` |
+| 6 | **Git глубже базы** (branching, rebase, merge conflicts, git bisect) | ❌ | **Создать:** `11-devops-and-observability/git/` — branching, rebase, bisect, advanced |
 | 7 | AI-pair: правила работы | — | Не технический топик, вне scope |
 
 ---
@@ -34,8 +46,8 @@
 | 1 | Дизайн REST-API (именование, версионирование, пагинация, фильтры, ошибки) | ✅ | `04-architecture-and-patterns/patterns/07-rest-api-design.md`, `03-api-versioning.md` |
 | 2 | Один фреймворк до автоматизма (chi/gin/echo) | ✅ | `03-go-libraries-and-ecosystem/http-servers/` |
 | 3 | Дизайн БД (нормализация, индексы, транзакции, ACID, миграции, N+1) | ✅ | `06-databases/` |
-| 4 | **Кэширование — Redis** (cache-aside, TTL, инвалидация, сессии, когда НЕ кэшировать) | ❌ | **Создать:** `06-databases/caching/` или отдельный раздел. Упоминания есть в разных местах, но нет единого документа |
-| 5 | Type safety (TypeScript/Pydantic/mypy) | — | Go-специфично не применимо; частично покрыто через generics и интерфейсы |
+| 4 | Кэширование — Redis (cache-aside, TTL, инвалидация, сессии, когда НЕ кэшировать) | ✅ | `06-databases/caching/01-redis-as-cache.md` |
+| 5 | Type safety (TypeScript/Pydantic/mypy) | — | Go-специфично не применимо; покрыто через систему типов |
 | 6 | Аутентификация (OAuth 2.0, bcrypt, JWT refresh, CSRF, session fixation) | ✅ | `12-security/authentication/` (01–07) |
 | 7 | Async, очереди, фоновые задачи (горутины, Redis Streams, Kafka, воркеры) | ✅ | `09-concurrency-and-performance/`, `07-message-brokers-and-streaming/`, `04-architecture-and-patterns/patterns/04-background-workers.md` |
 | 8 | Тесты (unit, интеграционные, API, моки внешних сервисов) | ✅ | `10-testing-and-quality/` (01–11) |
@@ -53,7 +65,7 @@
 | 3 | **Облако — одна платформа** (AWS: EC2, RDS, S3, SQS, IAM, VPC, security groups, managed vs self-hosted) | ❌ | **Создать:** `11-devops-and-observability/cloud/` — AWS (или GCP) как платформа. Terraform есть (GCP), но нет AWS-обзора |
 | 4 | Профилировка и нагрузка (flame graphs, slow query log, p95/p99) | ✅ | `09-concurrency-and-performance/profiling/`, `11-devops-and-observability/incident-investigation-and-profiling/` |
 | 4a | **Нагрузочное тестирование** (k6/Locust, bottleneck → фикс → перетест) | ❌ | **Создать:** `10-testing-and-quality/12-load-testing.md` — k6 примеры, интерпретация результатов, p95/p99 |
-| 5 | **Безопасность вглубь — OWASP Top 10** (SQL injection, XSS, SSRF, IDOR + AI-аудит) | 🟡 | CORS/CSRF/auth/rate-limit есть. **Создать:** `12-security/owasp-top10/` — SQL injection, XSS, SSRF как отдельные документы |
+| 5 | Безопасность вглубь — OWASP Top 10 (SQL injection, XSS, SSRF, IDOR + AI-аудит) | ✅ | `12-security/owasp-top10/` (SQL injection, XSS, SSRF). IDOR — в `authentication/07-authorization-and-rbac.md` |
 | 6 | **Edge и Serverless** (Cloudflare Workers, AWS Lambda, cold start, лимиты, биллинг) | ❌ | **Создать:** `11-devops-and-observability/serverless/` или `05-system-design/edge-and-serverless/` |
 | 7 | **API-дизайн на масштаб** (idempotency, webhook design, версионирование, OpenAPI spec, backward compatibility) | 🟡 | Idempotency: `05-system-design/reliability-patterns/06-idempotency.md`. Webhooks: `08-networking-and-api/protocols/06-webhooks.md`. Версионирование: `04-architecture-and-patterns/patterns/03-api-versioning.md`. **Создать:** `08-networking-and-api/protocols/12-openapi-and-api-spec.md` — OpenAPI/Swagger spec, codegen |
 
@@ -65,12 +77,12 @@
 |---|---|---|---|
 | 1 | System design фундамент (CAP, горизонтальное/вертикальное, LB, CDN, "Спроектируй Twitter") | ✅ | `05-system-design/` (CAP, external-request-flows, interview-cases) |
 | 2 | БД на масштаб (read replicas, PgBouncer, шардирование, денормализация, партиционирование, zero-downtime миграции) | ✅ | `06-databases/database-systems-catalog/postgresql/` (06-replication, 05-partitioning, 12-sharding, 09-connection-pooling) |
-| 3 | **LLM как часть бэкенда** (OpenAI/Anthropic API, streaming, function calling, токеномика, кэш промптов, деградация провайдера) | ❌ | **Создать:** `13-llm-and-ai-integration/` — новый раздел. Файлы: интеграция API, streaming ответов, function calling, prompt caching, fallback при отказе |
-| 4 | **RAG и vector БД** (pgvector, Qdrant, Weaviate, эмбеддинги, чанкинг, гибридный поиск, стейл-данные, prompt injection через документы) | ❌ | **Создать:** `13-llm-and-ai-integration/rag/` — внутри нового раздела |
+| 3 | **LLM как часть бэкенда** (OpenAI/Anthropic API, streaming, function calling, токеномика, кэш промптов, деградация провайдера) | ❌ | **Создать:** `18-llm-and-ai-integration/` — раздел создан. Нужны файлы: API basics, streaming/function calling, prompt engineering, reliability/fallback |
+| 4 | **RAG и vector БД** (pgvector, Qdrant, Weaviate, эмбеддинги, чанкинг, гибридный поиск, стейл-данные, prompt injection через документы) | 🟡 | `18-llm-and-ai-integration/rag/01-rag-fundamentals.md` есть. **Создать:** vector БД, chunking/embeddings, hybrid search, pitfalls |
 | 5 | Очереди и event streaming (Kafka: партиции, consumer groups, exactly-once, event sourcing, DLQ) | ✅ | `07-message-brokers-and-streaming/01-kafka.md` |
 | 6 | Микросервисы — когда и как (gRPC vs REST, service mesh, distributed tracing, "монолит сначала") | ✅ | `04-architecture-and-patterns/service-topologies/`, `03-go-libraries-and-ecosystem/grpc/`, `11-devops-and-observability/tracing-and-opentelemetry/` |
 | 7 | Kubernetes — основы (pods, services, deployments, ingress, ConfigMaps, secrets, HPA) | ✅ | `11-devops-and-observability/kubernetes/` (01–07) |
-| 8 | **Reliability engineering** (SLO, SLI, error budgets, circuit breakers, chaos engineering, graceful degradation, постмортемы) | 🟡 | Circuit breaker/retries/backoff/idempotency: `05-system-design/reliability-patterns/`. **Создать:** `05-system-design/reliability-patterns/08-slo-sli-error-budgets.md`, `09-chaos-engineering.md`, `10-postmortem.md` |
+| 8 | **Reliability engineering** (SLO, SLI, error budgets, circuit breakers, chaos engineering, graceful degradation, постмортемы) | 🟡 | Есть: `08-slo-sli-error-budgets.md`, `09-postmortem.md`, circuit breaker/retries/backoff/idempotency. **Создать:** `10-chaos-engineering.md` |
 
 ---
 
@@ -80,24 +92,38 @@
 
 ---
 
+## Что было сделано сверх плана PDF
+
+Это темы которых не было в PDF, но мы их сделали для глубины senior уровня.
+
+### Hardware и OS internals (раздел `11-devops-and-observability/hardware-and-os/`)
+
+7 файлов, ~4400 строк:
+- `01-cpu-architecture.md` — pipeline, OoO, branch prediction, SIMD, SMT
+- `02-memory-hierarchy.md` — latency numbers, DRAM, SSD vs HDD, locality
+- `03-cache-coherence-and-mesi.md` — cache lines, MESI, false sharing с demo в Go
+- `04-atomics-and-memory-ordering.md` — store buffers, x86 TSO vs ARM weak, fences, CAS
+- `05-virtual-memory-and-paging.md` — VA→PA, MMU/TLB, COW, mmap, swap, VIRT/RSS
+- `06-processes-and-threads.md` — fork/exec/clone, kernel/user mode, syscalls
+- `07-context-switching-and-scheduling.md` — CFS, Go M:N scheduler, GOMAXPROCS
+
+### Углубление аутентификации
+
+- `12-security/authentication/05-authentication-methods-overview.md`
+- `12-security/authentication/06-jwt.md`
+- `12-security/authentication/07-authorization-and-rbac.md`
+
+### Container security deep-dive
+
+Расширен `11-devops-and-observability/docker/01-container-vs-virtual-machine.md` — добавлены разделы про векторы атак, известные CVE (runc, Dirty Pipe, Leaky Vessels), последствия компрометации, чек-лист защиты.
+
+---
+
 ## Итоговый список файлов к созданию
 
-Упорядочен по приоритету (сначала более фундаментальные).
+### Средний приоритет (7 файлов)
 
-### Высокий приоритет
-
-| Файл / Раздел | Раздел | Что покрывает |
-|---|---|---|
-| `06-databases/caching/01-redis-as-cache.md` | Databases | Cache-aside, TTL, инвалидация, прогрев, когда НЕ кэшировать, session store в Redis |
-| `12-security/owasp-top10/01-sql-injection.md` | Security | Параметризованные запросы, ORM pitfalls, примеры в Go |
-| `12-security/owasp-top10/02-xss.md` | Security | Reflected/stored/DOM XSS, Content-Security-Policy, html/template в Go |
-| `12-security/owasp-top10/03-ssrf.md` | Security | SSRF атака, allowlist URL, блокировка metadata endpoint, примеры в Go |
-| `05-system-design/reliability-patterns/08-slo-sli-error-budgets.md` | System Design | SLO/SLI/SLA определения, error budget, alerting на burn rate |
-| `05-system-design/reliability-patterns/09-postmortem.md` | System Design | Структура постмортема, blame-free культура, шаблон |
-
-### Средний приоритет
-
-| Файл / Раздел | Раздел | Что покрывает |
+| Файл | Раздел | Что покрывает |
 |---|---|---|
 | `11-devops-and-observability/git/01-branching-and-workflow.md` | DevOps | Trunk-based, gitflow, branching стратегии, rebase vs merge, git bisect |
 | `11-devops-and-observability/git/02-advanced-git.md` | DevOps | Interactive rebase, cherry-pick, reflog, коммит-сообщения |
@@ -107,18 +133,31 @@
 | `11-devops-and-observability/cloud/01-aws-core-services.md` | DevOps | EC2, RDS, S3, SQS, IAM, VPC, security groups, managed vs self-hosted |
 | `11-devops-and-observability/cloud/02-cloud-cost-and-architecture.md` | DevOps | Стоимость инфры, выбор типа инстанса, reserved vs spot, cost optimization |
 
-### Низкий приоритет (LLM/AI — отдельный большой блок)
+### Низкий приоритет — LLM и AI (7 файлов)
 
-| Файл / Раздел | Раздел | Что покрывает |
+**LLM API integration (4 файла):**
+
+| Файл | Что покрывает |
+|---|---|
+| `18-llm-and-ai-integration/api-integration/01-llm-api-basics.md` | OpenAI/Anthropic API, модели, токены, стоимость |
+| `18-llm-and-ai-integration/api-integration/02-streaming-and-function-calling.md` | Streaming ответов (SSE), function/tool calling, structured output |
+| `18-llm-and-ai-integration/prompt-engineering/01-prompts-for-backend.md` | System prompts, контекстное окно, prompt caching, temperature |
+| `18-llm-and-ai-integration/reliability/01-fallback-and-degradation.md` | Деградация при отказе провайдера, timeout, fallback на другую модель, retry |
+
+**RAG детальнее (3 файла):**
+
+| Файл | Что покрывает |
+|---|---|
+| `18-llm-and-ai-integration/rag/02-embeddings.md` | Модели эмбеддингов, размерности, OpenAI vs open-source |
+| `18-llm-and-ai-integration/rag/03-vector-databases.md` | pgvector, Qdrant, Weaviate — сравнение, когда что выбирать |
+| `18-llm-and-ai-integration/rag/04-chunking-strategies.md` | Стратегии чанкинга, влияние на качество |
+| `18-llm-and-ai-integration/rag/05-hybrid-search.md` | Vector + BM25, reranking |
+| `18-llm-and-ai-integration/rag/06-rag-pitfalls.md` | Стейл-данные, prompt injection через документы, галлюцинации, evaluation |
+
+### Низкий приоритет — прочее (2 файла)
+
+| Файл | Раздел | Что покрывает |
 |---|---|---|
-| `13-llm-and-ai-integration/01-llm-api-basics.md` | LLM (новый) | OpenAI/Anthropic API, модели, токены, стоимость |
-| `13-llm-and-ai-integration/02-streaming-and-function-calling.md` | LLM (новый) | Streaming ответов (SSE), function/tool calling, structured output |
-| `13-llm-and-ai-integration/03-prompt-engineering-for-backend.md` | LLM (новый) | System prompts, контекстное окно, prompt caching, temperature |
-| `13-llm-and-ai-integration/04-reliability-and-fallback.md` | LLM (новый) | Деградация при отказе провайдера, timeout, fallback на другую модель, retry |
-| `13-llm-and-ai-integration/rag/01-rag-fundamentals.md` | LLM (новый) | Что такое RAG, pipeline: chunk → embed → store → retrieve → generate |
-| `13-llm-and-ai-integration/rag/02-vector-databases.md` | LLM (новый) | pgvector, Qdrant, Weaviate — сравнение, когда что выбирать |
-| `13-llm-and-ai-integration/rag/03-chunking-and-embeddings.md` | LLM (новый) | Стратегии чанкинга, модели эмбеддингов, размерность |
-| `13-llm-and-ai-integration/rag/04-rag-pitfalls.md` | LLM (новый) | Стейл-данные, prompt injection через документы, галлюцинации, оценка качества |
 | `11-devops-and-observability/serverless/01-edge-and-serverless.md` | DevOps | Cloudflare Workers, AWS Lambda, cold start, лимиты, когда VPS избыточен |
 | `05-system-design/reliability-patterns/10-chaos-engineering.md` | System Design | Chaos Monkey, fault injection, gamedays, инструменты |
 
@@ -129,3 +168,12 @@
 - Type safety (TypeScript/Pydantic/mypy) — это про другие языки, Go покрывает через систему типов
 - AI-pair правила работы — не технический топик
 - Контрибьюти в OSS, пиши блог, специализация — не технический топик
+
+---
+
+## История обновлений
+
+- **Изначальная версия** — гэп-анализ по PDF, 15 файлов в плане
+- **После высокого приоритета** — закрыто 6 файлов: Redis cache, OWASP (SQL/XSS/SSRF), SLO/SLI, postmortems
+- **После hardware-and-os** — добавлен сверх-плановый раздел из 7 файлов про CPU/память/OS
+- **После RAG fundamentals** — начат раздел `18-llm-and-ai-integration/`, осталось 7 файлов по LLM/RAG + 2 прочее + 7 среднего приоритета
