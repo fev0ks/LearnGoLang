@@ -14,6 +14,7 @@ Go-specific паттерны на уровне кода и архитектур�
 - [06. SOLID в Go](./06-solid-in-go.md) — SRP, OCP, LSP, ISP, DIP с Go-примерами: почему без классов и наследования принципы выглядят иначе
 - [07. Проектирование REST API](./07-rest-api-design.md) — ресурсы vs действия, именование URL, HTTP-методы, path/query/body, типичные ошибки и как их избежать
 - [08. Graceful Shutdown](./08-graceful-shutdown.md) — перехват SIGTERM, `signal.NotifyContext`, HTTP + gRPC + worker shutdown, оркестрация компонентов, таймауты, частые ошибки
+- [09. Saga и Outbox: distributed transactions](./09-saga-and-outbox.md) — dual write проблема, transactional outbox с Go-реализацией, inbox dedup, CDC (Debezium), choreography vs orchestration saga, compensation logic, Temporal.io
 
 ## Как читать
 
@@ -25,6 +26,7 @@ Go-specific паттерны на уровне кода и архитектур�
 6. `06` — SOLID в Go: те же принципы, но без классов — через интерфейсы и composition
 7. `07` — REST API design: ресурсы, правила именования, типичные ошибки из реального опыта
 8. `08` — Graceful shutdown: как корректно остановить сервис под K8s, не теряя запросы и задачи
+9. `09` — Saga и Outbox: distributed transactions через надёжную доставку событий и компенсирующие действия
 
 ## Что важно уметь объяснить
 
@@ -45,6 +47,10 @@ Go-specific паттерны на уровне кода и архитектур�
 - почему в Go интерфейс объявляет потребитель — это ISP + DIP одновременно
 - чем OCP в Go отличается от OCP в Java (нет наследования → интерфейсы)
 - как проверить что реализация соблюдает LSP — contract tests
+- почему dual write — антипаттерн и как outbox решает проблему
+- разница choreography vs orchestration saga, когда что
+- зачем нужен inbox pattern на стороне consumer'а
+- как комбинировать saga и outbox в production-системах
 
 ## Interview-ready answer
 
