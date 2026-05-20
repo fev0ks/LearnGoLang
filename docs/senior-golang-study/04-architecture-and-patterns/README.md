@@ -11,7 +11,7 @@ Senior-фокус:
 
 ### [Patterns](./patterns/README.md)
 
-- [01. Go Code Patterns](./patterns/01-go-code-patterns.md) — small interfaces, constructor injection, functional options, middleware, adapter, decorator, strategy, repository
+- [01. Go Code Patterns](./patterns/go-code-patterns/) — small interfaces, DI, functional options, middleware, adapter, decorator, strategy, repository, UoW, context, error wrapping
 - [02. Architecture Patterns](./patterns/02-architecture-patterns.md) — layered, hexagonal, CQRS, outbox, saga, idempotency, reconciliation, ACL, strangler fig
 - [03. API Versioning](./patterns/03-api-versioning.md) — REST/gRPC versioning, backward compatibility, Protobuf rules, deprecation
 - [04. Background Workers](./patterns/04-background-workers.md) — worker pool, graceful shutdown, distributed lease, idempotent workers

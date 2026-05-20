@@ -6,7 +6,7 @@ Go-specific паттерны на уровне кода и архитектур�
 
 ## Материалы
 
-- [01. Go Code Patterns](./01-go-code-patterns.md) — small interfaces, constructor injection, functional options, middleware, adapter, decorator, strategy, repository, UoW
+- [01. Go Code Patterns](./go-code-patterns/) — small interfaces, DI, functional options, middleware, adapter, decorator, strategy, repository, UoW, context, error wrapping (разбито на 4 файла по типам проблем)
 - [02. Architecture Patterns](./02-architecture-patterns.md) — layered, hexagonal, clean, DDD lite, CQRS, outbox, saga, idempotency, reconciliation, ACL, strangler fig
 - [03. API Versioning](./03-api-versioning.md) — REST/gRPC versioning, backward compatibility, Protobuf rules, event schema, deprecation lifecycle
 - [04. Background Workers](./04-background-workers.md) — worker pool, graceful shutdown, periodic jobs, distributed lease, idempotent workers, backpressure

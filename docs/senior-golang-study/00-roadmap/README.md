@@ -72,7 +72,7 @@
 
 | Файл | Что внутри | Приоритет |
 |------|-----------|-----------|
-| [01-go-code-patterns.md](../04-architecture-and-patterns/patterns/01-go-code-patterns.md) | functional options, small interfaces, middleware, decorator | ★★★ |
+| [go-code-patterns/](../04-architecture-and-patterns/patterns/go-code-patterns/) | functional options, small interfaces, middleware, decorator, strategy, repository, UoW, context, errors (4 файла по типам) | ★★★ |
 | [02-architecture-patterns.md](../04-architecture-and-patterns/patterns/02-architecture-patterns.md) | hexagonal, DDD lite, layered, clean arch — trade-offs | ★★★ |
 | [05-ddd-in-go.md](../04-architecture-and-patterns/patterns/05-ddd-in-go.md) | Entity, Value Object, Aggregate, Domain Events, Repository, Application Service | ★★★ |
 | [06-solid-in-go.md](../04-architecture-and-patterns/patterns/06-solid-in-go.md) | SRP, OCP, LSP, ISP, DIP — с Go-примерами | ★★★ |
