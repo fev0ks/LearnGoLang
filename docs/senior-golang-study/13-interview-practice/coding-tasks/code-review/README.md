@@ -10,7 +10,17 @@
 
 ## Задачи
 
-1. [Fetcher с кэшем — bug hunt](./01-fetcher-with-cache.md) — concurrent fetcher с 12+ проблемами: deadlock, race, panic on nil map, неправильный lifecycle, stampede, отсутствие отмены
+1. [Fetcher с кэшем — bug hunt](./01-fetcher-with-cache.md) — **batch** concurrent fetcher с 12+ проблемами: deadlock, race, panic on nil map, неправильный lifecycle, stampede, отсутствие отмены
+2. [Background Task Processor](./02-background-task-processor.md) — **long-running** task pool с retry: WaitGroup race, send on closed channel, infinite retry, no drain mode, no panic recovery, busy loop
+
+## Сравнение задач
+
+| | 01: Fetcher | 02: Task Processor |
+|---|---|---|
+| Тип pool'а | Batch (process IDs → return) | Long-running (Submit/Stop API) |
+| Фокус | Lifecycle close, cache stampede | Retry policy, graceful shutdown |
+| Главные баги | nil channels, race on cache | wg.Add race, send to closed, infinite retry |
+| Расширения | singleflight + LRU | dead letter, drain mode, separate retry queue |
 
 ## Формат
 
