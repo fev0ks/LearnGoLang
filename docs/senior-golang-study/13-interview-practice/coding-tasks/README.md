@@ -6,7 +6,7 @@
 
 - [Concurrency](./concurrency/) — горутины, каналы, синхронизация. **Самое частое для Go.**
 - [Data Structures](./data-structures/) — LRU cache, top-K (heap), bloom filter, trie, sliding window counter
-- _System Primitives_ _(planned)_ — connection pool, retry, circuit breaker, distributed lock
+- [System Primitives](./system-primitives/) — connection pool, retry, circuit breaker, distributed lock, idempotency
 - _Streams_ _(planned)_ — дедупликация, batching
 
 ## Шаблон задачи

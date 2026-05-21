@@ -7,7 +7,7 @@
 - **coding-tasks/** — задачи на код, которые часто просят на собеседовании
   - **concurrency/** — задачи на горутины, каналы, синхронизацию (самая частая категория для Go)
   - **data-structures/** — LRU cache, top-K (heap), bloom filter, trie, sliding window counter
-  - **system-primitives/** _(planned)_ — connection pool, retry с backoff, circuit breaker
+  - **system-primitives/** — connection pool, retry с backoff, circuit breaker, distributed lock, idempotency
   - **streams/** _(planned)_ — дедупликация, batching
 
 - _Behavioral_ _(planned)_ — STAR-кейсы, рассказ о себе, leadership примеры
