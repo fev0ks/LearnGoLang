@@ -8,6 +8,7 @@
   - **concurrency/** — задачи на горутины, каналы, синхронизацию (самая частая категория для Go)
   - **data-structures/** — LRU cache, top-K (heap), bloom filter, trie, sliding window counter
   - **system-primitives/** — connection pool, retry с backoff, circuit breaker, distributed lock, idempotency
+  - **code-review/** — задачи формата "найди баги": broken-looking code, найти все проблемы, переписать
   - **streams/** _(planned)_ — дедупликация, batching
 
 - _Behavioral_ _(planned)_ — STAR-кейсы, рассказ о себе, leadership примеры
