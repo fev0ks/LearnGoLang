@@ -8,7 +8,7 @@
 - [Data Structures](./data-structures/) — LRU cache, top-K (heap), bloom filter, trie, sliding window counter
 - [System Primitives](./system-primitives/) — connection pool, retry, circuit breaker, distributed lock, idempotency
 - [Code Review](./code-review/) — задачи формата "найди баги в коде" (senior+ интервью в bigtech)
-- _Streams_ _(planned)_ — дедупликация, batching
+- [Streams](./streams/) — обработка потоков: deduplication, batching writer, streaming aggregation, backpressure
 
 ## Шаблон задачи
 
