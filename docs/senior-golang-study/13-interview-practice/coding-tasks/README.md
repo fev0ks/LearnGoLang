@@ -5,9 +5,9 @@
 ## Категории
 
 - [Concurrency](./concurrency/) — горутины, каналы, синхронизация. **Самое частое для Go.**
-- _Data Structures_ _(planned)_ — LRU cache, top-K, bloom filter, trie
+- [Data Structures](./data-structures/) — LRU cache, top-K (heap), bloom filter, trie, sliding window counter
 - _System Primitives_ _(planned)_ — connection pool, retry, circuit breaker, distributed lock
-- _Streams_ _(planned)_ — дедупликация, batching, sliding window
+- _Streams_ _(planned)_ — дедупликация, batching
 
 ## Шаблон задачи
 
