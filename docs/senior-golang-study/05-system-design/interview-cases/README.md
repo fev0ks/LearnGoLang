@@ -25,6 +25,7 @@
 - [09. Netflix / Streaming](./09-netflix-streaming.md) — Open Connect CDN, per-title encoding, playback service, Chaos Engineering
 - [10. Google Drive](./10-google-drive.md) — content-addressed chunking, Rabin fingerprint, deduplication, sync protocol, conflict resolution
 - [11. Payment System](./11-payment-system.md) — double-entry bookkeeping, idempotency, Saga + Outbox, reconciliation, strong consistency
+- [12. Marketplace Vendor Notifications](./12-marketplace-vendor-notifications.md) — webhook delivery (Stripe-style), outbox + Kafka, per-vendor circuit breaker, HMAC signing, dead letter
 
 ## Структура каждого кейса
 
