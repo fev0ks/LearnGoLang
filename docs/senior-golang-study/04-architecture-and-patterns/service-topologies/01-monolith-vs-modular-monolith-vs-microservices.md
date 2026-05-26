@@ -36,17 +36,13 @@
 
 ## Монолит
 
-```
-┌──────────────────────────────────────┐
-│             Monolith                 │
-│                                      │
-│  [HTTP]─►[Service]─►[Repository]─►   │
-│                                      │
-│              ▼                       │
-│  ┌───────────────────────────────┐   │
-│  │          Database             │   │
-│  └───────────────────────────────┘   │
-└──────────────────────────────────────┘
+```mermaid
+flowchart LR
+    subgraph Mono[Monolith]
+        HTTP[HTTP] --> Service --> Repo[Repository]
+    end
+    DB[(Database)]
+    Repo --> DB
 ```
 
 **Когда монолит — правильный выбор:**
@@ -71,24 +67,29 @@
 
 ## Modular monolith
 
-```
-┌────────────────────────────────────────────────────────┐
-│                    Monolith Process                     │
-│                                                        │
-│  ┌────────────┐    ┌────────────┐    ┌────────────┐    │
-│  │  Orders    │    │  Payments  │    │   Users    │    │
-│  │  Module    │───►│   Module   │    │   Module   │    │
-│  │            │    │            │    │            │    │
-│  │ public API │    │ public API │    │ public API │    │
-│  └────────────┘    └────────────┘    └────────────┘    │
-│        ↑                ↑                  ↑           │
-│  cross-module calls only through public interfaces     │
-│                                                        │
-│  ┌──────────────────────────────────────────────────┐  │
-│  │              Shared Infrastructure                │  │
-│  │     (logger, metrics, DB pool, config)            │  │
-│  └──────────────────────────────────────────────────┘  │
-└────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph Mono[Monolith Process]
+        direction TB
+
+        subgraph Orders["Orders Module"]
+            O[public API]
+        end
+        subgraph Payments["Payments Module"]
+            P[public API]
+        end
+        subgraph Users["Users Module"]
+            U[public API]
+        end
+
+        O -->|cross-module<br/>через public API| P
+
+        Shared[Shared Infrastructure<br/>logger, metrics, DB pool, config]
+
+        O --> Shared
+        P --> Shared
+        U --> Shared
+    end
 ```
 
 **Когда modular monolith — правильный выбор:**
@@ -120,18 +121,32 @@ func (m *Module) CancelOrder(ctx context.Context, id OrderID) error
 
 ## Микросервисы
 
-```
-                        ┌─────────────────┐
-              ┌────────►│  Order Service  │────────►
-              │          └─────────────────┘         │
-API Gateway───┤          ┌─────────────────┐         ▼
-              ├────────►│ Payment Service │────► Kafka
-              │          └─────────────────┘         │
-              └────────►│  User Service   │◄──────────┘
-                         └─────────────────┘
+```mermaid
+flowchart LR
+    GW[API Gateway]
+    Order[Order Service]
+    Payment[Payment Service]
+    User[User Service]
+    Kafka[(Kafka)]
 
-Каждый сервис: своя БД, свой deployment, своя команда
+    OrderDB[(Order DB)]
+    PaymentDB[(Payment DB)]
+    UserDB[(User DB)]
+
+    GW --> Order
+    GW --> Payment
+    GW --> User
+
+    Order --> OrderDB
+    Payment --> PaymentDB
+    User --> UserDB
+
+    Order --> Kafka
+    Payment --> Kafka
+    Kafka --> User
 ```
+
+Каждый сервис: своя БД, свой deployment, своя команда.
 
 **Когда микросервисы оправданы:**
 - Команды уже достаточно автономны (Conway's Law)

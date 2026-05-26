@@ -43,26 +43,22 @@
 
 Самый распространённый паттерн. Приложение само управляет кэшем.
 
-```
-Read путь:
-  ┌────────────┐
-  │ Application │
-  └──────┬─────┘
-         │ 1. GET key
-         ▼
-  ┌────────────┐
-  │   Redis    │ ── HIT → return value
-  └──────┬─────┘
-         │ MISS
-         ▼ 2. SELECT FROM db
-  ┌────────────┐
-  │     DB     │
-  └──────┬─────┘
-         │ 3. SET key value EX ttl
-         ▼
-  ┌────────────┐
-  │   Redis    │ ── 4. return value
-  └────────────┘
+```mermaid
+sequenceDiagram
+    autonumber
+    participant A as Application
+    participant R as Redis
+    participant DB as DB
+
+    A->>R: GET key
+    alt cache hit
+        R-->>A: value
+    else cache miss
+        R-->>A: nil
+        A->>DB: SELECT
+        DB-->>A: value
+        A->>R: SET key value EX ttl
+    end
 ```
 
 ```go

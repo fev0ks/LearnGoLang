@@ -73,30 +73,21 @@ Storage:
 
 ## Фаза 3: Высокоуровневый дизайн
 
-```
-                    ┌─────────────┐
-                    │   Client    │
-                    └──────┬──────┘
-                           │
-                    ┌──────▼──────┐
-                    │  API Gateway │  ← rate limiting, TLS termination
-                    └──────┬──────┘
-               ┌───────────┴───────────┐
-               │                       │
-        ┌──────▼──────┐         ┌──────▼──────┐
-        │  Write API  │         │  Read API   │
-        │  (create)   │         │  (redirect) │
-        └──────┬──────┘         └──────┬──────┘
-               │                       │
-               │                ┌──────▼──────┐
-               │                │    Cache    │  ← Redis
-               │                │ (hot URLs)  │
-               │                └──────┬──────┘
-               │                       │ miss
-        ┌──────▼───────────────────────▼──────┐
-        │              Database               │
-        │           (PostgreSQL)              │
-        └─────────────────────────────────────┘
+```mermaid
+flowchart TB
+    Client[Client]
+    Gateway[API Gateway<br/>rate limiting, TLS]
+    WriteAPI[Write API<br/>POST /shorten]
+    ReadAPI[Read API<br/>GET /:code]
+    Cache[(Redis<br/>hot URLs cache)]
+    DB[(PostgreSQL<br/>code → url)]
+
+    Client --> Gateway
+    Gateway --> WriteAPI
+    Gateway --> ReadAPI
+    WriteAPI --> DB
+    ReadAPI --> Cache
+    Cache -.->|miss| DB
 ```
 
 **API:**

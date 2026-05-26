@@ -28,24 +28,20 @@ API key                — долгоживущий секрет для machine-
 
 Сервер выдаёт случайный токен (session ID). Всё состояние хранится в БД. По токену — lookup в хранилище.
 
-```
-Browser                    Server                    DB
-  │                          │                        │
-  │  POST /login             │                        │
-  │─────────────────────────▶│                        │
-  │                          │ INSERT session(token)  │
-  │                          │───────────────────────▶│
-  │  Set-Cookie: sid=<token> │                        │
-  │◀─────────────────────────│                        │
-  │                          │                        │
-  │  GET /profile            │                        │
-  │  Cookie: sid=<token>     │                        │
-  │─────────────────────────▶│                        │
-  │                          │ SELECT WHERE token=... │
-  │                          │───────────────────────▶│
-  │                          │◀───────────────────────│
-  │  200 OK                  │                        │
-  │◀─────────────────────────│                        │
+```mermaid
+sequenceDiagram
+    participant B as Browser
+    participant S as Server
+    participant DB as DB
+
+    B->>S: POST /login
+    S->>DB: INSERT session(token)
+    S-->>B: Set-Cookie: sid=<token>
+
+    B->>S: GET /profile<br/>Cookie: sid=<token>
+    S->>DB: SELECT WHERE token=...
+    DB-->>S: session data
+    S-->>B: 200 OK
 ```
 
 **Ревокация:** мгновенная — удалить строку из БД.  
@@ -60,20 +56,18 @@ Browser                    Server                    DB
 
 Сервер выдаёт подписанный токен. Всё состояние закодировано внутри. Сервер проверяет подпись — без обращения к БД.
 
-```
-Browser                    Server
-  │                          │
-  │  POST /login             │
-  │─────────────────────────▶│
-  │  { access_token, ...}    │ (подпись проверена — нет запроса в БД)
-  │◀─────────────────────────│
-  │                          │
-  │  GET /profile            │
-  │  Authorization: Bearer   │
-  │─────────────────────────▶│
-  │                          │ verify signature → decode claims
-  │  200 OK                  │ (нет запроса в БД)
-  │◀─────────────────────────│
+```mermaid
+sequenceDiagram
+    participant B as Browser
+    participant S as Server
+
+    B->>S: POST /login
+    Note over S: подпись JWT,<br/>нет запроса в БД
+    S-->>B: { access_token, ... }
+
+    B->>S: GET /profile<br/>Authorization: Bearer ...
+    Note over S: verify signature,<br/>decode claims,<br/>нет запроса в БД
+    S-->>B: 200 OK
 ```
 
 **Ревокация:** сложная — токен валиден до истечения `exp`. Нужен blacklist или короткий TTL.  

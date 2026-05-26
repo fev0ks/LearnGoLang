@@ -61,10 +61,21 @@
 
 ### Dependency graph
 
-```
-         ┌─── lint ───┐
-trigger ──┤             ├─── build-image ─── deploy-dev ─── deploy-prod
-         └─── test ───┘
+```mermaid
+flowchart LR
+    Trigger[trigger]
+    Lint[lint]
+    Test[test]
+    Build[build-image]
+    DevD[deploy-dev]
+    ProdD[deploy-prod]
+
+    Trigger --> Lint
+    Trigger --> Test
+    Lint --> Build
+    Test --> Build
+    Build --> DevD
+    DevD --> ProdD
 ```
 
 Jobs без `needs` запускаются параллельно.

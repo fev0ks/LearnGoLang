@@ -145,34 +145,36 @@ Fan-out on Read ДЛЯ:
 
 ### Архитектура
 
-```
-  User
-   │
-   ├── POST /tweets ──────────────────────────────────►
-   │                                                   │
-   └── GET  /timeline ─────────────────────────────►   │
-                                                   │   │
-                                            ┌──────┴───┴────┐
-                                            │  API Gateway  │
-                                            └───┬───────────┘
-                                                │
-                    ┌───────────────────────────┼──────────────────────┐
-                    │                           │                      │
-             ┌──────▼──────┐            ┌──────▼──────┐       ┌──────▼──────┐
-             │  Tweet      │            │  Timeline   │       │   User/     │
-             │  Service    │            │  Service    │       │   Follow    │
-             └──────┬──────┘            └──────┬──────┘       │   Service   │
-                    │                          │              └──────┬──────┘
-                    │                          │                     │
-             ┌──────▼──────┐          ┌────────▼────────┐    ┌──────▼──────┐
-             │  Tweets DB  │          │  Feed Cache     │    │  Follow DB  │
-             │(Cassandra)  │◄─────────│  (Redis)        │    │(PostgreSQL) │
-             └─────────────┘          └─────────────────┘    └─────────────┘
-                    │
-             ┌──────▼──────┐
-             │  Fan-out    │
-             │  Workers    │◄── Kafka: tweet.published
-             └─────────────┘
+```mermaid
+flowchart TB
+    User[User<br/>POST /tweets<br/>GET /timeline]
+    GW[API Gateway]
+
+    Tweet[Tweet Service]
+    Timeline[Timeline Service]
+    Follow[User / Follow Service]
+
+    TweetsDB[(Cassandra<br/>tweets)]
+    FeedCache[(Redis<br/>feed cache)]
+    FollowDB[(PostgreSQL<br/>follow graph)]
+
+    Kafka[(Kafka<br/>tweet.published)]
+    FanOut[Fan-out Workers]
+
+    User --> GW
+    GW --> Tweet
+    GW --> Timeline
+    GW --> Follow
+
+    Tweet --> TweetsDB
+    Tweet --> Kafka
+    Timeline --> FeedCache
+    Timeline --> TweetsDB
+    Follow --> FollowDB
+
+    Kafka --> FanOut
+    FanOut --> FeedCache
+    FanOut --> Follow
 ```
 
 ---

@@ -136,23 +136,47 @@ func chargePayment(orderID string, amount float64) error {
 4. Отдельный **relay worker** периодически читает outbox и публикует в broker
 5. После успешной публикации — помечает запись как "sent"
 
+```mermaid
+flowchart LR
+    subgraph Svc[Service]
+        direction TB
+        Handler[Business Handler]
+        DB[(PostgreSQL<br/>orders + outbox)]
+        Relay[Relay Worker<br/>poll every N ms]
+
+        Handler -->|1 TX: INSERT order<br/>2 TX: INSERT outbox<br/>3 COMMIT| DB
+        DB -->|SELECT WHERE sent_at IS NULL| Relay
+        Relay -->|UPDATE sent_at| DB
+    end
+
+    Broker[(Kafka / RabbitMQ)]
+    Relay -->|publish| Broker
+
+    style Svc fill:#dbeafe,stroke:#1e40af
 ```
-┌─────────── Service ────────────┐
-│                                 │
-│  ┌─ Business transaction ─┐    │
-│  │  1. INSERT INTO orders │    │   ←─ всё в одной TX
-│  │  2. INSERT INTO outbox │    │
-│  │  COMMIT                │    │
-│  └────────────────────────┘    │
-│                                 │
-│  ┌─ Relay worker (фоновый) ┐   │
-│  │  Каждые N мс:           │   │
-│  │  - SELECT outbox WHERE  │   │
-│  │    sent_at IS NULL       │   │
-│  │  - Publish to broker    │   │   ──→  Kafka / RabbitMQ
-│  │  - UPDATE sent_at        │   │
-│  └─────────────────────────┘   │
-└─────────────────────────────────┘
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant App as Business Logic
+    participant DB as PostgreSQL
+    participant Relay as Outbox Relay
+    participant K as Kafka
+
+    rect rgb(219, 234, 254)
+        Note over App,DB: Атомарная TX
+        App->>DB: BEGIN
+        App->>DB: INSERT orders
+        App->>DB: INSERT outbox(event)
+        App->>DB: COMMIT
+    end
+
+    Note over Relay,K: Async, eventually
+    Relay->>DB: SELECT outbox WHERE sent_at IS NULL
+    DB-->>Relay: unsent rows
+    Relay->>K: publish event
+    K-->>Relay: ack
+    Relay->>DB: UPDATE sent_at = NOW()
 ```
 
 **Ключ:** транзакция БД атомарна. Либо и order, и outbox записаны (значит, событие будет опубликовано), либо ни одно (значит, и order не создан).
@@ -645,19 +669,26 @@ UI должен это учитывать: показывать "обработ�
 
 Каждый сервис подписан на события и реагирует. Логика "что после чего" распределена.
 
-```
-[Order created]
-   │
-   ▼
-PaymentService → [Payment completed]
-   │                    │
-   │                    ▼
-   │            InventoryService → [Inventory reserved]
-   │                                       │
-   │                                       ▼
-   │                          ShippingService → [Shipment created]
-   │
-   └─ (если payment failed) → [Order cancelled]
+```mermaid
+flowchart LR
+    OrderCreated[Order created]
+    PaymentSvc[Payment Service]
+    PaymentDone[Payment completed]
+    PaymentFailed[Payment failed]
+    InventorySvc[Inventory Service]
+    InventoryDone[Inventory reserved]
+    ShippingSvc[Shipping Service]
+    ShipmentDone[Shipment created]
+    OrderCancelled[Order cancelled]
+
+    OrderCreated --> PaymentSvc
+    PaymentSvc -->|success| PaymentDone
+    PaymentSvc -.->|failure| PaymentFailed
+    PaymentDone --> InventorySvc
+    InventorySvc --> InventoryDone
+    InventoryDone --> ShippingSvc
+    ShippingSvc --> ShipmentDone
+    PaymentFailed -.->|compensate| OrderCancelled
 ```
 
 ### Реализация
@@ -738,18 +769,48 @@ Choreography подходит для **2-3 шагов** и **stable** проце
 
 Центральный **orchestrator** управляет процессом. Каждый сервис делает только то что ему скажут.
 
+```mermaid
+sequenceDiagram
+    participant O as Orchestrator
+    participant P as Payment Service
+    participant I as Inventory Service
+    participant S as Shipping Service
+
+    O->>P: 1. Charge(orderID)
+    P-->>O: payment_id
+
+    O->>I: 2. Reserve(items)
+    I-->>O: reservation_id
+
+    O->>S: 3. CreateShipment()
+
+    alt happy path
+        S-->>O: shipment_id
+        Note over O: state = completed
+    else shipping fails
+        S--xO: error
+        Note over O: compensations in reverse
+        O->>I: Release(reservation_id)
+        O->>P: Refund(payment_id)
+        Note over O: state = failed
+    end
 ```
-[Orchestrator]
-    │
-    ├─ Step 1 → PaymentService.Charge()
-    │              ← success/failure
-    │
-    ├─ Step 2 → InventoryService.Reserve()
-    │              ← success/failure
-    │
-    ├─ Step 3 → ShippingService.CreateShipment()
-    │
-    └─ On failure → запустить compensations в обратном порядке
+
+Также можно представить orchestration как state machine:
+
+```mermaid
+stateDiagram-v2
+    [*] --> Payment
+    Payment --> Inventory: charged
+    Payment --> Failed: charge failed
+    Inventory --> Shipping: reserved
+    Inventory --> CompensatePayment: reserve failed
+    Shipping --> Completed: shipped
+    Shipping --> CompensateInventory: ship failed
+    CompensateInventory --> CompensatePayment
+    CompensatePayment --> Failed
+    Failed --> [*]
+    Completed --> [*]
 ```
 
 ### Реализация

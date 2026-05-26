@@ -68,32 +68,29 @@ Storage:
 
 ## Фаза 3: Высокоуровневый дизайн
 
-```
-                    ┌─────────────────────────────────────────────┐
-                    │              Upload Pipeline                │
-  Creator           │                                             │
-  ──────────────────►  ┌──────────┐   ┌──────────┐  ┌─────────┐  │
-  (raw video)       │  │ Upload   │   │  Raw     │  │Transcode│  │
-                    │  │ Service  │──►│ Storage  │─►│ Workers │  │
-                    │  └──────────┘   │  (S3)    │  │(FFmpeg) │  │
-                    │                 └──────────┘  └────┬────┘  │
-                    │                                    │       │
-                    │               ┌────────────────────┘       │
-                    │               ▼                            │
-                    │  ┌────────────────────────────┐            │
-                    │  │   Processed Video Storage  │            │
-                    │  │   (S3: 5 quality variants) │            │
-                    │  └────────────┬───────────────┘            │
-                    └───────────────┼─────────────────────────────┘
-                                    │
-                         ┌──────────▼──────────┐
-                         │    CDN (Edge nodes) │
-                         │  (CloudFront/Akamai)│
-                         └──────────┬──────────┘
-                                    │
-                               ┌────▼─────┐
-                               │  Viewer  │
-                               └──────────┘
+```mermaid
+flowchart LR
+    Creator[Creator<br/>raw video]
+
+    subgraph Upload[Upload Pipeline]
+        UploadSvc[Upload Service<br/>chunked, resumable]
+        RawS3[(S3<br/>raw storage)]
+        Transcode[Transcode Workers<br/>FFmpeg]
+        ProcS3[(S3<br/>processed, 5 quality variants)]
+
+        UploadSvc --> RawS3
+        RawS3 --> Transcode
+        Transcode --> ProcS3
+    end
+
+    CDN[CDN Edge Nodes<br/>CloudFront / Akamai]
+    Viewer[Viewer]
+
+    Creator --> UploadSvc
+    ProcS3 --> CDN
+    CDN --> Viewer
+
+    style Upload fill:#dbeafe,stroke:#1e40af
 ```
 
 ---

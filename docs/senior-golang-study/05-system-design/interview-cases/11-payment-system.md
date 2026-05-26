@@ -118,34 +118,31 @@ Storage:
 
 ## Фаза 4: Архитектура
 
-```
-  Client
-    │
-    │ POST /payments (Idempotency-Key: X)
-    ▼
-┌─────────────────────────────────────────────────────────────┐
-│                    Payment Service                          │
-│                                                             │
-│  ┌──────────────┐    ┌─────────────┐    ┌────────────────┐  │
-│  │  Idempotency │    │  Payment    │    │   Ledger       │  │
-│  │  Check       │───►│  Processor  │───►│   Service      │  │
-│  └──────────────┘    └──────┬──────┘    └────────────────┘  │
-│                             │                               │
-│                    ┌────────▼────────┐                      │
-│                    │  PSP Gateway    │                      │
-│                    │  (Stripe/PP)    │                      │
-│                    └────────┬────────┘                      │
-│                             │                               │
-└─────────────────────────────┼───────────────────────────────┘
-                              │
-    ┌─────────────────────────┼──────────────────────┐
-    │                         │                      │
-    ▼                         ▼                      ▼
-┌──────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│  PostgreSQL  │    │  Audit Log      │    │  Kafka          │
-│  (ledger,    │    │  (append-only)  │    │  (events for    │
-│   accounts)  │    │                 │    │   reconcile)    │
-└──────────────┘    └─────────────────┘    └─────────────────┘
+```mermaid
+flowchart TB
+    Client[Client]
+
+    subgraph PS[Payment Service]
+        Idemp[Idempotency Check]
+        Processor[Payment Processor]
+        Ledger[Ledger Service]
+        Gateway[PSP Gateway<br/>Stripe / PayPal]
+
+        Idemp --> Processor
+        Processor --> Ledger
+        Processor --> Gateway
+    end
+
+    DB[(PostgreSQL<br/>ledger, accounts)]
+    Audit[(Audit Log<br/>append-only)]
+    Kafka[(Kafka<br/>events for reconcile)]
+
+    Client -->|POST /payments<br/>Idempotency-Key: X| Idemp
+    Ledger --> DB
+    Processor --> Audit
+    Processor --> Kafka
+
+    style PS fill:#dbeafe,stroke:#1e40af
 ```
 
 ---

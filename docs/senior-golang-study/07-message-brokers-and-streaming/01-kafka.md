@@ -6,19 +6,39 @@ Kafka — распределённый лог событий. Не очеред�
 
 ## Архитектура: основные понятия
 
-```
-Producers ──► [Topic: orders]
-                 │
-        ┌────────┼────────┐
-        │        │        │
-   Partition 0  P1      P2    (N партиций = параллелизм)
-   [0][1][2]  [0][1]  [0][1] ← offset
-        │
-   Leader (один брокер)
-   ISR replicas (follower броkers копируют)
-        │
-Consumer Group A ──► consumer 1 читает P0, consumer 2 читает P1+P2
-Consumer Group B ──► независимо читает те же партиции
+```mermaid
+flowchart TB
+    Producers[Producers]
+
+    subgraph Topic["Topic: orders"]
+        P0["Partition 0<br/>offset: 0,1,2,..."]
+        P1["Partition 1<br/>offset: 0,1,..."]
+        P2["Partition 2<br/>offset: 0,1,..."]
+    end
+
+    subgraph CGA["Consumer Group A"]
+        CA1[consumer 1<br/>reads P0]
+        CA2[consumer 2<br/>reads P1, P2]
+    end
+
+    subgraph CGB["Consumer Group B<br/>(независимо)"]
+        CB1[consumer 1]
+        CB2[consumer 2]
+    end
+
+    Producers --> P0
+    Producers --> P1
+    Producers --> P2
+
+    P0 --> CA1
+    P1 --> CA2
+    P2 --> CA2
+
+    P0 --> CB1
+    P1 --> CB1
+    P2 --> CB2
+
+    Note["Каждая партиция:<br/>1 Leader + N ISR followers (репликация)"]
 ```
 
 ### Topic

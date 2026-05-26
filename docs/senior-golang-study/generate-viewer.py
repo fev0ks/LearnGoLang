@@ -150,6 +150,10 @@ body{display:flex;height:100vh;overflow:hidden;font-family:-apple-system,BlinkMa
 .raw-file{background:#0f172a;border-radius:10px;overflow:auto;border:1px solid #1e293b}
 .raw-file code{font-family:'JetBrains Mono','Cascadia Code','Fira Code',monospace;font-size:.84em;line-height:1.65;color:#e2e8f0;padding:20px;display:block}
 
+/* Mermaid diagrams */
+.mermaid-wrap{background:#0f172a;border-radius:10px;padding:24px;margin:1.5rem 0;border:1px solid #1e293b;overflow:auto;text-align:center;display:flex;justify-content:center;align-items:center;min-height:80px}
+.mermaid-wrap svg{max-width:100%;height:auto}
+
 #welcome{text-align:center;padding:80px 40px;color:#94a3b8}
 #welcome h1{font-size:2rem;color:#1e293b;margin-bottom:12px;font-weight:800}
 #welcome p{font-size:1rem;margin-bottom:24px;line-height:1.7}
@@ -242,6 +246,26 @@ function loadFile(path) {
 
   const contentEl = document.getElementById('content');
   contentEl.innerHTML = html;
+
+  // Mermaid: convert <pre><code class="language-mermaid">...</code></pre> into rendered diagrams
+  try {
+    if (window.__mermaid) {
+      const mermaidBlocks = contentEl.querySelectorAll('pre code.language-mermaid');
+      mermaidBlocks.forEach((codeEl, i) => {
+        const pre = codeEl.parentElement;
+        const src = codeEl.textContent;
+        const wrap = document.createElement('div');
+        wrap.className = 'mermaid-wrap';
+        wrap.id = 'mermaid-' + Date.now() + '-' + i;
+        wrap.textContent = src;
+        pre.replaceWith(wrap);
+      });
+      if (mermaidBlocks.length > 0) {
+        window.__mermaid.run({ querySelector: '.mermaid-wrap', suppressErrors: false })
+          .catch(err => console.warn('mermaid render error', err));
+      }
+    }
+  } catch(e) { console.warn('mermaid setup error', e); }
 
   try { contentEl.querySelectorAll('pre code, .raw-file code').forEach(el => hljs.highlightElement(el)); } catch(e) {}
 
@@ -415,6 +439,17 @@ HTML = """<!DOCTYPE html>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/yaml.min.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({
+    startOnLoad: false,
+    theme: 'dark',
+    securityLevel: 'loose',
+    fontFamily: 'inherit',
+    flowchart: { htmlLabels: true, curve: 'basis' }
+  });
+  window.__mermaid = mermaid;
+</script>
 <style>""" + CSS + """</style>
 </head>
 <body>

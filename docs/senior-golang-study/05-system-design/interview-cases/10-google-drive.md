@@ -71,29 +71,35 @@ Deduplication opportunity:
 
 ## Фаза 3: Высокоуровневый дизайн
 
-```
-  Desktop Client              Mobile Client             Web Client
-    (sync daemon)               (app)                    (browser)
-         │                        │                          │
-         └────────────────────────┴──────────────────────────┘
-                                  │
-                         ┌────────▼────────┐
-                         │   API Gateway   │
-                         └────────┬────────┘
-                                  │
-          ┌───────────────────────┼──────────────────────────┐
-          │                       │                          │
-   ┌──────▼──────┐        ┌───────▼──────┐         ┌────────▼──────┐
-   │  Upload     │        │  Metadata    │         │   Sync        │
-   │  Service    │        │  Service     │         │   Service     │
-   └──────┬──────┘        └───────┬──────┘         └────────┬──────┘
-          │                       │                          │
-          ▼                       ▼                          ▼
-   ┌─────────────┐       ┌────────────────┐        ┌────────────────┐
-   │  Block      │       │  Metadata DB   │        │  Notification  │
-   │  Storage    │       │  (PostgreSQL)  │        │  Queue (Kafka) │
-   │  (S3)       │       │  + Redis Cache │        └────────────────┘
-   └─────────────┘       └────────────────┘
+```mermaid
+flowchart TB
+    Desktop[Desktop Client<br/>sync daemon]
+    Mobile[Mobile Client<br/>app]
+    Web[Web Client<br/>browser]
+
+    GW[API Gateway]
+
+    Upload[Upload Service]
+    Meta[Metadata Service]
+    Sync[Sync Service]
+
+    Blocks[(S3<br/>block storage)]
+    MetaDB[(PostgreSQL + Redis<br/>metadata)]
+    Notif[(Kafka<br/>notification queue)]
+
+    Desktop --> GW
+    Mobile --> GW
+    Web --> GW
+
+    GW --> Upload
+    GW --> Meta
+    GW --> Sync
+
+    Upload --> Blocks
+    Meta --> MetaDB
+    Sync --> Notif
+
+    Notif -.->|push events| Sync
 ```
 
 ---

@@ -72,33 +72,33 @@ External provider rate limits:
 
 ## Фаза 3: Высокоуровневый дизайн
 
-```
-                           ┌──────────────────────────────────┐
-  Service A                │      Notification Service        │
-  (Order placed)  ────────►│                                  │
-                           │  ┌─────────────┐                 │
-  Service B                │  │   API       │  validate,      │
-  (OTP request)  ─────────►│  │   Gateway   │  template,      │
-                           │  │             │  preferences    │
-  Admin Panel              │  └──────┬──────┘                 │
-  (bulk campaign)─────────►│         │                        │
-                           │  ┌──────▼──────┐                 │
-                           │  │  Message    │                 │
-                           │  │  Queue      │  Kafka          │
-                           │  └──────┬──────┘                 │
-                           │         │                        │
-                           │  ┌──────▼────────────────────┐   │
-                           │  │     Dispatcher Workers    │   │
-                           │  │  (Push | Email | SMS)     │   │
-                           │  └──────┬────────────────────┘   │
-                           └─────────┼────────────────────────┘
-                                     │
-          ┌──────────────────────────┼──────────────────────────┐
-          │                          │                          │
-   ┌──────▼──────┐            ┌──────▼──────┐           ┌──────▼──────┐
-   │   Firebase  │            │  SendGrid   │           │   Twilio    │
-   │    (Push)   │            │   (Email)   │           │    (SMS)    │
-   └─────────────┘            └─────────────┘           └─────────────┘
+```mermaid
+flowchart LR
+    SvcA[Service A<br/>Order placed]
+    SvcB[Service B<br/>OTP request]
+    Admin[Admin Panel<br/>bulk campaign]
+
+    subgraph NS[Notification Service]
+        API[API Gateway<br/>validate, template, preferences]
+        Queue[(Kafka<br/>per-channel topics)]
+        Workers[Dispatcher Workers<br/>push / email / sms]
+
+        API --> Queue
+        Queue --> Workers
+    end
+
+    FB[Firebase<br/>Push]
+    SG[SendGrid<br/>Email]
+    TW[Twilio<br/>SMS]
+
+    SvcA --> API
+    SvcB --> API
+    Admin --> API
+    Workers --> FB
+    Workers --> SG
+    Workers --> TW
+
+    style NS fill:#dbeafe,stroke:#1e40af
 ```
 
 ---

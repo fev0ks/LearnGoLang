@@ -73,33 +73,32 @@ Metadata (каталог):
 
 ## Фаза 3: Высокоуровневый дизайн
 
-```
-  Client (TV/Mobile/Web)
-    │
-    ├── browse catalog ──────────────────────────────────►
-    ├── search ──────────────────────────────────────────►
-    ├── play video ──────────────────────────────────────►
-    │                                                     │
-    │                                             ┌───────┴────────┐
-    │                                             │  API Gateway   │
-    │                                             └───┬────────────┘
-    │                                                 │
-    │                      ┌─────────────────────────┼──────────────────┐
-    │                      │                         │                  │
-    │              ┌───────▼──────┐        ┌─────────▼──────┐  ┌───────▼──────┐
-    │              │   Catalog    │        │   Playback     │  │   User       │
-    │              │   Service   │        │   Service      │  │   Service    │
-    │              └───────┬──────┘        └─────────┬──────┘  └───────┬──────┘
-    │                      │                         │                  │
-    │              ┌───────▼──────┐        ┌─────────▼──────┐  ┌───────▼──────┐
-    │              │   Catalog DB │        │  Manifest DB   │  │  Postgres    │
-    │              │  + Cache     │        │  (video URLs)  │  │  + Redis     │
-    │              └─────────────┘        └────────────────┘  └──────────────┘
-    │
-    │ video segments ◄──────────────────────────────────────────────────
-    │                                                   Open Connect CDN
-    │                                              (ISP-embedded servers)
-    └─────────────────────────────────────────────────────────────────►
+```mermaid
+flowchart TB
+    Client[Client<br/>TV / Mobile / Web]
+    GW[API Gateway]
+
+    Catalog[Catalog Service]
+    Playback[Playback Service]
+    UserSvc[User Service]
+
+    CatalogDB[(Catalog DB<br/>+ Cache)]
+    ManifestDB[(Manifest DB<br/>video URLs)]
+    UserDB[(PostgreSQL<br/>+ Redis)]
+
+    OC[Open Connect CDN<br/>ISP-embedded servers]
+
+    Client -->|browse, search, play| GW
+    GW --> Catalog
+    GW --> Playback
+    GW --> UserSvc
+
+    Catalog --> CatalogDB
+    Playback --> ManifestDB
+    UserSvc --> UserDB
+
+    OC -->|video segments<br/>direct, bypassing GW| Client
+    Playback -.->|manifest with<br/>OC URLs| Client
 ```
 
 ---

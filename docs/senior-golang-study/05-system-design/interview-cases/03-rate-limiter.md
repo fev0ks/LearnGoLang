@@ -148,31 +148,24 @@ Bucket: N токенов, заполняется со скоростью R token
 
 ### Архитектура
 
-```
-    Client
-      │
-      ▼
-┌──────────────────────────────────┐
-│         API Gateway              │
-│                                  │
-│  ┌────────────┐                  │
-│  │ Rate Limit │                  │
-│  │ Middleware │                  │
-│  └─────┬──────┘                  │
-│        │  1. extract key         │
-│        │     (user_id / IP)      │
-│        │  2. check_and_increment │ ─────► Redis Cluster
-│        │     (Lua script)        │ ◄─────  (allowed/denied)
-│        │  3. set headers         │
-│        │  4. pass or reject      │
-│  ┌─────▼──────┐                  │
-│  │  Upstream  │                  │
-│  │  Services  │                  │
-│  └────────────┘                  │
-└──────────────────────────────────┘
-         │
-         ▼
-    Config Service  ← лимиты для разных endpoints
+```mermaid
+flowchart TB
+    Client[Client]
+
+    subgraph GW[API Gateway]
+        RL[Rate Limit Middleware<br/>1. extract key user_id/IP<br/>2. check_and_increment<br/>3. set headers<br/>4. pass or reject]
+        Upstream[Upstream Services]
+        RL --> Upstream
+    end
+
+    Redis[(Redis Cluster<br/>Lua script: atomic<br/>check + increment)]
+    Config[Config Service<br/>лимиты для endpoints]
+
+    Client --> RL
+    RL <-->|allowed / denied| Redis
+    RL -.->|load limits| Config
+
+    style GW fill:#dbeafe,stroke:#1e40af
 ```
 
 ---

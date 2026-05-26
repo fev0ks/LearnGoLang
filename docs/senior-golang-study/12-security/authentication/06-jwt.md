@@ -252,29 +252,24 @@ func ClaimsFromContext(ctx context.Context) (*Claims, bool) {
 
 Короткий access token (15 мин) + долгий opaque refresh token (30 дней):
 
-```
-Клиент                      Auth Service               API
-  │                               │                     │
-  │  POST /login                  │                     │
-  │──────────────────────────────▶│                     │
-  │  access_token (JWT, 15 мин)   │                     │
-  │  refresh_token (opaque, 30д)  │                     │
-  │◀──────────────────────────────│                     │
-  │                               │                     │
-  │  GET /api/data                │                     │
-  │  Authorization: Bearer <JWT>  │                     │
-  │──────────────────────────────────────────────────▶  │
-  │                               │  verify sig only    │
-  │  200 OK                       │  (нет запроса к БД) │
-  │◀──────────────────────────────────────────────────  │
-  │                               │                     │
-  │  (через 15 мин JWT истёк)     │                     │
-  │  POST /auth/refresh           │                     │
-  │  { refresh_token: "..." }     │                     │
-  │──────────────────────────────▶│                     │
-  │                               │ lookup refresh в БД │
-  │  новый access_token (JWT)     │ rotate refresh      │
-  │◀──────────────────────────────│                     │
+```mermaid
+sequenceDiagram
+    participant C as Клиент
+    participant Auth as Auth Service
+    participant API
+
+    C->>Auth: POST /login
+    Auth-->>C: access_token (JWT, 15 мин)<br/>refresh_token (opaque, 30д)
+
+    C->>API: GET /api/data<br/>Authorization: Bearer <JWT>
+    Note over API: verify signature только<br/>нет запроса в БД
+    API-->>C: 200 OK
+
+    Note over C: через 15 мин JWT истёк
+
+    C->>Auth: POST /auth/refresh<br/>{ refresh_token: ... }
+    Note over Auth: lookup refresh в БД,<br/>rotate refresh
+    Auth-->>C: новый access_token (JWT)<br/>+ новый refresh_token
 ```
 
 ```go

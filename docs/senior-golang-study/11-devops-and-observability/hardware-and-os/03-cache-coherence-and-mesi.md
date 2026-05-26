@@ -89,24 +89,22 @@ MESI — самый распространённый протокол cache cohe
 
 ### Переходы
 
-```
-                          (загрузил, никто больше не имеет)
-                   ┌───────────────────────────────┐
-                   ↓                               │
-                ┌─────┐                       ┌────┴────┐
-   write   ┌───→│  E  │──────read─by_other───→│    S    │
-       ┌───┘    └─────┘                       └─────────┘
-       ↓                                            │
-   ┌─────┐                                          │write
-   │  M  │←──────────write─────────────────────────┘
-   └─────┘                                          ↓
-       │                                       (invalidate
-       │       other_writes / cache evict        others)
-       └─────────────────────────────────────────────┘
-                                                     ↓
-                                                  ┌─────┐
-                                                  │  I  │
-                                                  └─────┘
+```mermaid
+stateDiagram-v2
+    [*] --> E: read miss<br/>(никто не имеет)
+    E --> S: другое ядро<br/>читает ту же линию
+    E --> M: write локально
+    S --> M: write<br/>(invalidate others)
+    S --> I: другое ядро<br/>пишет в линию
+    M --> S: snoop read<br/>от другого ядра<br/>(write-back в RAM)
+    M --> I: cache evict<br/>(write-back)
+    I --> S: read miss<br/>(другие имеют)
+    I --> E: read miss<br/>(никто не имеет)
+
+    note right of M: Modified — только у меня, RAM stale
+    note right of E: Exclusive — только у меня, RAM совпадает
+    note right of S: Shared — у меня и других, read-only
+    note right of I: Invalid — устарело, надо перечитать
 ```
 
 ### Сценарий пошагово
@@ -187,14 +185,22 @@ Atomic операции (CAS, fetch-and-add) на x86 — это специал�
 С точки зрения программиста — нет shared state, нет contention.
 С точки зрения железа — каждая запись в одну переменную **invalidate'ит** копии cache line на ядре, работающем с другой переменной. Огромное coherence traffic. Программа тормозит в разы.
 
-```
-┌─────── 64-byte cache line ───────┐
-│ counter_a │ counter_b │ ... │ ...│
-└──────────────────────────────────┘
-      ↑           ↑
-   Goroutine 1   Goroutine 2
-   обновляет     обновляет
-   только это    только это
+```mermaid
+flowchart TB
+    subgraph Line["64-byte cache line"]
+        A[counter_a]
+        B[counter_b]
+        Other[... другие данные ...]
+    end
+
+    G1[Goroutine 1<br/>обновляет только это]
+    G2[Goroutine 2<br/>обновляет только это]
+
+    G1 -.->|write| A
+    G2 -.->|write| B
+
+    style A fill:#fef3c7,stroke:#a16207
+    style B fill:#dbeafe,stroke:#1e40af
 ```
 
 Они "не shared" логически — каждая работает со своей переменной. Но физически они в одной линии, и каждая запись `counter_a++` принудительно делает копию у Goroutine 2 invalid → её следующая запись `counter_b++` начнётся с cache miss → подтянет линию обратно → теперь у Goroutine 1 invalid → и так в цикле.
@@ -392,12 +398,21 @@ shards[shard].counter++
 
 На больших серверах (2+ CPU socket'а) каждый CPU имеет свою локальную RAM. Доступ к чужой RAM — через **межсокетный link** (Intel UPI, AMD Infinity Fabric).
 
-```
-┌── Socket 0 ──┐         ┌── Socket 1 ──┐
-│ Cores 0-31   │ ←──────→│ Cores 32-63  │
-│  Local RAM   │  cross  │  Local RAM   │
-│   (DDR5)     │  socket │   (DDR5)     │
-└──────────────┘         └──────────────┘
+```mermaid
+flowchart LR
+    subgraph S0[Socket 0]
+        C0[Cores 0-31]
+        RAM0[(Local RAM<br/>DDR5)]
+        C0 <--> RAM0
+    end
+
+    subgraph S1[Socket 1]
+        C1[Cores 32-63]
+        RAM1[(Local RAM<br/>DDR5)]
+        C1 <--> RAM1
+    end
+
+    S0 <-->|cross-socket link<br/>UPI / Infinity Fabric| S1
 ```
 
 **Latency:**

@@ -51,25 +51,26 @@ CPU — тоже конвейер. И как настоящий конвейер
 
 **Pipeline / Out-of-order engine** — то что делает CPU быстрым на современных задачах (см. ниже).
 
-```
-┌────────────────────── CPU Core ─────────────────────┐
-│                                                      │
-│   ┌──────────┐    ┌──────────┐    ┌─────────────┐   │
-│   │  Fetch   │ →  │  Decode  │ →  │  Execute    │   │
-│   │ + branch │    │ + rename │    │  (ALU/FPU/  │   │
-│   │ predict  │    │          │    │   SIMD)     │   │
-│   └──────────┘    └──────────┘    └─────────────┘   │
-│        ↓               ↓                ↓            │
-│   ┌────────────────────────────────────────────┐    │
-│   │   Reservation stations / scheduler          │    │
-│   └────────────────────────────────────────────┘    │
-│                                                      │
-│   ┌──────────┐    ┌──────────┐                      │
-│   │ Registers│    │   L1 d   │                      │
-│   │  (RAX,   │    │ + L1 i   │                      │
-│   │   ...)   │    └──────────┘                      │
-│   └──────────┘                                       │
-└──────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph Core[CPU Core]
+        Fetch[Fetch<br/>+ branch predict]
+        Decode[Decode<br/>+ rename]
+        Execute[Execute<br/>ALU / FPU / SIMD]
+
+        Sched[Reservation stations<br/>scheduler]
+
+        Regs[Registers<br/>RAX, RBX, ...]
+        L1d[(L1d + L1i)]
+
+        Fetch --> Decode --> Execute
+        Fetch --> Sched
+        Decode --> Sched
+        Execute --> Sched
+
+        Execute --- Regs
+        Fetch --- L1d
+    end
 ```
 
 ---

@@ -34,13 +34,18 @@
 >
 > Контроль над **Order Backend** (синий блок) и контрактом между Backend и Vendor Fulfillment.
 
-```
-Customer Browser
-    │
-    │ HTTP
-    ▼
-Shop API ───────────→ [Order Backend] ←─────→ Vendor Fulfillment
-                       (наш домен)             (vendor's сервис)
+```mermaid
+flowchart LR
+    Browser[Customer Browser]
+    ShopAPI[Shop API]
+    Backend[Order Backend<br/>наш домен]
+    Vendor[Vendor Fulfillment<br/>vendor's сервис]
+
+    Browser -->|HTTP| ShopAPI
+    ShopAPI --> Backend
+    Backend <-->|контракт<br/>наша зона| Vendor
+
+    style Backend fill:#bfdbfe,stroke:#1e40af,color:#0f172a
 ```
 
 ---
@@ -248,89 +253,113 @@ Vendor consumer SDK reads messages
 
 ## Рекомендуемая архитектура
 
-```
-┌─────────────────┐
-│ Customer Browser│
-└────────┬────────┘
-         │ HTTPS
-         ▼
-┌─────────────────┐
-│    Shop API     │
-└────────┬────────┘
-         │ gRPC/HTTP
-         ▼
-┌──────────────────────────────────────────┐
-│         Order Backend                     │
-│  ┌─────────────┐    ┌───────────────┐    │
-│  │ Order API   │ →  │ orders + outbox│   │  ← TX both
-│  └─────────────┘    │  (PostgreSQL)  │   │
-│                     └────────┬───────┘   │
-│                              │           │
-│                              ▼           │
-│                     ┌───────────────┐    │
-│                     │ Outbox Relay  │    │
-│                     └───────┬───────┘    │
-└─────────────────────────────┼────────────┘
-                              │ publish
-                              ▼
-                     ┌───────────────┐
-                     │    Kafka       │
-                     │ orders.placed  │
-                     └───────┬───────┘
-                              │ consume
-                              ▼
-              ┌─────────────────────────────────┐
-              │   Notification Service          │
-              │  ┌─────────┐  ┌──────────────┐  │
-              │  │ Vendor  │  │ Webhook     │  │
-              │  │ Registry│  │ Dispatcher  │  │
-              │  └─────────┘  └──────┬──────┘  │
-              │                       │         │
-              │              ┌────────▼──────┐  │
-              │              │ Retry Queue   │  │
-              │              │ (delayed)     │  │
-              │              └───────────────┘  │
-              │                                 │
-              │              ┌───────────────┐  │
-              │              │ Dead Letter   │  │
-              │              │  (S3/DB)      │  │
-              │              └───────────────┘  │
-              └────────────────┬────────────────┘
-                              │ HTTPS POST
-                              ▼
-                     ┌────────────────┐
-                     │ Vendor         │
-                     │ Fulfillment    │
-                     │ (vendor's API) │
-                     └────────────────┘
+```mermaid
+flowchart TB
+    Browser[Customer Browser]
+    ShopAPI[Shop API]
+
+    subgraph OB[Order Backend]
+        OrderAPI[Order API]
+        DB[(PostgreSQL<br/>orders + outbox)]
+        Relay[Outbox Relay]
+        OrderAPI -->|TX: order + event| DB
+        DB -->|читает unsent| Relay
+    end
+
+    Kafka[("Kafka<br/>orders.placed<br/>partitioned by vendor_id")]
+
+    subgraph NS[Notification Service]
+        Consumer[Kafka Consumer]
+        Registry[Vendor Registry<br/>+ Redis cache]
+        Dispatcher[Webhook Dispatcher<br/>+ per-vendor CB]
+        RetryQ[(Redis Sorted Set<br/>delayed retry queue)]
+        DLQ[(S3<br/>dead letter)]
+
+        Consumer --> Dispatcher
+        Dispatcher -->|lookup| Registry
+        Dispatcher -.->|on failure| RetryQ
+        RetryQ -.->|retry| Dispatcher
+        Dispatcher -.->|max attempts| DLQ
+    end
+
+    Vendor[Vendor Fulfillment<br/>vendor's endpoint]
+
+    Browser -->|HTTPS| ShopAPI
+    ShopAPI -->|gRPC| OrderAPI
+    Relay -->|publish| Kafka
+    Kafka -->|consume| Consumer
+    Dispatcher -->|HTTPS POST<br/>HMAC signed| Vendor
+
+    style OB fill:#dbeafe,stroke:#1e40af
+    style NS fill:#fef3c7,stroke:#a16207
 ```
 
-### Поток
+### Поток — happy path
 
-1. **Customer places order:**
-   - Shop API → Order Backend
-   - В одной транзакции:
-     - INSERT INTO `orders`
-     - INSERT INTO `outbox` (event: `order.placed`)
-   - Return 201 to customer
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as Customer
+    participant API as Shop API
+    participant OB as Order Backend
+    participant DB as PostgreSQL
+    participant R as Outbox Relay
+    participant K as Kafka
+    participant N as Notification Service
+    participant V as Vendor
 
-2. **Outbox relay:**
-   - Background process читает unprocessed outbox rows
-   - Publishes в Kafka topic `orders.placed`
-   - Marks row as sent
-   - **Garantirovannaya delivery** в Kafka (см. [outbox pattern](../../04-architecture-and-patterns/patterns/09-saga-and-outbox.md))
+    C->>API: POST /order
+    API->>OB: CreateOrder
 
-3. **Notification Service consumes:**
-   - Reads from Kafka topic
-   - Looks up vendor's webhook URL и signing key (Vendor Registry)
-   - POSTs to vendor's endpoint
-   - On failure → retry queue с backoff
-   - After max retries → dead letter
+    rect rgb(219, 234, 254)
+        Note over OB,DB: ОДНА транзакция
+        OB->>DB: INSERT orders
+        OB->>DB: INSERT outbox(event)
+        OB->>DB: COMMIT
+    end
 
-4. **Vendor receives:**
-   - Validates HMAC signature
-   - Idempotent processing (use `event_id`)
-   - Returns 200 (ACK) или 4xx/5xx
+    OB-->>API: 201 Created
+    API-->>C: 201 Created
+
+    Note over R,K: Async, ~100ms-1s
+    R->>DB: SELECT unsent outbox
+    R->>K: publish (key=vendor_id)
+    R->>DB: UPDATE sent_at
+
+    K->>N: consume
+    N->>N: lookup vendor webhook<br/>(Redis cache)
+    N->>V: POST + HMAC signature
+    V-->>N: 200 OK
+    Note over N: success: ack Kafka offset
+```
+
+### Поток — vendor unavailable
+
+```mermaid
+sequenceDiagram
+    participant N as Notification Service
+    participant V as Vendor
+    participant R as Retry Queue<br/>(Redis)
+    participant DLQ as Dead Letter<br/>(S3)
+
+    N->>V: POST /webhooks
+    V--xN: timeout / 5xx
+    Note over N: attempt 1 failed
+    N->>R: enqueue with delay=2s, attempt=2
+
+    Note over R: 2s passes
+    R->>N: due
+    N->>V: POST /webhooks
+    V--xN: 5xx
+    N->>R: enqueue with delay=4s, attempt=3
+
+    Note over R: ... exponential backoff up to 1h ...
+
+    Note over N: attempt=20 (≈24h)
+    N->>V: POST /webhooks
+    V--xN: still fails
+    N->>DLQ: save event + error<br/>alert ops
+```
 
 ---
 

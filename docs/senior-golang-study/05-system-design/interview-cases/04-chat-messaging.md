@@ -79,27 +79,30 @@ Fan-out:
 
 ## Фаза 3: Высокоуровневый дизайн
 
-```
-                              ┌──────────────────────────────┐
-                              │    Chat Service Cluster      │
-                              │                              │
-Mobile/Web    WebSocket       │  ┌────────┐  ┌────────┐     │
- Client A ────────────────────►  │Chat    │  │Chat    │     │
-                              │  │Server 1│  │Server 2│ ... │
- Client B ────────────────────►  │(conn A)│  │(conn B)│     │
-                              │  └───┬────┘  └───┬────┘     │
-                              └──────┼────────────┼──────────┘
-                                     │            │
-                              ┌──────▼────────────▼──────────┐
-                              │      Message Bus (Kafka)     │
-                              └──────┬────────────────────────┘
-                        ┌───────────┼────────────────┐
-                        │           │                │
-               ┌────────▼───┐ ┌─────▼──────┐ ┌──────▼──────┐
-               │  Message   │ │  Presence  │ │  Push Notif │
-               │  Store     │ │  Service   │ │  Service    │
-               │(ScyllaDB)  │ │  (Redis)   │ │             │
-               └────────────┘ └────────────┘ └─────────────┘
+```mermaid
+flowchart TB
+    A[Client A<br/>Mobile/Web]
+    B[Client B<br/>Mobile/Web]
+
+    subgraph Cluster[Chat Service Cluster]
+        S1[Chat Server 1<br/>conn A]
+        S2[Chat Server 2<br/>conn B]
+    end
+
+    Kafka[(Kafka<br/>message bus)]
+    DB[(ScyllaDB<br/>message store)]
+    Presence[(Redis<br/>presence service)]
+    Push[Push Notif Service]
+
+    A <-->|WebSocket| S1
+    B <-->|WebSocket| S2
+    S1 --> Kafka
+    S2 --> Kafka
+    Kafka --> DB
+    Kafka --> Presence
+    Kafka --> Push
+
+    style Cluster fill:#dbeafe,stroke:#1e40af
 ```
 
 ---

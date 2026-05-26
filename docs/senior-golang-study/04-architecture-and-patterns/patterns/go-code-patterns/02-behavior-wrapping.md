@@ -62,33 +62,17 @@ func Auth(verifier TokenVerifier) Middleware {
 
 ### Цепочка middleware
 
-```
-Request
-  │
-  ▼
-┌─────────────┐
-│  Recovery   │  ← паника не роняет сервер
-└──────┬──────┘
-       ▼
-┌─────────────┐
-│   Tracing   │  ← открыть span
-└──────┬──────┘
-       ▼
-┌─────────────┐
-│   Logging   │  ← залогировать запрос
-└──────┬──────┘
-       ▼
-┌─────────────┐
-│    Auth     │  ← проверить токен
-└──────┬──────┘
-       ▼
-┌─────────────┐
-│  RateLimit  │  ← ограничить частоту
-└──────┬──────┘
-       ▼
-┌─────────────┐
-│   Handler   │  ← бизнес-логика
-└─────────────┘
+```mermaid
+flowchart TB
+    Req[Request]
+    Rec[Recovery<br/>паника не роняет сервер]
+    Trace[Tracing<br/>открыть span]
+    Log[Logging<br/>залогировать запрос]
+    Auth[Auth<br/>проверить токен]
+    RL[RateLimit<br/>ограничить частоту]
+    Handler[Handler<br/>бизнес-логика]
+
+    Req --> Rec --> Trace --> Log --> Auth --> RL --> Handler
 ```
 
 ### Порядок middleware важен
@@ -236,18 +220,25 @@ func mapStripeError(err error) error {
 
 Adapter — центральный паттерн в **hexagonal (ports and adapters) architecture**. Domain определяет "ports" (интерфейсы), adapter'ы соединяют domain с external world. См. [../02-architecture-patterns.md](../02-architecture-patterns.md).
 
-```
-                  ┌───────────────────┐
-                  │      DOMAIN       │
-                  │  (бизнес-логика)  │
-                  │                   │
-                  │   PaymentProvider │  ← port (интерфейс)
-                  │   EmailSender     │
-                  └───────────────────┘
-                       ↑          ↑
-                  StripeAdapter   SendGridAdapter   ← adapters
-                       │              │
-                   stripe.io      sendgrid.com
+```mermaid
+flowchart TB
+    subgraph Domain["DOMAIN (бизнес-логика)"]
+        PP[PaymentProvider<br/>port: interface]
+        ES[EmailSender<br/>port: interface]
+    end
+
+    SA[StripeAdapter]
+    SGA[SendGridAdapter]
+
+    Stripe[stripe.io]
+    SG[sendgrid.com]
+
+    SA -.->|implements| PP
+    SGA -.->|implements| ES
+    SA --> Stripe
+    SGA --> SG
+
+    style Domain fill:#dbeafe,stroke:#1e40af
 ```
 
 ---
@@ -256,16 +247,17 @@ Adapter — центральный паттерн в **hexagonal (ports and adap
 
 Идея: добавить поведение к существующей реализации без изменения её кода, оборачивая через тот же интерфейс.
 
-```
-         ┌──────────────────────────────────────┐
-         │   MetricsUserStore                   │
-         │   ┌──────────────────────────────┐   │
-         │   │   CachedUserStore            │   │
-         │   │   ┌──────────────────────┐   │   │
-         │   │   │   PostgresUserStore   │   │   │
-         │   │   └──────────────────────┘   │   │
-         │   └──────────────────────────────┘   │
-         └──────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph M["MetricsUserStore"]
+        subgraph C["CachedUserStore"]
+            P[PostgresUserStore]
+        end
+    end
+
+    style M fill:#fef3c7,stroke:#a16207
+    style C fill:#dbeafe,stroke:#1e40af
+    style P fill:#dcfce7,stroke:#15803d
 ```
 
 ```go

@@ -64,31 +64,28 @@ Storage для location:
 
 ## Фаза 3: Высокоуровневый дизайн
 
-```
-Driver App                    Passenger App
-    │                              │
-    │ location update (5s)         │ request ride
-    ▼                              ▼
-┌───────────────────────────────────────────────────┐
-│                  API Gateway                      │
-└──────┬────────────────────────────────────────────┘
-       │
-  ┌────┼──────────────────┐
-  │    │                  │
-  ▼    ▼                  ▼
-┌─────────────┐  ┌──────────────┐  ┌──────────────┐
-│  Location   │  │  Matching    │  │   Trip       │
-│  Service    │  │  Service     │  │   Service    │
-└──────┬──────┘  └──────┬───────┘  └──────┬───────┘
-       │                │                 │
-       ▼                │                 │
-┌─────────────┐         │                 │
-│  Location   │◄────────┘                 │
-│  Store      │                           │
-│  (Redis)    │                    ┌──────▼───────┐
-└─────────────┘                    │  Trip Store  │
-                                   │ (PostgreSQL) │
-                                   └──────────────┘
+```mermaid
+flowchart TB
+    Driver[Driver App<br/>location update 5s]
+    Passenger[Passenger App<br/>request ride]
+    GW[API Gateway]
+
+    LocSvc[Location Service]
+    MatchSvc[Matching Service]
+    TripSvc[Trip Service]
+
+    LocStore[(Redis<br/>H3-indexed locations)]
+    TripStore[(PostgreSQL<br/>trips)]
+
+    Driver --> GW
+    Passenger --> GW
+    GW --> LocSvc
+    GW --> MatchSvc
+    GW --> TripSvc
+
+    LocSvc --> LocStore
+    MatchSvc -->|find nearby drivers| LocStore
+    TripSvc --> TripStore
 ```
 
 ---

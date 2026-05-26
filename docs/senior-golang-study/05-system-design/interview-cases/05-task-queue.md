@@ -77,33 +77,28 @@ Storage для задач (pending/active):
 
 ## Фаза 3: Высокоуровневый дизайн
 
-```
-  Producer                     ┌──────────────────────────────────┐
-  (API/Service)                │        Task Queue System         │
-      │                        │                                  │
-      │  enqueue(task)          │  ┌────────────┐                 │
-      ├────────────────────────►│  │   Queue    │  API            │
-      │                        │  │   API      │  (REST/gRPC)    │
-      │  task_status(id)        │  └─────┬──────┘                 │
-      ├────────────────────────►│        │                        │
-      │                        │  ┌─────▼──────┐                 │
-                               │  │  Broker    │                 │
-                               │  │  (Redis /  │                 │
-                               │  │  Kafka)    │                 │
-                               │  └─────┬──────┘                 │
-                               │        │                        │
-                               │  ┌─────▼──────────────────┐     │
-                               │  │   Worker Pool          │     │
-                               │  │ ┌──────┐ ┌──────┐ ...  │     │
-                               │  │ │  W1  │ │  W2  │      │     │
-                               │  │ └──────┘ └──────┘      │     │
-                               │  └────────────────────────┘     │
-                               │                                  │
-                               │  ┌────────────┐ ┌────────────┐  │
-                               │  │ Task Store │ │  Scheduler │  │
-                               │  │(PostgreSQL)│ │  Service   │  │
-                               │  └────────────┘ └────────────┘  │
-                               └──────────────────────────────────┘
+```mermaid
+flowchart LR
+    Producer[Producer<br/>API / Service]
+
+    subgraph TQ[Task Queue System]
+        QueueAPI[Queue API<br/>REST / gRPC]
+        Broker[(Broker<br/>Redis / Kafka)]
+        Workers[Worker Pool<br/>W1, W2, ...]
+        TaskStore[(PostgreSQL<br/>task store)]
+        Scheduler[Scheduler Service<br/>delayed/cron]
+
+        QueueAPI --> Broker
+        QueueAPI --> TaskStore
+        Broker --> Workers
+        Workers --> TaskStore
+        Scheduler --> Broker
+    end
+
+    Producer -->|enqueue task| QueueAPI
+    Producer -->|task_status id| QueueAPI
+
+    style TQ fill:#dbeafe,stroke:#1e40af
 ```
 
 ---

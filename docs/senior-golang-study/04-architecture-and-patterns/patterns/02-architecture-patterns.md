@@ -45,19 +45,17 @@
 
 Разделить код на слои с однонаправленными зависимостями.
 
-```
-┌───────────────────────────────┐
-│  Transport (HTTP/gRPC/CLI)    │  ← protocol mapping, validation
-├───────────────────────────────┤
-│  Service / Use Case           │  ← бизнес-логика, orchestration
-├───────────────────────────────┤
-│  Repository / Client          │  ← storage, external APIs
-├───────────────────────────────┤
-│  Database / Message Broker    │
-└───────────────────────────────┘
+```mermaid
+flowchart TB
+    L1[Transport<br/>HTTP / gRPC / CLI<br/>protocol mapping, validation]
+    L2[Service / Use Case<br/>бизнес-логика, orchestration]
+    L3[Repository / Client<br/>storage, external APIs]
+    L4[(Database / Message Broker)]
 
-Зависимости: только вниз. Transport не знает о DB.
+    L1 --> L2 --> L3 --> L4
 ```
+
+Зависимости — только вниз. Transport не знает о DB.
 
 **Правила слоёв:**
 
@@ -113,23 +111,23 @@ flowchart LR
 
 Похожа на Hexagonal, но сильнее акцентирует направление зависимостей: внутренние слои не знают о внешних.
 
-```
-          ┌──────────────────────────────────┐
-          │         Frameworks & Drivers      │  ← HTTP, DB drivers, CLI
-          │  ┌────────────────────────────┐   │
-          │  │  Interface Adapters        │   │  ← Controllers, Presenters, Gateways
-          │  │  ┌──────────────────────┐  │   │
-          │  │  │  Application Rules   │  │   │  ← Use Cases
-          │  │  │  ┌────────────────┐  │  │   │
-          │  │  │  │ Enterprise     │  │  │   │  ← Entities, Domain
-          │  │  │  │ Business Rules │  │  │   │
-          │  │  │  └────────────────┘  │  │   │
-          │  │  └──────────────────────┘  │   │
-          │  └────────────────────────────┘   │
-          └──────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph L1["Frameworks & Drivers (HTTP, DB drivers, CLI)"]
+        subgraph L2["Interface Adapters (Controllers, Presenters, Gateways)"]
+            subgraph L3["Application Rules (Use Cases)"]
+                L4["Enterprise Business Rules<br/>Entities, Domain"]
+            end
+        end
+    end
 
-Зависимости: только внутрь. Внешний слой знает о внутреннем, не наоборот.
+    style L1 fill:#fef3c7,stroke:#a16207
+    style L2 fill:#dbeafe,stroke:#1e40af
+    style L3 fill:#dcfce7,stroke:#15803d
+    style L4 fill:#fce7f3,stroke:#9d174d
 ```
+
+Зависимости — только внутрь. Внешний слой знает о внутреннем, не наоборот.
 
 **Практичная Go-структура:**
 
@@ -178,24 +176,27 @@ internal/
 
 Один deployable artifact, но код разделён на модули с контролируемыми границами.
 
-```
-┌─────────────────────────────────────────────────────┐
-│                   Monolith Process                   │
-│                                                     │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  │
-│  │   Orders    │  │  Payments   │  │    Users    │  │
-│  │   Module    │  │   Module    │  │   Module    │  │
-│  │             │  │             │  │             │  │
-│  │ - service   │  │ - service   │  │ - service   │  │
-│  │ - repo      │  │ - repo      │  │ - repo      │  │
-│  │ - models    │  │ - models    │  │ - models    │  │
-│  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘  │
-│         │                │                │         │
-│  ┌──────▼────────────────▼────────────────▼──────┐  │
-│  │              Shared Infrastructure             │  │
-│  │         (DB pool, logger, metrics)             │  │
-│  └───────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph Mono[Monolith Process]
+        direction TB
+
+        subgraph Orders[Orders Module]
+            O[service<br/>repo<br/>models]
+        end
+        subgraph Payments[Payments Module]
+            P[service<br/>repo<br/>models]
+        end
+        subgraph Users[Users Module]
+            U[service<br/>repo<br/>models]
+        end
+
+        Shared[Shared Infrastructure<br/>DB pool, logger, metrics]
+
+        O --> Shared
+        P --> Shared
+        U --> Shared
+    end
 ```
 
 **Правила модульных границ:**
@@ -244,22 +245,29 @@ flowchart LR
 
 Атомарно сохранить изменение и событие в одной DB transaction, отдельный publisher доставляет в broker.
 
-```
-Сервис A
-  │
-  │  BEGIN TRANSACTION
-  ├─── UPDATE orders SET status='completed'
-  ├─── INSERT INTO outbox(event='order.completed', payload='{...}')
-  │  COMMIT
-  │
-  ▼
-Outbox Publisher (background)
-  │
-  ├─── SELECT * FROM outbox WHERE published = false LIMIT 100
-  ├─── Publish to Kafka
-  └─── UPDATE outbox SET published = true
+```mermaid
+sequenceDiagram
+    participant A as Service A
+    participant DB as PostgreSQL
+    participant Pub as Outbox Publisher
+    participant K as Kafka
+    participant B as Service B
 
-Kafka → Сервис B (consumer)
+    rect rgb(219, 234, 254)
+        Note over A,DB: Атомарная TX
+        A->>DB: BEGIN
+        A->>DB: UPDATE orders SET status='completed'
+        A->>DB: INSERT outbox(event, payload)
+        A->>DB: COMMIT
+    end
+
+    Note over Pub,K: Async background
+    Pub->>DB: SELECT * FROM outbox WHERE published=false
+    DB-->>Pub: rows
+    Pub->>K: publish event
+    Pub->>DB: UPDATE outbox SET published=true
+
+    K->>B: consume event
 ```
 
 **Почему outbox решает dual-write:**
@@ -286,31 +294,44 @@ Kafka → Сервис B (consumer)
 Длинный бизнес-процесс разбивается на шаги, каждый имеет compensating action при failure.
 
 **Choreography saga** (через события):
-```
-OrderService          PaymentService         InventoryService
-      │                     │                      │
-      │── OrderCreated ─────►│                      │
-      │                     │── PaymentProcessed ──►│
-      │                     │                      │── InventoryReserved
-      │◄────────────────────────────────────────────│
-      │
-  При ошибке:
-      │                     │◄─── PaymentFailed ───│
-      │◄── OrderCancelled ──│
+
+```mermaid
+sequenceDiagram
+    participant O as Order Service
+    participant P as Payment Service
+    participant I as Inventory Service
+
+    O->>P: OrderCreated
+    P->>I: PaymentProcessed
+    I->>O: InventoryReserved
+
+    Note over O,I: При ошибке:
+    I--xP: InventoryUnavailable
+    P--xO: PaymentRefunded
+    Note over O: OrderCancelled
 ```
 
 **Orchestration saga** (центральный координатор):
-```
-Saga Orchestrator
-  │
-  ├── Step 1: charge payment    → success/failure
-  ├── Step 2: reserve inventory → success/failure
-  ├── Step 3: schedule delivery → success/failure
-  │
-  При failure на шаге N:
-  ├── Compensate Step N-1
-  ├── Compensate Step N-2
-  └── Compensate Step 1
+
+```mermaid
+sequenceDiagram
+    participant Saga as Saga Orchestrator
+    participant P as Payment
+    participant I as Inventory
+    participant D as Delivery
+
+    Saga->>P: 1. charge payment
+    P-->>Saga: ok
+
+    Saga->>I: 2. reserve inventory
+    I-->>Saga: ok
+
+    Saga->>D: 3. schedule delivery
+    D--xSaga: failed
+
+    Note over Saga: compensations in reverse
+    Saga->>I: undo: release inventory
+    Saga->>P: undo: refund payment
 ```
 
 | | Choreography | Orchestration |
@@ -329,23 +350,25 @@ Saga Orchestrator
 
 Повторный вызов той же операции не создаёт повторный side effect.
 
-```
-Клиент                Server                  DB/External
-  │                      │                        │
-  ├── POST /orders ──────►│                        │
-  │   Idempotency-Key: X  │                        │
-  │                       ├── check key X ────────►│
-  │                       │◄── not found ──────────│
-  │                       ├── process order        │
-  │                       ├── INSERT + save key X ─►│
-  │◄── 200 order_id ──────│                        │
-  │                       │                        │
-  │   (network error)     │                        │
-  ├── POST /orders ──────►│  (retry same key X)    │
-  │   Idempotency-Key: X  │                        │
-  │                       ├── check key X ────────►│
-  │                       │◄── found: cached resp ─│
-  │◄── 200 order_id ──────│  (не обрабатывает!)    │
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant S as Server
+    participant DB as DB / External
+
+    C->>S: POST /orders<br/>Idempotency-Key: X
+    S->>DB: check key X
+    DB-->>S: not found
+    S->>DB: process + save key X
+    S-->>C: 200 order_id
+
+    Note over C,S: network error, client retries
+
+    C->>S: POST /orders<br/>Idempotency-Key: X
+    S->>DB: check key X
+    DB-->>S: found: cached response
+    Note over S: не обрабатывает повторно
+    S-->>C: 200 order_id (cached)
 ```
 
 **Техники:**
@@ -398,12 +421,32 @@ flowchart LR
 
 Изолировать свой домен от чужой модели данных.
 
-```
-Наша система             ACL                 Внешняя система
-─────────────────        ──────────────────  ─────────────────
-Order.Status        ←──  StatusMapper    ←── LegacyOrderState
-Payment.Currency    ←──  CurrencyMapper  ←── MoneyDTO
-Customer            ←──  CustomerMapper  ←── UserRecord (legacy schema)
+```mermaid
+flowchart LR
+    subgraph Domain[Наш домен]
+        OS[Order.Status]
+        PC[Payment.Currency]
+        Cust[Customer]
+    end
+
+    subgraph ACL[Anti-Corruption Layer]
+        SM[StatusMapper]
+        CM[CurrencyMapper]
+        UM[CustomerMapper]
+    end
+
+    subgraph Ext[Внешняя система]
+        LOS[LegacyOrderState]
+        MDTO[MoneyDTO]
+        UR[UserRecord<br/>legacy schema]
+    end
+
+    LOS --> SM --> OS
+    MDTO --> CM --> PC
+    UR --> UM --> Cust
+
+    style Domain fill:#dbeafe,stroke:#1e40af
+    style ACL fill:#fef3c7,stroke:#a16207
 ```
 
 **Где нужен ACL:**
@@ -418,17 +461,23 @@ Customer            ←──  CustomerMapper  ←── UserRecord (legacy sche
 
 Постепенно заменять старую систему новой, перехватывая отдельные flows.
 
-```
-Phase 1: Only legacy
-  Request → Legacy System
+```mermaid
+flowchart TB
+    subgraph Phase1["Phase 1: только legacy"]
+        R1[Request] --> L1[Legacy System]
+    end
 
-Phase 2: Strangler proxy
-  Request → Proxy → legacy (most)
-                  → new service (feature X)
+    subgraph Phase2["Phase 2: strangler proxy"]
+        R2[Request] --> P2[Proxy]
+        P2 -->|most routes| L2[Legacy System]
+        P2 -->|feature X| N2[New Service]
+    end
 
-Phase 3: Legacy replaced
-  Request → New System
-  (legacy removed)
+    subgraph Phase3["Phase 3: legacy замещён"]
+        R3[Request] --> N3[New System]
+    end
+
+    Phase1 --> Phase2 --> Phase3
 ```
 
 **Ключевые шаги:**

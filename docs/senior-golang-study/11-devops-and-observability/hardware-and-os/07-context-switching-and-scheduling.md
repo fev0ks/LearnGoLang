@@ -45,14 +45,18 @@ CPU физически выполняет одну инструкцию за р�
 
 Это и есть context switch.
 
-```
-Time:   t1                    t2                t3
-        ┌─────────┐ context   ┌─────────┐ context  ┌─────────┐
-CPU:    │ Task A  │ switch    │ Task B  │ switch   │ Task A  │
-        └─────────┘           └─────────┘          └─────────┘
-                  ↑                     ↑
-                  Save A state          Save B state
-                  Load B state          Load A state
+```mermaid
+gantt
+    title CPU timeline with context switches
+    dateFormat X
+    axisFormat %L
+
+    section CPU
+    Task A : a1, 0, 10
+    Save A / Load B : milestone, switch1, 10, 0
+    Task B : b1, 11, 10
+    Save B / Load A : milestone, switch2, 21, 0
+    Task A : a2, 22, 10
 ```
 
 Switch'и происходят:
@@ -274,31 +278,39 @@ Linux **не** real-time OS из коробки. Есть `PREEMPT_RT` патч 
 
 **P (processor / logical processor)** — "слот" исполнения. Количество P = `GOMAXPROCS`. Хранит **локальную очередь** runnable goroutines.
 
-```
-                Goroutines
-                (миллионы)
-                    G G G G G G G G G G
-                    │ │ │ │ │ │ │ │ │ │
-                    ▼ ▼ ▼ ▼ ▼ ▼ ▼ ▼ ▼ ▼
-                ┌──────────────────────┐
-                │  P0 │ P1 │ P2 │ P3   │  ← Logical processors
-                │  ┌─┐│ ┌─┐│ ┌─┐│ ┌─┐  │     (GOMAXPROCS=4)
-                │  │G││ │G││ │G││ │G│  │
-                │  ├─┤│ ├─┤│ ├─┤│ ├─┤  │     Each P has local
-                │  │G││ │G││ │G││ │G│  │     run queue
-                │  └─┘│ └─┘│ └─┘│ └─┘  │
-                └──────────────────────┘
-                    │   │   │   │
-                    ▼   ▼   ▼   ▼
-                ┌──────────────────────┐
-                │  M0  M1  M2  M3       │ ← OS threads
-                └──────────────────────┘
-                          │
-                          ▼
-                       Linux kernel
-                          │
-                          ▼
-                       CPU cores
+```mermaid
+flowchart TB
+    Goroutines[Goroutines<br/>миллионы<br/>G G G G G G G G G G ...]
+
+    subgraph Ps["Logical Processors P (GOMAXPROCS = 4)"]
+        P0["P0<br/>local runqueue<br/>[G, G, G]"]
+        P1["P1<br/>local runqueue<br/>[G, G]"]
+        P2["P2<br/>local runqueue<br/>[G, G, G, G]"]
+        P3["P3<br/>local runqueue<br/>[G]"]
+    end
+
+    subgraph Ms["OS Threads M"]
+        M0[M0]
+        M1[M1]
+        M2[M2]
+        M3[M3]
+    end
+
+    Kernel[Linux Kernel scheduler]
+    CPU[CPU cores]
+
+    Goroutines --> Ps
+    P0 --> M0
+    P1 --> M1
+    P2 --> M2
+    P3 --> M3
+    Ms --> Kernel
+    Kernel --> CPU
+
+    P3 -.->|work steal| P2
+
+    style Ps fill:#dbeafe,stroke:#1e40af
+    style Ms fill:#fef3c7,stroke:#a16207
 ```
 
 **Поток работы:**

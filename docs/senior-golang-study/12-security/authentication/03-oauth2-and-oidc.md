@@ -16,45 +16,30 @@ OAuth 2.0 — протокол авторизации: пользователь 
 
 ## Authorization Code + PKCE flow
 
-```
-Пользователь    Ваш сервер          Google
-     │                │                 │
-     │  Нажал "Sign   │                 │
-     │  in with Google│                 │
-     │────────────────▶                 │
-     │                │                 │
-     │                │ Сгенерировать:  │
-     │                │ - state         │
-     │                │ - code_verifier │
-     │                │ - nonce         │
-     │                │ Сохранить в БД  │
-     │                │                 │
-     │  Redirect →    │                 │
-     │  accounts.google.com?            │
-     │  client_id=...&                  │
-     │  redirect_uri=...&               │
-     │  code_challenge=hash(verifier)&  │
-     │  state=...&                      │
-     │  nonce=...                       │
-     │◀───────────────                  │
-     │                                  │
-     │  Логин и согласие у Google       │
-     │──────────────────────────────────▶
-     │                                  │
-     │  Redirect → /callback?code=...&state=...
-     │◀──────────────────────────────────
-     │────────────────▶                 │
-     │                │ Проверить state │
-     │                │ Exchange code   │
-     │                │ + code_verifier │──────────────────▶
-     │                │                 │   access_token
-     │                │                 │   id_token (JWT)
-     │                │◀──────────────────────────────────
-     │                │                 │
-     │                │ Верифицировать id_token
-     │                │ Найти/создать аккаунт
-     │                │ Выдать сессию   │
-     │◀───────────────                  │
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User as Пользователь
+    participant App as Ваш сервер
+    participant G as Google
+
+    User->>App: Sign in with Google
+    Note over App: Генерация state,<br/>code_verifier, nonce<br/>+ сохранение в БД
+
+    App-->>User: Redirect → accounts.google.com<br/>?client_id&redirect_uri<br/>&code_challenge=hash(verifier)<br/>&state&nonce
+
+    User->>G: Логин и согласие
+    G-->>User: Redirect → /callback?code&state
+    User->>App: GET /callback?code&state
+
+    Note over App: Проверить state<br/>(защита от CSRF)
+
+    App->>G: POST /token<br/>code + code_verifier
+    G-->>App: access_token<br/>id_token (JWT)
+
+    Note over App: Верифицировать id_token<br/>(подпись, aud, iss, exp, nonce)<br/>Найти/создать аккаунт<br/>Выдать сессию
+
+    App-->>User: Set-Cookie: session
 ```
 
 ---

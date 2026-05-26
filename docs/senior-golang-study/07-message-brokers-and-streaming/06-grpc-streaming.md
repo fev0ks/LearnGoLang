@@ -64,12 +64,14 @@ service ChatService {
 
 ## Архитектура: single broker
 
-```
-┌──────────┐        gRPC bidi stream        ┌──────────┐        gRPC bidi stream        ┌──────────┐
-│  Alice   │◄──────────────────────────────►│  Broker  │◄──────────────────────────────►│   Bob    │
-│ Gateway  │   Chat(stream ↔ stream)        │  :50051  │   Chat(stream ↔ stream)        │ Gateway  │
-│  :8081   │                                │          │                                │  :8082   │
-└──────────┘                                └──────────┘                                └──────────┘
+```mermaid
+flowchart LR
+    Alice[Alice Gateway<br/>:8081]
+    Broker[Broker<br/>:50051]
+    Bob[Bob Gateway<br/>:8082]
+
+    Alice <-->|gRPC bidi stream<br/>Chat stream ↔ stream| Broker
+    Broker <-->|gRPC bidi stream<br/>Chat stream ↔ stream| Bob
 ```
 
 Broker — gRPC сервер. Каждый gateway открывает один постоянный bidi поток. Broker при получении сообщения от одного gateway — рассылает всем остальным.
@@ -219,15 +221,20 @@ func (c *ClientTransport) Close() error { c.cancel(); return c.conn.Close() }
 
 При горизонтальном масштабировании — несколько инстансов broker. Клиенты на разных инстансах не видят друг друга без backplane.
 
-```
-                    Redis Pub/Sub ("grpc:backplane")
-                 ┌──────────────────────────────────────┐
-                 │                                      │
-                 ▼                                      ▼
-┌──────────┐  ┌─────────┐  PUBLISH/SUBSCRIBE  ┌─────────┐  ┌──────────┐
-│  Alice   │◄►│ BrokerA │ ──────────────────► │ BrokerB │◄►│   Bob    │
-│ Gateway  │  │ :50051  │                     │ :50052  │  │ Gateway  │
-└──────────┘  └─────────┘                     └─────────┘  └──────────┘
+```mermaid
+flowchart LR
+    Alice[Alice Gateway]
+    BrokerA[BrokerA<br/>:50051]
+    Redis[(Redis Pub/Sub<br/>grpc:backplane)]
+    BrokerB[BrokerB<br/>:50052]
+    Bob[Bob Gateway]
+
+    Alice <--> BrokerA
+    Bob <--> BrokerB
+    BrokerA <-->|publish / subscribe| Redis
+    BrokerB <-->|publish / subscribe| Redis
+
+    style Redis fill:#fef3c7,stroke:#a16207
 ```
 
 ```go

@@ -111,28 +111,28 @@ Layer 1: FROM scratch           ← read-only
 
 ## Virtual Machine: другой уровень изоляции
 
-```text
-VM stack:
-┌─────────────────────┐
-│ Application         │
-├─────────────────────┤
-│ Guest OS (kernel)   │ ← собственное ядро, драйверы
-├─────────────────────┤
-│ Hypervisor (VMM)    │ ← KVM, VMware ESXi, Hyper-V
-├─────────────────────┤
-│ Host Hardware       │
-└─────────────────────┘
+```mermaid
+flowchart TB
+    subgraph VM["VM Stack"]
+        direction TB
+        VApp[Application]
+        VGuestOS[Guest OS / kernel<br/>собственное ядро, драйверы]
+        VHyper[Hypervisor / VMM<br/>KVM, VMware ESXi, Hyper-V]
+        VHW[Host Hardware]
+        VApp --> VGuestOS --> VHyper --> VHW
+    end
 
-Container stack:
-┌─────────────────────┐
-│ Application         │
-├─────────────────────┤
-│ Container runtime   │ ← runc, namespaces, cgroups
-├─────────────────────┤
-│ Host OS kernel      │ ← shared
-├─────────────────────┤
-│ Host Hardware       │
-└─────────────────────┘
+    subgraph Container["Container Stack"]
+        direction TB
+        CApp[Application]
+        CRuntime[Container runtime<br/>runc, namespaces, cgroups]
+        CKernel[Host OS kernel<br/><b>shared</b> между контейнерами]
+        CHW[Host Hardware]
+        CApp --> CRuntime --> CKernel --> CHW
+    end
+
+    style VGuestOS fill:#fef3c7,stroke:#a16207
+    style CKernel fill:#fee2e2,stroke:#b91c1c
 ```
 
 VM имеет **полностью виртуализированную hardware**: виртуальный CPU, виртуальный диск, виртуальная сеть. Guest OS общается с виртуальным железом через гипервизор.

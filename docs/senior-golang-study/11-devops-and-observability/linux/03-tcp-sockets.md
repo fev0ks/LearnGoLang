@@ -61,29 +61,29 @@ close(sockfd);
 
 ## TCP connection states
 
-```text
-                    [SYN_SENT] ←── client вызвал connect()
-                         │
-                  отправлен SYN
-                         │
-                    [SYN_RCVD] ←── server получил SYN, отправил SYN-ACK
-                         │
-                  получен ACK
-                         ▼
-                   [ESTABLISHED] ←── данные можно передавать
-                         │
-              ┌──────────┴──────────┐
-              │ активное закрытие    │ пассивное закрытие
-              ▼                     ▼
-        [FIN_WAIT_1]          [CLOSE_WAIT] ←── FIN получен, но app ещё не close()
-              │                     │
-        [FIN_WAIT_2]           [LAST_ACK]
-              │                     │
-         [TIME_WAIT]          [CLOSED]
-              │
-  (2*MSL ≈ 60s)
-              │
-          [CLOSED]
+```mermaid
+stateDiagram-v2
+    [*] --> SYN_SENT: client connect()
+    SYN_SENT --> ESTABLISHED: SYN-ACK received,<br/>отправлен ACK
+
+    [*] --> LISTEN: server listen()
+    LISTEN --> SYN_RCVD: получен SYN,<br/>отправлен SYN-ACK
+    SYN_RCVD --> ESTABLISHED: получен ACK
+
+    state "Active close" as ActiveClose {
+        ESTABLISHED --> FIN_WAIT_1: close() locally
+        FIN_WAIT_1 --> FIN_WAIT_2: ACK получен
+        FIN_WAIT_2 --> TIME_WAIT: FIN получен от peer
+        TIME_WAIT --> ClosedA: 2*MSL ≈ 60s
+        ClosedA: CLOSED
+    }
+
+    state "Passive close" as PassiveClose {
+        ESTABLISHED --> CLOSE_WAIT: FIN от peer<br/>(app ещё не close)
+        CLOSE_WAIT --> LAST_ACK: app вызвал close()
+        LAST_ACK --> ClosedP: ACK получен
+        ClosedP: CLOSED
+    }
 ```
 
 **Активное закрытие** — сторона, которая вызвала `close()` первой, проходит FIN_WAIT → TIME_WAIT.
@@ -94,23 +94,16 @@ close(sockfd);
 
 При вызове `listen(sockfd, backlog)` ядро создаёт две очереди:
 
-```text
-Клиент отправляет SYN
-         │
-         ▼
-┌─────────────────────┐
-│    SYN queue        │  ← полностью открытые SYN_RCVD соединения
-│   (backlog limit)   │     ограничена tcp_max_syn_backlog
-└────────┬────────────┘
-         │ получен ACK от клиента → соединение полностью установлено
-         ▼
-┌─────────────────────┐
-│    Accept queue     │  ← ESTABLISHED соединения, ждущие accept()
-│   (backlog limit)   │     ограничена min(backlog, net.core.somaxconn)
-└────────┬────────────┘
-         │ вызван accept()
-         ▼
-  приложение обрабатывает
+```mermaid
+flowchart TB
+    Client[Клиент<br/>отправляет SYN]
+    SynQ[SYN queue<br/>SYN_RCVD соединения<br/>лимит: tcp_max_syn_backlog]
+    AcceptQ[Accept queue<br/>ESTABLISHED, ждут accept<br/>лимит: min backlog, somaxconn]
+    App[Приложение<br/>обрабатывает]
+
+    Client --> SynQ
+    SynQ -->|получен ACK от клиента| AcceptQ
+    AcceptQ -->|accept| App
 ```
 
 **Переполнение accept queue**: при высокой нагрузке и медленном `accept()` — очередь заполняется. Новые соединения **молча отбрасываются** (no response) или сбрасываются с RST. Клиент видит connect timeout или connection refused.
