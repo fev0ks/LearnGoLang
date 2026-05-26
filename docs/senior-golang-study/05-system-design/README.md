@@ -34,6 +34,11 @@
 - [09. Netflix / Streaming](./interview-cases/09-netflix-streaming.md) — Open Connect CDN, per-title encoding
 - [10. Google Drive](./interview-cases/10-google-drive.md) — content-addressed chunking, sync, conflict resolution
 - [11. Payment System](./interview-cases/11-payment-system.md) — double-entry, idempotency, Saga + Outbox
+- [12. Marketplace Vendor Notifications](./interview-cases/12-marketplace-vendor-notifications.md) — webhook delivery, outbox + Kafka, per-vendor circuit breaker, HMAC signing
+
+## Highload как отдельная тема
+
+- [Highload Design Patterns](./highload-design-patterns.md) — walls на каждом уровне нагрузки (CPU/memory/DB/network/coordination/operational/cost), sharding strategies, hot keys, fan-out patterns, реальные истории Twitter / Discord / WhatsApp / Stripe / Cloudflare, конкретный design example 1M concurrent WS chat
 
 ## Подборка
 
