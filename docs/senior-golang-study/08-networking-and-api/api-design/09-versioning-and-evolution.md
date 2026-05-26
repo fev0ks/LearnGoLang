@@ -1,0 +1,259 @@
+# 09. Версионирование и эволюция
+
+Версия API публикуется один раз и должна поддерживаться годами. Изменения
+делятся на два класса: backward-compatible (можно добавлять в текущую версию) и
+breaking (требуют новой версии). Понимание различия — половина успеха.
+
+## Версия в URL
+
+Глобальный префикс: `/v1/...`. Для breaking changes — `/v2/...`. Не суффиксы
+в именах rpc/типов.
+
+```text
+/v1/orders/{orderId}     # v1
+/v2/orders/{orderId}     # v2 — параллельно, пока v1 не EOL
+```
+
+Антипаттерн:
+
+```protobuf
+rpc SearchResorts(SearchResortsRequest) returns(SearchResortsResponse) {
+  option (google.api.http) = { get: "/v1/provider/resorts" };
+}
+rpc SearchResortsV2(SearchResortsRequestV2) returns(SearchResortsResponseV2) {
+  option (google.api.http) = { get: "/v1/provider/resorts/search" };
+}
+```
+
+Версия `V2` живёт в имени RPC, в URL её нет. Для клиента это просто «два
+разных эндпойнта» без подсказки, какой использовать. Если завтра V3 — путь
+ещё длиннее.
+
+Правильно:
+
+- Backward-compatible изменения → добавляешь поля в существующий `SearchResortsRequest`.
+- Breaking → новый префикс `/v2/provider/resorts`.
+
+### Альтернативы URL-version
+
+- **Header `Accept: application/vnd.api+json; version=2`** — GitHub стиль.
+  Технически чище, но менее прозрачно: клиент не видит версии в URL, сложнее
+  отлаживать через curl.
+- **Custom header `X-API-Version: 2`** — Stripe-стиль (привязывает версию к
+  API key, а не к URL).
+- **Query параметр `?version=2`** — редко, неудобно.
+
+URL — самый прозрачный и стандартный. Для большинства проектов это лучший
+выбор.
+
+## Что считается breaking change в proto3
+
+Когда нужно бампать версию URL — это вопрос «сломал ли я существующих клиентов».
+
+### Backward-compatible (можно в той же версии)
+
+| Изменение | Безопасно? |
+|---|---|
+| Добавить новое опциональное поле в message | да |
+| Добавить новый rpc в service | да |
+| Добавить новое значение в enum | да (старые клиенты увидят число) |
+| Добавить новый `oneof` вариант | да |
+| Добавить новый файл/package | да |
+| Добавить `[deprecated = true]` на старое поле/метод | да |
+| Изменить документацию (комментарии) | да |
+
+### Breaking (требуют v2)
+
+| Изменение | Безопасно? |
+|---|---|
+| Удалить поле без `reserved` | нет |
+| Изменить номер существующего поля | нет |
+| Изменить тип поля (int32 → string) | нет |
+| Изменить имя поля (меняется JSON-имя) | нет |
+| Изменить семантику поля без переименования | нет |
+| Сделать optional поле required (новое REQUIRED) | нет |
+| Изменить enum-значение (поменять имя) | нет |
+| Удалить enum-значение | нет |
+| Переименовать rpc / message / service | нет |
+| Изменить структуру `oneof` (переместить поле в/из oneof) | нет |
+
+### Серая зона
+
+- **Добавить REQUIRED поле в request:** технически не breaking для proto-сериализации,
+  но клиенты, которые не знают про это поле, начнут получать ошибки валидации.
+  Лучше делать поле опциональным с разумным дефолтом или бампать версию.
+- **Сменить дефолт enum_unspecified на другое значение:** меняет поведение
+  старых клиентов, которые не задают enum.
+
+### reserved для удаления
+
+При удалении поля **никогда не переиспользовать** его номер:
+
+```protobuf
+message Order {
+  string id = 1;
+  // string oldField = 2;  // удалено в v1.2
+  reserved 2;
+  reserved "oldField";  // зарезервировать ещё и имя
+
+  string newField = 3;  // новый номер, не 2
+}
+```
+
+Иначе старые клиенты, которые шлют `oldField`, попадут в `newField` с
+непредсказуемым результатом.
+
+## option deprecated
+
+В proto есть встроенный механизм:
+
+```protobuf
+service RecService {
+  // Use NewListMethod instead.
+  rpc OldListMethod(OldListRequest) returns (OldListResponse) {
+    option deprecated = true;
+    option (google.api.http) = { get: "/v1/old-endpoint" };
+  }
+
+  rpc NewListMethod(NewListRequest) returns (NewListResponse) {
+    option (google.api.http) = { get: "/v1/new-endpoint" };
+  }
+}
+
+message OldRequest {
+  string oldField = 1 [deprecated = true];  // на уровне поля
+}
+```
+
+Что это даёт:
+
+- В сгенерированном Go-коде — комментарий `// Deprecated:`.
+- gRPC-инструменты помечают такие методы.
+- OpenAPI-генератор отдаёт `"deprecated": true` в Swagger.
+- buf-lint имеет правила, предупреждающие об использовании deprecated.
+
+Сравни с простым комментарием:
+
+```protobuf
+// Deprecated: use NewListMethod instead.
+rpc OldListMethod(...) returns (...);
+```
+
+Комментарий человек прочитает, инструменты — нет. Используй `option deprecated = true`.
+
+## Жизненный цикл версии
+
+Типичный цикл для публичного API:
+
+1. **v1 launch.** Свежая версия, активно развивается (опциональные добавления).
+2. **v2 launch.** Параллельно с v1, обе активны.
+3. **v1 deprecated.** Объявление о EOL за 6-12 месяцев. В response headers
+   добавляется `Sunset: 2027-01-01`.
+4. **v1 sunset.** Полный отключение. Клиенты, которые не мигрировали, получают
+   HTTP 410 Gone.
+
+`Sunset` header — RFC 8594:
+
+```text
+HTTP/1.1 200 OK
+Sunset: Sat, 31 Dec 2026 23:59:59 GMT
+Deprecation: true
+Link: </v2/orders>; rel="successor-version"
+```
+
+Современные клиенты могут парсить это и предупреждать.
+
+## Обновление одного поля без bump'а версии
+
+Часто хочется «доработать» одно поле, не делая v2. Шаги:
+
+### Добавить новое поле параллельно со старым
+
+```protobuf
+message Order {
+  string contactEmail = 1;
+  string contactLastName = 2;
+  string contactLasName = 3 [deprecated = true];  // <-- опечатка из легаси, теперь deprecated
+}
+```
+
+Сервер заполняет оба поля при response. На вход принимает оба, приоритет —
+новому.
+
+### Через некоторое время
+
+Удаление старого = breaking change → нужен v2. Либо оставить deprecated
+навсегда (минимальная боль).
+
+## Множественные параллельные версии
+
+В Stripe-style API key содержит «pinned version»:
+
+```text
+GET /orders
+Stripe-Version: 2023-10-16
+Authorization: Bearer sk_...
+```
+
+Сервер хранит N версий схемы и адаптирует ответ. Клиент сам выбирает, когда
+мигрировать.
+
+Это сложнее в реализации (нужно поддерживать N versions кода), но удобнее для
+клиентов. Подходит для зрелого API с большой клиентской базой.
+
+Для нового API — обычно достаточно `/v1/`, `/v2/` в URL.
+
+## proto3 optional и эволюция
+
+С proto3 3.15 доступен `optional` keyword:
+
+```protobuf
+syntax = "proto3";
+
+message Order {
+  optional bool isActive = 1;  // можно различить unset и false
+}
+```
+
+В Go это `*bool` вместо `bool`. Позволяет добавлять булевые поля и различать
+«клиент не задал» от «клиент задал false».
+
+До 3.15 для этого использовались wrappers (`google.protobuf.BoolValue`). Сейчас
+`optional` чище.
+
+## Поведение при изменении enum
+
+Старые клиенты могут получить новое enum-значение. proto3 обрабатывает это
+так:
+
+- В payload приходит число (например, 5), которого старый клиент не знает.
+- В сгенерированном Go-коде это будет `OrderStatus(5)`, и при сериализации
+  обратно — то же число.
+- Если клиент делает switch — попадает в default. Поэтому **всегда** иметь
+  default-ветку и адекватный fallback.
+
+В коде клиента (на любом языке) — никогда не assume, что enum-значения только
+«известные». Делай default обработку.
+
+## Чек-лист перед изменением proto
+
+Прежде чем мерджить:
+
+1. Изменение в существующем поле? → breaking, нужна v2.
+2. Удаление поля? → reserved + breaking.
+3. Изменение типа? → breaking.
+4. Добавление optional поля? → safe, можно мерджить.
+5. Добавление нового rpc? → safe.
+6. Добавление REQUIRED поля? → серая зона, лучше optional.
+7. Запустил `buf breaking` против main? → если есть нарушения, разбираться.
+
+`buf breaking` в CI ловит большинство breaking-изменений автоматически. См.
+[11-tooling.md](./11-tooling.md).
+
+## Связанные документы
+
+- [02-url-design.md](./02-url-design.md) — версия в path.
+- [05-payloads-and-types.md](./05-payloads-and-types.md) — `reserved`, enum
+  naming.
+- [11-tooling.md](./11-tooling.md) — `buf breaking` в CI.
+- [13-references.md](./13-references.md) — RFC 8594, Stripe versioning.

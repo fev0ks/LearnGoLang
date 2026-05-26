@@ -18,6 +18,28 @@
 - [10. SOAP](./protocols/10-soap.md) — WSDL, конверт, заголовки, Fault, SOAP из Go (ручной + gowsdl), почему проиграл
 - [11. Protocol Comparison](./protocols/11-protocol-comparison.md) — большая таблица REST/gRPC/GraphQL/WebSocket/Webhooks/WebRTC/SOAP, decision tree
 
+### [API Design](./api-design/)
+
+Методичка по проектированию REST + protobuf API с нуля: URL, HTTP-методы,
+моделирование ресурсов, payload, pagination/errors/idempotency, versioning,
+организация proto-репозитория без дублирования external/internal message'ей,
+tooling, готовый greenfield-шаблон. Применима к любому HTTP/gRPC API.
+
+- [README](./api-design/README.md) — оглавление + три аксиомы
+- [01. Принципы](./api-design/01-principles.md) — три аксиомы дизайна
+- [02. URL-дизайн](./api-design/02-url-design.md) — plural, kebab-case, no verbs
+- [03. HTTP-методы](./api-design/03-http-methods.md) — семантика, идемпотентность, POST-as-search
+- [04. Моделирование ресурсов](./api-design/04-resource-modeling.md) — sub-resource vs top-level
+- [05. Payload и типы](./api-design/05-payloads-and-types.md) — Timestamp, Money, FieldMask, field_behavior
+- [06. Cross-cutting concerns](./api-design/06-cross-cutting-concerns.md) — userId/locale/idempotency через metadata
+- [07. Пагинация и фильтрация](./api-design/07-pagination-and-filtering.md) — cursor-based, AIP-158
+- [08. Ошибки](./api-design/08-errors.md) — HTTP-коды + единая Error, RFC 9457
+- [09. Версионирование и эволюция](./api-design/09-versioning-and-evolution.md) — /v1/, deprecated, breaking changes
+- [10. Структура proto-репозитория](./api-design/10-protobuf-repo-layout.md) — без дублирования и мапперов
+- [11. Tooling](./api-design/11-tooling.md) — buf, OpenAPI gen, validators, CI
+- [12. Greenfield-шаблон](./api-design/12-greenfield-template.md) — полный пример Payment-домена
+- [13. Ссылки и источники](./api-design/13-references.md) — AIP, RFC, публичные стайлгайды
+
 ### Подразделы
 
 - [Rate Limiting Examples](./rate-limiting-examples/README.md)
