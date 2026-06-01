@@ -1,14 +1,18 @@
 # Escape Analysis
 
-Escape analysis — это как компилятор Go решает, где разместить значение: на стеке (дёшево, не нагружает GC) или в heap (дороже, GC должен его отслеживать).
+Escape analysis — это как компилятор Go решает, где разместить значение: на стеке (дёшево, не нагружает GC) или в heap (дороже, GC должен его отслеживать). Это одна из главных причин, почему идиоматичный Go быстрый «из коробки» — компилятор бесплатно оставляет на стеке всё, что может.
 
 ## Содержание
 
 - [Базовая идея](#базовая-идея)
+- [Почему это важно: цена heap-аллокации](#почему-это-важно-цена-heap-аллокации)
+- [Как компилятор это решает](#как-компилятор-это-решает)
 - [Что вызывает escape](#что-вызывает-escape)
+- [Что НЕ вызывает escape (мифы)](#что-не-вызывает-escape-мифы)
+- [Interface boxing подробнее](#interface-boxing-подробнее)
 - [Как читать вывод компилятора](#как-читать-вывод-компилятора)
 - [Inlining и его эффект на escape](#inlining-и-его-эффект-на-escape)
-- [Что реально дает выигрыш](#что-реально-дает-выигрыш)
+- [Что реально даёт выигрыш](#что-реально-даёт-выигрыш)
 - [Практический подход](#практический-подход)
 - [Interview-ready answer](#interview-ready-answer)
 
@@ -19,19 +23,71 @@ Escape analysis — это как компилятор Go решает, где �
 Heap: аллокация + GC должен отслеживать объект → дороже
 ```
 
-Компилятор выбирает стек если может **доказать**, что значение не переживает текущий stack frame. Если не может — переносит в heap (escape).
+Компилятор выбирает стек, если может **доказать**, что значение не переживёт текущий stack frame (т.е. после `return` на него точно никто не сошлётся). Если доказать не может — на всякий случай переносит в heap. Это «escape»: значение «убегает» из своего кадра.
 
-Важно: ни `new(T)`, ни `&x` не гарантируют heap — компилятор сам решает:
+Ключевой момент, который ломает интуицию из C++: **в Go синтаксис не определяет, где лежит объект**. Ни `new(T)`, ни `&x` не гарантируют heap. И наоборот, `x := T{}` может оказаться в heap. Решает только анализ потока данных:
+
 ```go
 func sum(a, b int) *int {
     result := a + b
-    return &result // result ESCAPES to heap — живет дольше функции
+    return &result // result ESCAPES: на него остаётся ссылка после return
 }
 
 func process() int {
-    x := computeExpensive() // x может остаться на стеке, если не утекает
+    x := computeExpensive() // x НЕ escapes: значение возвращается копией
     return x
 }
+```
+
+> Правило мышления: **escapes не "потому что взяли адрес", а "потому что адрес пережил функцию"**. Можно взять `&x` сто раз — пока этот адрес не утёк наружу (через return, поле, канал, горутину, интерфейс), `x` останется на стеке.
+
+## Почему это важно: цена heap-аллокации
+
+Стековая аллокация — это буквально `SUB $N, SP` (одна инструкция, ~1 нс). Heap-аллокация дороже на порядки и тянет за собой хвост:
+
+```mermaid
+flowchart LR
+    A["heap allocation"] --> B["найти span<br/>в mcache/mcentral"]
+    B --> C["bookkeeping:<br/>allocBits, метаданные"]
+    C --> D["позже: GC scan<br/>(mark по графу)"]
+    D --> E["позже: GC sweep<br/>(освобождение)"]
+    E --> F["рост alloc rate →<br/>чаще GC → CPU + tail latency"]
+```
+
+Каждый лишний объект в heap — это не только сама аллокация, но и работа GC потом: его надо просканировать в mark-фазе и подмести в sweep. На высоком RPS снижение `allocs/op` напрямую снижает частоту GC и p99-латентность. Поэтому в горячих путях escape analysis — реальная оптимизация, а не микрооптимизаторство.
+
+## Как компилятор это решает
+
+Escape analysis работает на этапе компиляции (после построения SSA, до генерации кода) и строит **граф потока указателей**: куда «течёт» каждый адрес. Если адрес может дотечь до места, которое переживает функцию, — переменная помечается escaping.
+
+Два ключевых понятия в выводе `-m=2`:
+
+- **`escapes to heap` / `moved to heap`** — сама переменная уезжает в heap.
+- **`leaking param`** — *параметр* функции «утекает»: переданный в него указатель сохраняется куда-то, что живёт дольше вызова. Это влияет на вызывающую сторону: если ты передаёшь `&x` в функцию с `leaking param`, твой `x` тоже может escape.
+
+```go
+// p НЕ утекает — функция только читает, escape анализ это видит
+func length(p *string) int { return len(*p) }   // p does not escape
+
+// p утекает — сохраняем указатель в глобал, переживающий вызов
+var stash *string
+func keep(p *string) { stash = p }               // leaking param: p
+```
+
+Анализ **межпроцедурный, но ограниченный**: компилятор учитывает уже проанализированные функции того же пакета и инлайнинг, но не может заглянуть во всё подряд. Если data flow слишком сложный или уходит через границу, которую не видно (например, через `interface{}` метод, вызванный динамически), компилятор делает консервативный вывод — escape. Лучше «перебдеть» (heap всегда корректен), чем оставить на стеке то, что переживёт кадр (это был бы dangling pointer).
+
+```mermaid
+flowchart TD
+    V["переменная / &x"] --> Q1{"адрес уходит<br/>за пределы функции?"}
+    Q1 -->|"нет"| S["СТЕК"]
+    Q1 -->|"return указателя"| H["HEAP"]
+    Q1 -->|"в interface{}"| H
+    Q1 -->|"захват замыканием"| H
+    Q1 -->|"в горутину"| H
+    Q1 -->|"в slice/map/поле,<br/>живущие дольше"| H
+    Q1 -->|"слишком большой<br/>для стека"| H
+    Q1 -->|"размер неизвестен<br/>на компиляции"| H
+    Q1 -->|"data flow слишком<br/>сложный (консервативно)"| H
 ```
 
 ## Что вызывает escape
@@ -41,7 +97,7 @@ func process() int {
 ```go
 func newVal() *int {
     x := 42
-    return &x // x escapes to heap: переживает stack frame функции
+    return &x // x escapes: переживает stack frame функции
 }
 ```
 
@@ -49,30 +105,34 @@ func newVal() *int {
 
 ```go
 func toInterface(x int) interface{} {
-    return x // x escapes to heap (для non-pointer значений, не влезающих в pointer word)
+    return x // x escapes: значение боксится в heap
 }
 
 func toAny(s MyStruct) any {
     return s // s escapes: struct копируется в heap
 }
 
-// Но pointer остается pointer — дополнительного escape нет:
+// Но указатель остаётся указателем — дополнительного escape нет:
 func ptrToInterface(p *int) interface{} {
-    return p // p (pointer) НЕ escapes: сам pointer помещается в interface.data
+    return p // p (pointer) уже указатель → кладётся в interface.data как есть
 }
 ```
+
+Подробнее — в разделе [Interface boxing](#interface-boxing-подробнее).
 
 ### 3. Closure захватывает переменную
 
 ```go
 func makeCounter() func() int {
-    count := 0         // count escapes: живет в замыкании дольше функции
+    count := 0         // count escapes: живёт в замыкании дольше функции
     return func() int {
         count++
         return count
     }
 }
 ```
+
+Замыкание захватывает `count` **по ссылке** (иначе `count++` не работал бы между вызовами), поэтому переменная переезжает в heap — её разделяет возвращённая функция.
 
 ### 4. Передача в другую горутину
 
@@ -87,18 +147,99 @@ func spawn(x int) {
 ### 5. Слишком большой объект для стека
 
 ```go
-func bigArray() [1 << 20]byte {
-    var arr [1 << 20]byte // 1MB — слишком велик для стека, escapes to heap
-    return arr
+func bigArray() {
+    var arr [10 << 20]byte // 10 MB — больше лимита стекового объекта → heap
+    _ = arr
 }
 ```
 
-### 6. Сложный data flow, который компилятор не может проанализировать
+Есть порог (`maxStackVarSize`, ~10 MB на объект и отдельный лимит на frame) — даже не-убегающий, но огромный объект кладётся в heap, чтобы не раздувать стек.
+
+### 6. Slice/map неизвестного на компиляции размера
 
 ```go
-func storeInSlice(items []*int, val int) {
-    items = append(items, &val) // val escapes: хранится в slice, живущем снаружи
+func build(n int) []int {
+    s := make([]int, n) // n не константа → backing array в heap
+    return s
 }
+
+func fixed() {
+    s := make([]int, 16) // размер — константа, не убегает → может остаться на стеке
+    _ = s
+}
+```
+
+### 7. Сохранение указателя в структуру/слайс/мапу, живущие дольше
+
+```go
+func storeInSlice(items *[]*int, val int) {
+    *items = append(*items, &val) // val escapes: хранится в slice снаружи
+}
+```
+
+### 8. Передача в `...interface{}` (классическая ловушка `fmt`)
+
+```go
+func log(id int) {
+    fmt.Println(id) // id escapes: Println(a ...any) — аргументы боксятся в []any
+}
+```
+
+`fmt.Println`, `fmt.Printf` и т.п. принимают `...any`, поэтому **любой** переданный аргумент уходит в heap. Это частая причина «неожиданных» аллокаций в горячем коде с логированием.
+
+## Что НЕ вызывает escape (мифы)
+
+Распространённые заблуждения — что из этого escapes:
+
+```go
+// МИФ: "взял адрес → значит heap". НЕТ.
+func noEscape() int {
+    x := 42
+    p := &x      // взяли адрес
+    *p = 43      // используем
+    return *p    // p никуда не утёк → x остаётся на стеке
+}
+
+// МИФ: "new() всегда heap". НЕТ.
+func newOnStack() int {
+    p := new(int) // new, но не убегает → стек
+    *p = 5
+    return *p
+}
+
+// МИФ: "указатель в локальный слайс → heap". Зависит.
+func localPtrSlice() {
+    x := 10
+    s := []*int{&x} // если s и &x не покидают функцию → стек
+    _ = s[0]
+}
+```
+
+Также не escapes (при прочих равных): передача указателя в функцию, которая его только **читает** (`does not escape`); pointer receiver метода, не сохраняющий `this`; небольшая структура, переданная и возвращённая по значению.
+
+## Interface boxing подробнее
+
+Когда конкретное значение кладётся в `interface{}`/`any`, runtime упаковывает его в пару `(type, data)`. Поле `data` — это машинное слово (указатель). Что происходит дальше:
+
+| Что кладём в interface | Что с памятью |
+|---|---|
+| указатель (`*T`) | кладётся в `data` как есть, **без аллокации** |
+| значение размером больше слова (struct, большой int в некоторых случаях) | копируется в **heap**, в `data` кладётся адрес копии |
+| маленькое значение | в общем случае тоже escapes в heap (компилятор консервативен) |
+
+Спецоптимизация рантайма: для **маленьких целых** (`0..255`) Go использует таблицу `runtime.staticuint64s` — boxing такого `byte`/маленького `int` может не аллоцировать, отдавая указатель на готовую константу. Аналогично boxing пустой строки/нулевых значений может не аллоцировать. Но полагаться на это в коде не стоит — проверяй `-benchmem`.
+
+```go
+type Stringer interface{ String() string }
+
+// value receiver + value в интерфейсе → копия в heap при каждом присваивании
+type Val struct{ data [64]byte }
+func (v Val) String() string { return "x" }
+var s Stringer = Val{}    // Val{} копируется в heap
+
+// pointer receiver → в interface кладётся указатель, без копии
+var s2 Stringer = &Val{}  // &Val{} — указатель, но сам Val всё равно escapes
+                          // (на него ссылается долгоживущий интерфейс)
 ```
 
 ## Как читать вывод компилятора
@@ -107,17 +248,19 @@ func storeInSlice(items []*int, val int) {
 # Базовый вывод escape analysis
 go build -gcflags="-m" ./...
 
-# Детальный вывод с причинами (level 2)
+# Детальный вывод с причинами и решениями по inlining (level 2)
 go build -gcflags="-m=2" ./...
 
-# Для конкретного файла
+# Только конкретный пакет
 go build -gcflags="-m" ./path/to/package
+
+# Заодно отключить inlining, чтобы увидеть "чистый" escape без оптимизаций
+go build -gcflags="-m -l" ./...
 ```
 
-Пример вывода:
+Пример:
 
 ```go
-// main.go
 package main
 
 import "fmt"
@@ -139,108 +282,120 @@ func main() {
 
 ```bash
 $ go build -gcflags="-m" .
-./main.go:6:2: moved to heap: x          ← x в функции newInt escapes
-./main.go:10:14: v escapes to heap       ← аргумент printVal(v interface{}) escapes
-./main.go:11:13: ... argument does not escape  ← fmt.Println инлайнит и оптимизирует
+./main.go:6:2: moved to heap: x                 ← x в newInt escapes (возврат &x)
+./main.go:10:14: leaking param: v               ← v утекает в Println
+./main.go:11:13: ... argument does not escape   ← сам []any для Println не убегает
 ```
 
-Ключевые сообщения:
-- `moved to heap: x` — переменная x перемещена в heap;
-- `x escapes to heap` — x уходит в heap из-за...;
-- `does not escape` — хорошо, остается на стеке;
-- `inlining call to ...` — функция была инлайнена.
+Шпаргалка по сообщениям:
+
+| Сообщение | Что значит |
+|---|---|
+| `moved to heap: x` | переменная `x` перемещена в heap |
+| `x escapes to heap` | `x` уходит в heap (обычно с указанием причины) |
+| `... does not escape` | хорошо — осталось на стеке |
+| `leaking param: p` | параметр `p` утекает (его указатель сохраняется дольше вызова) |
+| `leaking param: p to result ~r0` | `p` утекает именно в возвращаемое значение |
+| `inlining call to f` | функция `f` заинлайнена (может убрать escape) |
+| `can inline f` | `f` достаточно дешёвая для инлайна |
+| `... argument does not escape` | аргументы вызова не убегают |
 
 ## Inlining и его эффект на escape
 
-Когда функция инлайнится, её переменные анализируются в контексте вызывающей функции — и часто перестают escape:
+Когда функция инлайнится, её переменные анализируются **в контексте вызывающей функции** — и часто перестают escape, потому что компилятор видит, что адрес не покидает caller:
 
 ```go
 func add(a, b int) *int {
     result := a + b
-    return &result // БЕЗ inlining: result escapes
+    return &result // БЕЗ inlining: result escapes (возврат указателя)
 }
 
 func main() {
-    p := add(1, 2) // С inlining: result может остаться на стеке main
-    fmt.Println(*p)
+    p := add(1, 2) // С inlining: тело add вставлено в main,
+    fmt.Println(*p) // компилятор видит, что &result не покидает main → стек
 }
 ```
 
 ```bash
 $ go build -gcflags="-m=2" .
-./main.go:3:2: add: result escapes to heap      # без inlining
-./main.go:3:2: inlining call to add              # с inlining
-# → result больше не escapes
+./main.go:3: can inline add
+./main.go:7: inlining call to add
+# → после инлайна result больше не escapes
 ```
 
-Компилятор инлайнит "дешевые" функции (по умолчанию budget = 80 AST nodes). Инлайнинг может **убирать** escape и снижать allocation pressure.
+Компилятор инлайнит «дешёвые» функции (бюджет ≈ 80 AST-нод; функции с `defer` в старых версиях, рекурсия и некоторые конструкции инлайн ломают). Вывод: дробление на мелкие функции обычно **не** вредит — инлайн их склеит и escape уберёт. Не пиши «один большой метод ради скорости».
 
-## Что реально дает выигрыш
+## Что реально даёт выигрыш
 
 Escape analysis важен в **горячих путях** с высоким RPS:
 
 ```go
-// Плохо: аллокация на каждый вызов
+// Плохо: возврат указателя + конкатенация → heap allocation на каждый вызов
 func buildKey(userID, resource string) *string {
-    key := userID + ":" + resource // string concatenation → heap allocation
+    key := userID + ":" + resource
     return &key
 }
 
-// Лучше: возвращать значение (если caller не хранит указатель долго)
+// Лучше: возвращаем значение (caller не хранит указатель)
 func buildKey(userID, resource string) string {
-    return userID + ":" + resource // может остаться на стеке
+    return userID + ":" + resource // может остаться на стеке у caller
 }
 
-// Ещё лучше для hot path: pre-allocated buffer
+// Ещё лучше для hot path: переиспользуемый буфер, ноль аллокаций
 func buildKey(buf []byte, userID, resource string) []byte {
     buf = append(buf[:0], userID...)
     buf = append(buf, ':')
     buf = append(buf, resource...)
-    return buf // reuse buffer, no heap allocation
+    return buf
 }
 ```
+
+Измеряем эффект бенчмарком:
 
 ```go
-// Плохо: interface вызов с value type аллоцирует копию
-type Handler interface {
-    Handle(req Request) Response
+func BenchmarkKeyPtr(b *testing.B) {
+    for i := 0; i < b.N; i++ {
+        _ = buildKeyPtr("u123", "orders")
+    }
 }
-type MyHandler struct{ ... }
-func (h MyHandler) Handle(req Request) Response { ... }  // value receiver
-
-var h Handler = MyHandler{...}
-h.Handle(req) // MyHandler копируется в heap при каждом присваивании
-
-// Лучше для частых переприсваиваний: pointer receiver
-var h Handler = &MyHandler{...}  // указатель в interface — нет лишней аллокации
 ```
+
+```bash
+$ go test -bench=. -benchmem
+BenchmarkKeyPtr-8     20000000    62 ns/op    32 B/op   1 allocs/op   ← escapes
+BenchmarkKeyVal-8     50000000    24 ns/op     0 B/op   0 allocs/op   ← стек
+```
+
+`1 allocs/op` → `0 allocs/op` — вот что ищем. На 100k RPS это десятки тысяч лишних аллокаций в секунду, которые перестают грузить GC.
+
+Для объектов, которые **обязаны** жить в heap, но создаются часто, — `sync.Pool` (детали в [04-garbage-collector](./04-garbage-collector.md)).
 
 ## Практический подход
 
-1. **Не оптимизируй вслепую** — сначала найди hot path через `pprof` CPU/alloc profile.
-2. **Измеряй аллокации** в benchmark перед изменениями:
+1. **Не оптимизируй вслепую** — сначала найди hot path через `pprof` (CPU / alloc profile).
+2. **Измеряй аллокации** в benchmark до изменений:
    ```bash
    go test -bench=BenchmarkHandler -benchmem
    # BenchmarkHandler-8   100000   15234 ns/op   2048 B/op   8 allocs/op
    ```
 3. **Читай `-gcflags=-m`** только для горячих функций.
-4. **Проверяй эффект** — `allocs/op` в benchmark должен уменьшиться.
-5. Если код стал менее читаемым ради нулевой аллокации вне hot path — не стоит.
+4. **Проверяй эффект** — `allocs/op` должен уменьшиться, а бенч стать быстрее.
+5. Если ради нулевой аллокации **вне** hot path код стал нечитаемым — откатывай.
 
-Антипаттерны:
+Антипаттерны (не делай без измерений):
 ```go
-// Не делай это без измерений:
-// - замена interface на concrete type везде
-// - *T везде вместо T "для оптимизации"
-// - sync.Pool для объектов вне горячего пути
+// - замена interface на concrete type "везде"
+// - *T вместо T повсюду "для оптимизации" (часто наоборот добавляет escape!)
+// - sync.Pool для объектов вне горячего пути (усложняет, ловит баги с reuse)
+// - один гигантский метод вместо мелких (инлайн и так склеит мелкие)
 ```
 
 ## Interview-ready answer
 
-**"Что такое escape analysis и почему это важно?"**
+**«Что такое escape analysis и почему это важно?»**
 
-Escape analysis — это статический анализ компилятора, который определяет, может ли значение безопасно жить на стеке, или должно уйти в heap. Стековые аллокации бесплатны (stack pointer сдвинулся). Heap аллокации дороже — GC должен их отслеживать, что влияет на allocation rate и tail latency.
+Это статический анализ компилятора, который определяет, может ли значение безопасно жить на стеке или должно уйти в heap. Стек бесплатный (сдвиг SP), heap дороже — GC потом сканирует и подметает объект, что повышает alloc rate, частоту GC и tail latency. Компилятор строит граф потока указателей: если адрес переживает кадр функции — переменная escapes.
 
-Значение escapes в heap если: возвращается по указателю из функции, хранится в интерфейсе (если не fits in pointer), захватывается замыканием, передается в горутину. Проверить можно через `go build -gcflags="-m"`.
+Значение escapes, если: возвращается по указателю, кладётся в `interface{}` (когда это не просто указатель), захватывается замыканием, передаётся в горутину, сохраняется в долгоживущий slice/map/поле, имеет неизвестный на компиляции размер или слишком большое. Классика — `fmt.Println(x)`: аргументы `...any` всегда боксятся в heap.
 
-Важный нюанс: `new(T)` и `&x` не гарантируют heap — компилятор может держать их на стеке. И наоборот, `x := T{}` может уйти в heap, если компилятор не может доказать, что x не переживет frame. На практике оптимизируют только hot path после измерения `allocs/op` в benchmark.
+Главный нюанс: синтаксис не решает. `new(T)` и `&x` **не** гарантируют heap; `x := T{}` может уйти в heap. Решает только то, утёк ли адрес. Проверяю через `go build -gcflags=-m`, оптимизирую только hot path после `-benchmem`, цель — снизить `allocs/op`, в идеале до нуля (буфер / возврат по значению / `sync.Pool`).
