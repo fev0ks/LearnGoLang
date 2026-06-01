@@ -10,13 +10,19 @@
 - [04. Interfaces, Method Sets And Nil](./04-interfaces-method-sets-and-nil.md) — iface/eface layout, itab vtable, typed nil trap, method sets
 - [05. Slices](./05-slices.md) — slice header (ptr/len/cap), shared backing array, append реаллокация, sub-slice, copy ловушки, nil vs empty, memory retention
 - [06. Memory Model](./06-memory-model.md) — happens-before, channel/mutex/Once/atomic гарантии, data race, race detector
-- [07. Scheduler And Preemption](./07-scheduler-and-preemption.md) — GMP модель, work stealing, async preemption, syscall handoff, GOMAXPROCS в контейнерах
-- [08. Syscall](./08-syscall.md) — entersyscall/exitsyscall, P handoff, sysmon retake, CGo цена, LockOSThread, thread exhaustion
-- [09. Netpoller](./09-netpoller.md) — epoll/kqueue интеграция, pollDesc, горутина parking/wakeup, SetDeadline, DNS resolver
-- [10. Error Handling](./10-error-handling.md) — errors.Is/As, wrapping chain, sentinel vs typed errors, errgroup, errCh паттерн, errors.Join
-- [11. Generics](./11-generics.md) — type parameters, constraints, any/comparable, ~underlying type, слайс-утилиты, stdlib slices/maps/cmp, подводные камни, производительность
+- [07. Error Handling](./07-error-handling.md) — errors.Is/As, wrapping chain, sentinel vs typed errors, errgroup, errCh паттерн, errors.Join
+- [08. Generics](./08-generics.md) — type parameters, constraints, any/comparable, ~underlying type, слайс-утилиты, stdlib slices/maps/cmp, подводные камни, производительность
+- [Runtime Scheduler](./runtime-scheduler/) — GMP scheduler, syscall handoff, netpoller (подраздел)
 - [Map Internals](./map-internals/) — hmap+bmap (до 1.24), Swiss Tables (1.24+), ctrl bytes, matchH2, tombstones (подраздел)
 - [Memory Internals](./memory-internals/) — стек и heap, аллокатор, escape analysis, GC (подраздел)
+
+## Runtime Scheduler (подраздел)
+
+Как горутины исполняются на OS-потоках и почему I/O не блокирует scheduler. Файлы тесно связаны, читать по порядку:
+
+- [01. Scheduler And Preemption](./runtime-scheduler/01-scheduler-and-preemption.md) — GMP модель, work stealing, async preemption, syscall handoff, GOMAXPROCS в контейнерах
+- [02. Syscall](./runtime-scheduler/02-syscall.md) — entersyscall/exitsyscall, P handoff, sysmon retake, CGo цена, LockOSThread, thread exhaustion
+- [03. Netpoller](./runtime-scheduler/03-netpoller.md) — epoll/kqueue интеграция, pollDesc, горутина parking/wakeup, SetDeadline, DNS resolver
 
 ## Map Internals (подраздел)
 

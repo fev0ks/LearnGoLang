@@ -177,7 +177,7 @@ Syscall завершается:
 
 Для **сетевого I/O**: горутина паркуется через netpoller, M **не блокируется** вообще — это принципиальное отличие от файлового I/O.
 
-→ Подробно: [08-syscall.md](./08-syscall.md) — `entersyscall`/`exitsyscall` механика, sysmon retake, CGo, `LockOSThread`, thread exhaustion.
+→ Подробно: [02-syscall.md](./02-syscall.md) — `entersyscall`/`exitsyscall` механика, sysmon retake, CGo, `LockOSThread`, thread exhaustion.
 
 ## Netpoller интеграция
 
@@ -197,7 +197,7 @@ conn.Read(buf):
 
 Именно поэтому 100k concurrent TCP connections работают с 4–8 OS threads. Горутины в `Gwaiting` потребляют только память (~2 KB стека), не CPU.
 
-→ Подробно: [09-netpoller.md](./09-netpoller.md) — pollDesc, epoll интеграция, SetDeadline через таймеры, DNS resolver, диагностика CLOSE_WAIT/TIME_WAIT.
+→ Подробно: [03-netpoller.md](./03-netpoller.md) — pollDesc, epoll интеграция, SetDeadline через таймеры, DNS resolver, диагностика CLOSE_WAIT/TIME_WAIT.
 
 ## GOMAXPROCS в контейнерах
 

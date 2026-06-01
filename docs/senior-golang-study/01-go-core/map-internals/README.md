@@ -29,4 +29,4 @@
 
 - [Memory Internals: Allocator](../memory-internals/02-allocator.md) — как Go аллоцирует память под map elements
 - [Memory Internals: GC](../memory-internals/04-garbage-collector.md) — write barrier при записи в map
-- [07. Scheduler](../07-scheduler-and-preemption.md) — GMP, почему concurrent map access не thread-safe
+- [07. Scheduler](../runtime-scheduler/01-scheduler-and-preemption.md) — GMP, почему concurrent map access не thread-safe

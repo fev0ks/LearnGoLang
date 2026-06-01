@@ -461,7 +461,7 @@ Go runtime использует модель **M:N scheduling**:
 
 Goroutines выполняются на P. Каждый P привязан к одному M. Если goroutine блокируется (syscall, channel), runtime может **переместить** другие goroutines с этого P на другой M, чтобы продолжить работу.
 
-Подробнее: [01-go-core/07-scheduler-and-preemption.md](../../01-go-core/07-scheduler-and-preemption.md) и [07-context-switching-and-scheduling.md](./07-context-switching-and-scheduling.md).
+Подробнее: [01-go-core/runtime-scheduler/01-scheduler-and-preemption.md](../../01-go-core/runtime-scheduler/01-scheduler-and-preemption.md) и [07-context-switching-and-scheduling.md](./07-context-switching-and-scheduling.md).
 
 ### Почему goroutines дешевле
 
@@ -584,5 +584,5 @@ PostgreSQL forks процесс на каждое соединение — из�
 
 См. также:
 - [linux/04-signals-and-processes.md](../linux/04-signals-and-processes.md) — сигналы, init, zombie/orphan, PID 1
-- [01-go-core/07-scheduler-and-preemption.md](../../01-go-core/07-scheduler-and-preemption.md) — Go scheduler внутри
+- [01-go-core/runtime-scheduler/01-scheduler-and-preemption.md](../../01-go-core/runtime-scheduler/01-scheduler-and-preemption.md) — Go scheduler внутри
 - [07-context-switching-and-scheduling.md](./07-context-switching-and-scheduling.md) — следующий файл про планирование

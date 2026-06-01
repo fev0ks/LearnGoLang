@@ -62,7 +62,7 @@ GODEBUG=gctrace=1 ./myapp
 
 - [Memory Internals: Allocator](../../01-go-core/memory-internals/02-allocator.md) — mcache/mcentral/mheap, size classes
 - [Memory Internals: GC](../../01-go-core/memory-internals/04-garbage-collector.md) — tri-color, write barrier, GOGC
-- [Scheduler](../../01-go-core/07-scheduler-and-preemption.md) — GMP модель, P handoff, work stealing
-- [Syscall](../../01-go-core/08-syscall.md) — почему file I/O блокирует M
-- [Netpoller](../../01-go-core/09-netpoller.md) — почему network I/O не блокирует M
+- [Scheduler](../../01-go-core/runtime-scheduler/01-scheduler-and-preemption.md) — GMP модель, P handoff, work stealing
+- [Syscall](../../01-go-core/runtime-scheduler/02-syscall.md) — почему file I/O блокирует M
+- [Netpoller](../../01-go-core/runtime-scheduler/03-netpoller.md) — почему network I/O не блокирует M
 - [Incident Investigation](../../11-devops-and-observability/incident-investigation-and-profiling/01-how-to-investigate-production-issues.md) — как профилирование вписывается в общую диагностику

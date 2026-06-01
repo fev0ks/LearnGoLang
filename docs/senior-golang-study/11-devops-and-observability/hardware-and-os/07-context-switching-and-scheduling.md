@@ -321,7 +321,7 @@ flowchart TB
 
 **Локальная queue + work stealing:** если у одного P много задач, а другой простаивает — простаивающий "крадёт" половину задач у занятого. Это даёт балансировку без глобальной блокировки.
 
-Подробнее: [01-go-core/07-scheduler-and-preemption.md](../../01-go-core/07-scheduler-and-preemption.md).
+Подробнее: [01-go-core/runtime-scheduler/01-scheduler-and-preemption.md](../../01-go-core/runtime-scheduler/01-scheduler-and-preemption.md).
 
 ---
 
@@ -515,7 +515,7 @@ GODEBUG=schedtrace=1000,scheddetail=1 ./myapp
 
 См. также:
 - [06-processes-and-threads.md](./06-processes-and-threads.md) — что такое процессы и потоки
-- [01-go-core/07-scheduler-and-preemption.md](../../01-go-core/07-scheduler-and-preemption.md) — Go scheduler в деталях
+- [01-go-core/runtime-scheduler/01-scheduler-and-preemption.md](../../01-go-core/runtime-scheduler/01-scheduler-and-preemption.md) — Go scheduler в деталях
 - [09-concurrency-and-performance/profiling/04-goroutine-concurrency-profiling.md](../../09-concurrency-and-performance/profiling/04-goroutine-concurrency-profiling.md) — профилирование scheduling в Go
 - [Linux kernel docs: CFS Scheduler](https://www.kernel.org/doc/html/latest/scheduler/sched-design-CFS.html)
 - [Go scheduler: M:N threading](https://rakyll.org/scheduler/) — Jaana Dogan, классическая статья

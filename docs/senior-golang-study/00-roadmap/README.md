@@ -46,7 +46,7 @@
 | [04. Interfaces, Method Sets And Nil](../01-go-core/04-interfaces-method-sets-and-nil.md) | iface/eface layout, itab vtable, typed nil trap | ★★★ |
 | [05. Escape Analysis](../01-go-core/memory-internals/03-escape-analysis.md) | stack vs heap, причины escape, `-gcflags=-m` | ★★ |
 | [06. Memory Model](../01-go-core/06-memory-model.md) | happens-before, channel/mutex/Once гарантии, data race | ★★★ |
-| [07. Scheduler And Preemption](../01-go-core/07-scheduler-and-preemption.md) | GMP, work stealing, async preemption, GOMAXPROCS | ★★★ |
+| [07. Scheduler And Preemption](../01-go-core/runtime-scheduler/01-scheduler-and-preemption.md) | GMP, work stealing, async preemption, GOMAXPROCS | ★★★ |
 | [08. Garbage Collector](../01-go-core/memory-internals/04-garbage-collector.md) | tri-color, write barrier, GOGC, GOMEMLIMIT, gctrace | ★★★ |
 
 #### 09 Concurrency (конспекты в разработке)

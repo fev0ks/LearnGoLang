@@ -509,7 +509,7 @@ return fmt.Errorf("OrderService.CreateOrder: validation: input.Items.Length: inv
 
 - [Go blog: error wrapping](https://go.dev/blog/go1.13-errors) — оригинальный пост про %w
 - [09-concurrency-and-performance/04-context-patterns.md](../../../09-concurrency-and-performance/04-context-patterns.md) — context в concurrency контексте
-- [01-go-core/10-error-handling.md](../../../01-go-core/10-error-handling.md) — глубоко про error handling в Go
+- [01-go-core/07-error-handling.md](../../../01-go-core/07-error-handling.md) — глубоко про error handling в Go
 - [11-devops-and-observability/logging-and-log-shipping/02-logging-in-go-and-why-wrap-logger.md](../../../11-devops-and-observability/logging-and-log-shipping/02-logging-in-go-and-why-wrap-logger.md) — про structured logging
 
 ---
