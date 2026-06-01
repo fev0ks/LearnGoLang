@@ -271,15 +271,19 @@ func sysAlloc(n uintptr, sysStat *sysMemStat) unsafe.Pointer {
 }
 ```
 
-Иерархия памяти heap сверху вниз: **arena → span → page → объект**.
+Память heap организована так: OS отдаёт **arena** (64 MB); arena физически нарезана на **pages** (по 8 KB); смежные страницы объединяются в **span**; span нарезан на слоты, в которых лежат **объекты** одного size class.
+
+Важно, что это **не строгая линейная иерархия**: `page` — это базовая единица деления arena, а `span` стоит «сбоку» — он не лежит «между» arena и page, а **группирует** несколько подряд идущих страниц:
 
 ```mermaid
 flowchart TD
-    OS["OS (mmap)"] --> Arena["heapArena<br/>64 MB на 64-bit Linux"]
-    Arena --> Span["mspan<br/>группа страниц одного size class"]
-    Span --> Page["page = 8 KB"]
-    Page --> Obj["слоты под объекты<br/>одного size class"]
+    OS["OS (mmap)"] --> Arena["heapArena — 64 MB<br/>(8192 страницы по 8 KB)"]
+    Arena -->|"физически делится на"| Page["page = 8 KB<br/>базовая единица"]
+    Page -->|"смежные страницы<br/>группируются в"| Span["mspan<br/>= N страниц одного size class"]
+    Span -->|"нарезан на слоты"| Obj["объекты<br/>одного size class"]
 ```
+
+Иными словами: `arena ⊃ pages`, `span = группа смежных pages`, `объекты ⊂ span`. Один span может занимать одну страницу (для мелких объектов) или много подряд (для крупных).
 
 ### heapArena
 
