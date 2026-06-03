@@ -558,6 +558,8 @@ func handleRequest(r *http.Request) {
 
 ## Диагностика
 
+> 🧪 **Запусти сам:** [examples/gctrace](./examples/gctrace/) — синтетическая программа, на которой видно срабатывание GC, формулу `NextGC ≈ 2×live`, влияние `GOGC`/`GOMEMLIMIT` и рост `GCCPUFraction` под нагрузкой. `GODEBUG=gctrace=1 go run . -live=50`
+
 ```bash
 # GC trace в stderr: показывает каждый GC цикл
 GODEBUG=gctrace=1 ./myapp

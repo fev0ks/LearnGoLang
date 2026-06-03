@@ -8,6 +8,7 @@
 - [02. Allocator](./02-allocator.md) — size classes, mcache/mcentral/mheap иерархия, tiny allocator, noscan, large objects
 - [03. Escape Analysis](./03-escape-analysis.md) — как компилятор решает стек или heap, причины escape, `-gcflags=-m`, inlining
 - [04. Garbage Collector](./04-garbage-collector.md) — tri-color mark-and-sweep, write barrier, фазы GC, GOGC, GOMEMLIMIT, sync.Pool, gctrace
+- 🧪 [examples/gctrace](./examples/gctrace/) — запускаемое демо: наблюдать GC через `GODEBUG=gctrace=1` (формула NextGC, GOGC/GOMEMLIMIT, GCCPUFraction)
 
 ## Связи между файлами
 

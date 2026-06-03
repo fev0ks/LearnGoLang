@@ -23,6 +23,7 @@
 - [01. Scheduler And Preemption](./runtime-scheduler/01-scheduler-and-preemption.md) — GMP модель, work stealing, async preemption, syscall handoff, GOMAXPROCS в контейнерах
 - [02. Syscall](./runtime-scheduler/02-syscall.md) — entersyscall/exitsyscall, P handoff, sysmon retake, CGo цена, LockOSThread, thread exhaustion
 - [03. Netpoller](./runtime-scheduler/03-netpoller.md) — epoll/kqueue интеграция, pollDesc, горутина parking/wakeup, SetDeadline, DNS resolver
+- [04. Timers](./runtime-scheduler/04-timers.md) — time.Sleep/Timer/Ticker, per-P timer heap, почему не syscall, утечки тикеров, история timerproc
 
 ## Map Internals (подраздел)
 
