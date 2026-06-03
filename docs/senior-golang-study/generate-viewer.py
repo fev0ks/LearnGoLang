@@ -217,7 +217,7 @@ function setBreadcrumb(path) {
   document.getElementById('breadcrumb').innerHTML = html;
 }
 
-function loadFile(path) {
+function loadFile(path, anchor) {
   const content = FILES[path];
   if (content === undefined) return;
 
@@ -269,9 +269,24 @@ function loadFile(path) {
 
   try { contentEl.querySelectorAll('pre code, .raw-file code').forEach(el => hljs.highlightElement(el)); } catch(e) {}
 
-  document.getElementById('content-wrap').scrollTop = 0;
+  if (anchor) {
+    // прокрутить к разделу; повторяем после небольшой паузы, чтобы учесть reflow от mermaid
+    if (!scrollToAnchor(anchor)) document.getElementById('content-wrap').scrollTop = 0;
+    setTimeout(() => scrollToAnchor(anchor), 150);
+  } else {
+    document.getElementById('content-wrap').scrollTop = 0;
+  }
   openParents(path);
   scrollItemIntoView(path);
+}
+
+function scrollToAnchor(id) {
+  const target = document.getElementById(id);
+  if (!target) return false;
+  const wrap = document.getElementById('content-wrap');
+  const scrollTo = wrap.scrollTop + target.getBoundingClientRect().top - wrap.getBoundingClientRect().top - 16;
+  wrap.scrollTo({ top: scrollTo, behavior: 'smooth' });
+  return true;
 }
 
 function openParents(path) {
@@ -370,18 +385,15 @@ document.getElementById('content-wrap').addEventListener('click', e => {
   if (href.startsWith('mailto:')) return;
   if (href.startsWith('#')) {
     e.preventDefault();
-    const target = document.getElementById(decodeURIComponent(href.slice(1)));
-    if (target) {
-      const wrap = document.getElementById('content-wrap');
-      const scrollTo = wrap.scrollTop + target.getBoundingClientRect().top - wrap.getBoundingClientRect().top - 16;
-      wrap.scrollTo({ top: scrollTo, behavior: 'smooth' });
-    }
+    scrollToAnchor(decodeURIComponent(href.slice(1)));
     return;
   }
   e.preventDefault();
+  const hashIdx = href.indexOf('#');
+  const anchor = hashIdx >= 0 ? decodeURIComponent(href.slice(hashIdx + 1)) : null;
   const resolved = resolvePath(currentPath, href);
   if (resolved && FILES[resolved] !== undefined) {
-    loadFile(resolved);
+    loadFile(resolved, anchor);
   }
 });
 
@@ -414,7 +426,7 @@ function addHeadingIds(html) {
   return html.replace(/<(h[1-6])>([\s\S]*?)<\/\1>/g, function(_, tag, inner) {
     const text = inner.replace(/<[^>]+>/g, '');
     const id = text.toLowerCase()
-      .replace(/[^\w\u0400-\u04ff\s-]/g, '').trim().replace(/\s+/g, '-');
+      .replace(/[^\w\u0400-\u04ff\s-]/g, '').trim().replace(/\s/g, '-');
     return '<' + tag + ' id="' + id + '">' + inner + '</' + tag + '>';
   });
 }

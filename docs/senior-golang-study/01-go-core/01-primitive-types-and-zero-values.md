@@ -50,6 +50,9 @@ fmt.Println(len(empty) == 0) // true — len nil slice = 0
 var m map[string]int
 _ = m["key"]      // OK: возвращает 0
 m["key"] = 1      // PANIC: assignment to entry in nil map
+m["key"]++        // PANIC тоже: ++ это read-modify-WRITE
+delete(m, "key")  // OK: delete на nil map — безопасный no-op
+// исправление: m := make(map[string]int)
 
 // nil channel — блокирует send и receive навсегда
 var ch chan int
