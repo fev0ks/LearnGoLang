@@ -10,7 +10,7 @@
 
 | Раздел | Что внутри | Статус |
 |--------|------------|--------|
-| [01 Go Core](../01-go-core/README.md) | scheduler, GC, interfaces/nil, memory model, escape analysis | ✅ 8 файлов |
+| [01 Go Core](../01-go-core/README.md) | типы/nil, slices, memory model, scheduler+syscall+netpoller+timers, map internals, memory internals (stack/heap, allocator, escape, GC) | ✅ 18 файлов + 2 примера |
 | [02 Go Stdlib](../02-go-stdlib-and-tools/README.md) | net/http, context, sync, encoding/json, pprof | темы + ссылки |
 | [03 Go Libraries](../03-go-libraries-and-ecosystem/README.md) | chi, pgx, zap, testify, wire/fx — сравнения | темы + ссылки |
 | [04 Architecture](../04-architecture-and-patterns/README.md) | Go patterns, service topologies, DDD, SOLID, API versioning, background workers | ✅ 10 файлов |
@@ -36,7 +36,7 @@
 
 **Цель:** объяснить, как Go работает под капотом — планировщик, GC, interfaces/nil, memory model.
 
-#### 01 Go Core
+#### 01 Go Core — основы языка
 
 | Файл | Что внутри | Приоритет |
 |------|-----------|-----------|
@@ -44,10 +44,37 @@
 | [02. Numeric Types, Sizes And Overflow](../01-go-core/02-numeric-types-integer-sizes-and-overflow.md) | int vs int64, диапазоны, overflow | ★ |
 | [03. Value vs Pointer Semantics](../01-go-core/03-value-vs-pointer-semantics.md) | когда копировать, mutex copy bug, slice aliasing | ★★ |
 | [04. Interfaces, Method Sets And Nil](../01-go-core/04-interfaces-method-sets-and-nil.md) | iface/eface layout, itab vtable, typed nil trap | ★★★ |
-| [05. Escape Analysis](../01-go-core/memory-internals/03-escape-analysis.md) | stack vs heap, причины escape, `-gcflags=-m` | ★★ |
-| [06. Memory Model](../01-go-core/06-memory-model.md) | happens-before, channel/mutex/Once гарантии, data race | ★★★ |
-| [07. Scheduler And Preemption](../01-go-core/runtime-scheduler/01-scheduler-and-preemption.md) | GMP, work stealing, async preemption, GOMAXPROCS | ★★★ |
-| [08. Garbage Collector](../01-go-core/memory-internals/04-garbage-collector.md) | tri-color, write barrier, GOGC, GOMEMLIMIT, gctrace | ★★★ |
+| [05. Slices](../01-go-core/05-slices.md) | slice header, shared backing array, append реаллокация, copy ловушки, memory retention | ★★★ |
+| [06. Memory Model](../01-go-core/06-memory-model.md) | happens-before, channel/mutex/Once/atomic гарантии, data race | ★★★ |
+| [07. Error Handling](../01-go-core/07-error-handling.md) | errors.Is/As, wrapping chain, sentinel vs typed, errgroup, errors.Join | ★★ |
+| [08. Generics](../01-go-core/08-generics.md) | type parameters, constraints, ~underlying, slices/maps/cmp, производительность | ★★ |
+
+#### 01 Go Core — Runtime Scheduler (подраздел)
+
+| Файл | Что внутри | Приоритет |
+|------|-----------|-----------|
+| [01. Scheduler And Preemption](../01-go-core/runtime-scheduler/01-scheduler-and-preemption.md) | GMP, LRQ/GRQ, work stealing, async preemption, sysmon, GOMAXPROCS | ★★★ |
+| [02. Syscall](../01-go-core/runtime-scheduler/02-syscall.md) | entersyscall/exitsyscall, P handoff, sysmon retake, vDSO, CGo, thread exhaustion | ★★★ |
+| [03. Netpoller](../01-go-core/runtime-scheduler/03-netpoller.md) | epoll/kqueue, pollDesc, parking/wakeup, куда приходят данные, SetDeadline | ★★ |
+| [04. Timers](../01-go-core/runtime-scheduler/04-timers.md) | time.Sleep/Timer/Ticker, per-P timer heap, почему не syscall, утечки | ★★ |
+| 🧪 [examples/schedtrace](../01-go-core/runtime-scheduler/examples/schedtrace/) | запускаемое демо: `GODEBUG=schedtrace=1000`, work stealing, spinning M | — |
+
+#### 01 Go Core — Memory Internals (подраздел)
+
+| Файл | Что внутри | Приоритет |
+|------|-----------|-----------|
+| [01. Stack And Heap](../01-go-core/memory-internals/01-stack-and-heap.md) | goroutine stack (2KB, рост копированием), heapArena, scavenger, RSS vs VSZ | ★★ |
+| [02. Allocator](../01-go-core/memory-internals/02-allocator.md) | size classes, mcache/mcentral/mheap, tiny allocator, noscan, large objects | ★★ |
+| [03. Escape Analysis](../01-go-core/memory-internals/03-escape-analysis.md) | stack vs heap, причины escape, `-gcflags=-m`, goroutine capture | ★★★ |
+| [04. Garbage Collector](../01-go-core/memory-internals/04-garbage-collector.md) | tri-color, write barrier, фазы GC, GOGC, GOMEMLIMIT, Green Tea GC, gctrace | ★★★ |
+| 🧪 [examples/gctrace](../01-go-core/memory-internals/examples/gctrace/) | запускаемое демо: `GODEBUG=gctrace=1`, формула NextGC, GOGC/GOMEMLIMIT | — |
+
+#### 01 Go Core — Map Internals (подраздел)
+
+| Файл | Что внутри | Приоритет |
+|------|-----------|-----------|
+| [01. hmap + bmap (до 1.24)](../01-go-core/map-internals/01-hmap-before-1.24.md) | bucket layout, tophash, overflow chains, incremental evacuation | ★★ |
+| [02. Swiss Tables (1.24+)](../01-go-core/map-internals/02-swiss-tables-since-1.24.md) | open addressing, ctrl bytes, matchH2 bitset, directory | ★★ |
 
 #### 09 Concurrency (конспекты в разработке)
 
