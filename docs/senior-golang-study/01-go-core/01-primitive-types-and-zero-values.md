@@ -36,6 +36,7 @@
 | `complex64` | 8 байт | `0+0i` | `var c complex64` |
 | `complex128` | 16 байт | `0+0i` | `var c complex128` |
 | `*T` (pointer) | 4 / 8 байт ² | `nil` | `var p *int` |
+| `[N]T` (array) | N × размер T ³ | все элементы zero | `var a [3]int` |
 | `[]T` (slice) | 24 байта ¹ | `nil` | `var s []int` |
 | `map[K]V` | 8 байт ² | `nil` | `var m map[string]int` |
 | `chan T` | 8 байт ² | `nil` | `var ch chan int` |
@@ -44,7 +45,8 @@
 | `struct{}` | 0 байт | all fields zero | `var s MyStruct` |
 
 ¹ — заголовок структуры: `string` = `{*byte, int}`, `[]T` = `{*T, int, int}` (ptr + len + cap).  
-² — зависит от платформы: 4 байта на 32-bit, 8 байт на 64-bit (обычно).
+² — зависит от платформы: 4 байта на 32-bit, 8 байт на 64-bit (обычно).  
+³ — массив `[N]T` — это **значение** фиксированного размера (`N × размер T`), а не ссылка: при присваивании/передаче копируется целиком, длина — часть типа (`[3]int` и `[4]int` — разные типы). Это ключевое отличие от slice — подробнее в [02-value-vs-pointer-semantics](./02-value-vs-pointer-semantics.md) и [04-slices](./04-slices.md).
 
 Проверить размер любого типа: `unsafe.Sizeof(x)`.
 
