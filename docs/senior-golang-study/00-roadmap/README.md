@@ -47,6 +47,7 @@
 | [06. Error Handling](../01-go-core/06-error-handling.md) | errors.Is/As, wrapping chain, sentinel vs typed, errgroup, errors.Join | ★★ |
 | [07. Generics](../01-go-core/07-generics.md) | type parameters, constraints, ~underlying, slices/maps/cmp, производительность | ★★ |
 | [08. Strings](../01-go-core/08-strings.md) | string header, immutability, byte vs rune, UTF-8, range по рунам, конверсии, substring retention | ★★ |
+| [09. Unsafe And Low-Level](../01-go-core/09-unsafe-and-low-level.md) | unsafe.Pointer vs uintptr, Sizeof/Alignof/Offsetof, padding, zero-copy string↔[]byte | ★ |
 
 #### 01 Go Core — Runtime Scheduler (подраздел)
 

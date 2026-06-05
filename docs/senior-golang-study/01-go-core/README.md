@@ -12,6 +12,7 @@
 - [06. Error Handling](./06-error-handling.md) — errors.Is/As, wrapping chain, sentinel vs typed errors, errgroup, errCh паттерн, errors.Join
 - [07. Generics](./07-generics.md) — type parameters, constraints, any/comparable, ~underlying type, слайс-утилиты, stdlib slices/maps/cmp, подводные камни, производительность
 - [08. Strings](./08-strings.md) — string header (ptr/len), immutability, byte vs rune, UTF-8, len=байты, range по рунам, конверсии и аллокации, substring retention, strings.Builder, string(int) ловушка, unsafe-конверсии
+- [09. Unsafe And Low-Level](./09-unsafe-and-low-level.md) — unsafe.Pointer vs uintptr, Sizeof/Alignof/Offsetof, padding/alignment, zero-copy string↔[]byte, layout, где используется в рантайме
 - [Runtime Scheduler](./runtime-scheduler/) — GMP scheduler, syscall handoff, netpoller (подраздел)
 - [Map Internals](./map-internals/) — hmap+bmap (до 1.24), Swiss Tables (1.24+), ctrl bytes, matchH2, tombstones (подраздел)
 - [Memory Internals](./memory-internals/) — стек и heap, аллокатор, escape analysis, GC (подраздел)
