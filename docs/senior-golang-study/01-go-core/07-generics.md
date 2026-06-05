@@ -2,6 +2,17 @@
 
 Generics появились в Go 1.18. Решают конкретную задачу: писать типобезопасный code reuse без дублирования и без потери типовой информации. Не серебряная пуля — у generics есть цена и ограничения.
 
+## Содержание
+
+- [Type parameters и constraints — синтаксис](#type-parameters-и-constraints--синтаксис)
+- [Когда generics vs `interface{}` vs кодогенерация](#когда-generics-vs-interface-vs-кодогенерация)
+- [Generic data structures](#generic-data-structures)
+- [Пакеты `slices`, `maps`, `cmp` из stdlib](#пакеты-slices-maps-cmp-из-stdlib)
+- [Подводные камни](#подводные-камни)
+- [Производительность: когда generics медленнее interface](#производительность-когда-generics-медленнее-interface)
+- [Пример: типобезопасный Result тип](#пример-типобезопасный-result-тип)
+- [Interview-ready answer](#interview-ready-answer)
+
 ---
 
 ## Type parameters и constraints — синтаксис
