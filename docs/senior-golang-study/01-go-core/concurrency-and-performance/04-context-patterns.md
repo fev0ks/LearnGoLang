@@ -449,16 +449,146 @@ func handler(w http.ResponseWriter, r *http.Request) {
 
 ---
 
+## Разбор примеров-загадок
+
+### Загадка 1: Background().Done() блокируется вечно
+
+```go
+func main() {
+    ctx := context.Background()
+    select {
+    case <-ctx.Done():
+        fmt.Println("done")
+    }
+}
+```
+
+<details>
+<summary>Ответ</summary>
+
+```
+fatal error: all goroutines are asleep - deadlock!
+```
+
+У `context.Background()` (и `TODO()`) метод `Done()` возвращает **nil-канал** — он никогда не закроется, чтение блокируется навсегда. `select` без других case или `default` зависает → дедлок.
+
+`Done()` возвращает рабочий канал только у производных контекстов с отменой (`WithCancel/Timeout/Deadline`). Если ждёшь `Done()` — убедись, что контекст вообще отменяемый.
+</details>
+
+---
+
+### Загадка 2: дочерний таймаут не продлевает родительский
+
+```go
+start := time.Now()
+parent, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+defer cancel()
+child, cancel2 := context.WithTimeout(parent, 1*time.Hour)
+defer cancel2()
+
+<-child.Done()
+fmt.Println(child.Err(), time.Since(start).Round(10*time.Millisecond))  // ?
+```
+
+<details>
+<summary>Ответ</summary>
+
+```
+context deadline exceeded 50ms
+```
+
+Дочерний контекст наследует дедлайн родителя, если тот **раньше**. `WithTimeout(parent, 1h)` не может продлить жизнь за пределы родительских 50ms — берётся **минимум** из дедлайнов по цепочке. Через 50ms отменяется parent → отменяется child. Контекстом нельзя «расширить» отведённое время; для этого нужен отдельный корень (`WithoutCancel` + новый таймаут).
+</details>
+
+---
+
+### Загадка 3: производный от уже отменённого
+
+```go
+ctx, cancel := context.WithCancel(context.Background())
+cancel()                                    // отменяем сразу
+child, _ := context.WithTimeout(ctx, time.Hour)
+fmt.Println(child.Err())                    // ?
+```
+
+<details>
+<summary>Ответ</summary>
+
+```
+context.Canceled
+```
+
+Контекст, произведённый от **уже отменённого**, рождается отменённым — `child.Err()` сразу `context.Canceled` (унаследована причина родителя, не `DeadlineExceeded`). Любой `select { case <-child.Done(): }` сработает мгновенно. Полезно помнить: проверяй `ctx.Err()` перед дорогой работой — родитель мог отмениться ещё до входа.
+</details>
+
+---
+
+### Загадка 4: ключ-строка vs типизированный ключ
+
+```go
+type ctxKey string
+ctx := context.WithValue(context.Background(), "user", "alice") // string-ключ
+ctx = context.WithValue(ctx, ctxKey("user"), "bob")            // типизированный
+
+fmt.Println(ctx.Value("user"))          // ?
+fmt.Println(ctx.Value(ctxKey("user")))  // ?
+```
+
+<details>
+<summary>Ответ</summary>
+
+```
+alice
+bob
+```
+
+Ключи сравниваются и по **значению, и по типу**. `"user"` (тип `string`) и `ctxKey("user")` (тип `ctxKey`) — **разные** ключи, оба значения сосуществуют. Отсюда два вывода: (1) на голый `string`-ключ `go vet` ругается («should not use built-in type string as key») — два пакета с ключом `"user"` затрут друг друга; (2) используй неэкспортируемый тип ключа (`type ctxKey struct{}` / `string`), чтобы коллизий между пакетами не было в принципе.
+</details>
+
+---
+
+### Загадка 5: отмена идёт только вниз по дереву
+
+```go
+parent, cancelP := context.WithCancel(context.Background())
+childA, _ := context.WithCancel(parent)
+childB, cancelB := context.WithCancel(parent)
+
+cancelB()
+fmt.Println(childB.Err(), childA.Err(), parent.Err())  // ?
+cancelP()
+fmt.Println(childA.Err())                              // ?
+```
+
+<details>
+<summary>Ответ</summary>
+
+```
+context.Canceled <nil> <nil>
+context.Canceled
+```
+
+`cancel()` распространяется **только вниз** — на потомков. Отмена `childB` не трогает ни брата `childA`, ни родителя. А отмена `parent` отменяет всех потомков (`childA` становится `Canceled`). Поэтому `cancel` дочернего безопасен (не убьёт соседей), а отмена/таймаут на родителе гасит всё поддерево.
+</details>
+
+---
+
 ## Interview-ready answer
 
-**Q: Почему ctx — первый параметр, а не поле struct?**
+**1. Почему ctx — первый параметр, а не поле struct?**
+Struct живёт дольше запроса; ctx в поле = все будущие запросы получат устаревший контекст первого (его deadline/values/cancel). Context — per-request, не per-service. Параметр делает зависимость явной и упрощает тесты.
 
-Struct существует дольше одного запроса. Если сохранить ctx в struct, все последующие запросы получат устаревший контекст первого запроса — с его deadline, значениями, и отменой. Context — это per-request данные, а не per-service. Кроме того, передача через параметр делает зависимость явной и упрощает тестирование.
+**2. Когда использовать context.Value?**
+Только request-scoped метаданные для cross-cutting (trace/request ID, user ID для логов). Не бизнес-данные и не опциональные параметры — это прячет зависимости и ломает тестируемость. Ключ — неэкспортируемого типа, иначе коллизии и `go vet`-варнинг.
 
-**Q: Когда использовать context.Value?**
+**3. Зачем defer cancel(), если timeout сам истечёт?**
+`WithCancel/Timeout` регистрирует контекст в дереве отмены (а таймер — ещё и timer). Без `cancel()` ресурсы висят до срабатывания таймаута/отмены родителя. На высоком RPS это копит goroutine/timer leak и давит на GC.
 
-Только для request-scoped метаданных, которые нужны cross-cutting concerns: trace ID, request ID, authenticated user ID для логов. Нельзя передавать через context бизнес-данные — это прячет зависимости, усложняет тестирование, нарушает явность интерфейсов.
+**4. Background vs TODO?**
+Оба — пустой корневой неотменяемый контекст; `Done()` у них nil (ждать бессмысленно — зависнет). Разница семантическая: `Background` — осознанный корень (main, тесты, top-level); `TODO` — заглушка «контекст нужен, но непонятно откуда», `vet`/`staticcheck` напоминают убрать.
 
-**Q: Зачем defer cancel() если timeout всё равно истечёт?**
+**5. Что с дедлайнами в цепочке контекстов?**
+Берётся самый ранний дедлайн по цепочке — потомок не может продлить родителя. Производный от уже отменённого рождается отменённым (`Err()` = причина родителя сразу).
 
-`WithTimeout` создаёт внутреннюю горутину-таймер и channel. Без `cancel()` эти ресурсы не освобождаются до истечения timeout или отмены parent context. В сервисе с высоким RPS каждый запрос без `cancel()` накапливает goroutine leak — через несколько минут счётчик горутин растёт, увеличивается GC pressure.
+**6. Куда распространяется cancel?**
+Только вниз, на потомков. Отмена ребёнка не трогает родителя и братьев; отмена/таймаут родителя гасит всё поддерево. `WithoutCancel` (1.21+) обрывает наследование отмены, сохраняя values — для дел вроде audit-лога после ухода клиента.

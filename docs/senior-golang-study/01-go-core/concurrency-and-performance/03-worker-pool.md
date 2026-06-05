@@ -451,17 +451,146 @@ for _, url := range urls {
 
 ---
 
+## Разбор примеров-загадок
+
+### Загадка 1: closer не в отдельной горутине → deadlock
+
+```go
+func squares(nums []int) []int {
+    out := make(chan int)        // unbuffered
+    var wg sync.WaitGroup
+    for _, n := range nums {
+        wg.Add(1)
+        go func(x int) {
+            defer wg.Done()
+            out <- x * x         // ?
+        }(n)
+    }
+    wg.Wait()                    // ?
+    close(out)
+
+    var res []int
+    for v := range out {
+        res = append(res, v)
+    }
+    return res
+}
+```
+
+<details>
+<summary>Ответ</summary>
+
+```
+fatal error: all goroutines are asleep - deadlock!
+```
+
+Воркеры блокируются на `out <- x*x` (канал unbuffered, читателя ещё нет — `range out` идёт **после** `wg.Wait()`). Значит `wg.Done()` не вызывается → `wg.Wait()` висит вечно → дедлок.
+
+Закрытие/ожидание должно идти **параллельно** чтению:
+```go
+go func() { wg.Wait(); close(out) }()  // closer в отдельной горутине
+for v := range out { res = append(res, v) }  // читаем одновременно
+```
+Либо буферизировать `out` под все значения. Это ровно то, что делает «closer goroutine» в правильной реализации выше.
+</details>
+
+---
+
+### Загадка 2: producer без ctx-select течёт при ранней отмене
+
+```go
+jobs := make(chan int)
+go func() {
+    defer close(jobs)
+    for _, id := range ids {
+        jobs <- id            // ?  нет select на ctx.Done()
+    }
+}()
+
+for id := range jobs {
+    if shouldStop() {
+        break                 // consumer ушёл раньше
+    }
+    process(id)
+}
+```
+
+<details>
+<summary>Ответ</summary>
+
+Если consumer вышел из `range` раньше (break, ctx cancel, ошибка), а `ids` ещё не исчерпан — producer навсегда виснет на `jobs <- id` (читателя нет). Горутина-producer + `defer close` не выполнятся → **goroutine leak**.
+
+Producer обязан уважать отмену:
+```go
+select {
+case jobs <- id:
+case <-ctx.Done():
+    return
+}
+```
+</details>
+
+---
+
+### Загадка 3: fan-out не дублирует, а делит работу
+
+```go
+jobs := make(chan int)
+go func() { defer close(jobs); for i := 1; i <= 6; i++ { jobs <- i } }()
+
+var wg sync.WaitGroup
+for w := 0; w < 3; w++ {           // 3 воркера читают ОДИН канал
+    wg.Add(1)
+    go func() { defer wg.Done(); for j := range jobs { _ = j } }()
+}
+wg.Wait()
+```
+
+<details>
+<summary>Ответ</summary>
+
+Каждое значение из `jobs` получает **ровно один** воркер — Go гарантирует, что отправленное значение примет только одна горутина. 6 задач делятся между 3 воркерами (≈по 2), а **не** обрабатываются трижды.
+
+Частая путаница: «3 воркера читают один канал — значит каждый получит все 6». Нет — это распределение нагрузки (fan-out), не broadcast. Broadcast делается через `close(done)` или отдельные каналы на подписчика.
+</details>
+
+---
+
+### Загадка 4: буфер out и «потерянные» результаты при отмене
+
+```go
+out := make(chan Result, workers)   // буфер = workers
+// воркеры пишут в out; при ctx.Done() выходят, не дослав часть
+// closer: go func(){ wg.Wait(); close(out) }()
+for r := range out { use(r) }
+```
+
+<details>
+<summary>Ответ</summary>
+
+При отмене `ctx` воркеры выходят на `case <-ctx.Done(): return`, **не дослав** свои текущие результаты — это нормально (отмена = «результаты больше не нужны»). Но важно: если воркер пишет в `out` **без** `select { case out<-r: case <-ctx.Done(): }`, он зависнет, когда consumer перестал читать → leak.
+
+Вывод: и producer, и worker должны делать отправку через `select` с `ctx.Done()`. Буфер `out` лишь сглаживает coupling, но не спасает от блокировки на полном канале без ушедшего читателя.
+</details>
+
+---
+
 ## Interview-ready answer
 
-**Q: Какие баги в этом коде? (task_before.go)**
+**1. Какие баги в task_before.go?**
+Пять независимых: (1) `var out/jobs chan` — nil-каналы: send виснет вечно (leak), `close(nil)` — паника; (2) гонка на `f.cache` без mutex — `go test -race` ловит, нужен `RWMutex`; (3) нет `WaitGroup` — `out` не закрывается, `range out` дедлочит; (4) `ctx` создан, но не передан — timeout не работает; (5) следствие #1 — `close(jobs)` паникует.
 
-Пять независимых проблем:
-1. `var out chan Result` и `var jobs chan int` — nil channels. Отправка в nil канал блокируется вечно (goroutine leak), close nil — паника.
-2. Race condition на `f.cache` — несколько горутин читают и пишут map без mutex. `go test -race` выловит. Нужен `sync.RWMutex`.
-3. Нет `sync.WaitGroup` — `out` никогда не закрывается, `range out` в main зависнет (deadlock).
-4. Context создан, но не передан в `FetchAll` — timeout не работает.
-5. Следствие #1: `close(jobs)` в producer паникует (close nil channel).
+**2. Зачем `errCh chan error, 1`?**
+Unbuffered заблокирует отправителя, если читателя нет → leak. Буфер 1: первая ошибка пишется без блокировки, остальные дропаются через `select { default }`. Горутина завершается чисто при любом числе ошибок.
 
-**Q: Зачем `errCh chan error, 1` вместо `chan error`?**
+**3. Где в пуле обязателен `select` на `ctx.Done()`?**
+В трёх местах: producer при `jobs <- id`, worker при чтении `<-jobs` и при отправке `out <- r`. Иначе при ранней отмене/уходе consumer горутины виснут на заблокированных каналах.
 
-Unbuffered канал заблокирует горутину-отправитель, если читателя нет в этот момент → goroutine leak. Буфер 1 позволяет первой ошибке записаться без блокировки, остальные дропаются через `select { default }`. В итоге горутина завершается чисто в любом случае.
+**4. Почему closer-горутина обязательно отдельная?**
+`wg.Wait()` должен крутиться **параллельно** чтению `out`, иначе воркеры блокируются на отправке в непрочитанный канал, `Done` не зовётся, `Wait` висит — дедлок. Паттерн: `go func(){ wg.Wait(); close(out) }()` + `for range out` в вызывающем.
+
+**5. Worker pool или semaphore?**
+Пул (фиксированное N горутин, читающих общий `jobs`) — для долгих задач и предсказуемого потребления памяти. Semaphore (новая горутина на задачу, ограниченная buffered-каналом) — для коротких burst-задач. Пул экономит горутины, semaphore проще по коду.
+
+**6. Несколько воркеров на одном канале — дублируют работу?**
+Нет, делят: каждое значение примет ровно один воркер (fan-out/распределение). Broadcast («все получили») — это `close(done)` или канал на подписчика.
