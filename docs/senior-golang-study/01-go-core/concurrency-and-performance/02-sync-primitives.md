@@ -12,6 +12,7 @@
 - [`sync.Pool`](#syncpool)
 - [`sync.Map`](#syncmap)
 - [`atomic` — операции без mutex](#atomic--операции-без-mutex)
+- [`singleflight` — дедупликация одинаковых запросов](#singleflight--дедупликация-одинаковых-запросов)
 - [Шпаргалка: выбор примитива](#шпаргалка-выбор-примитива)
 - [Разбор примеров-загадок](#разбор-примеров-загадок)
 - [Interview-ready answer](#interview-ready-answer)
@@ -424,33 +425,94 @@ type Cache struct {
 
 ## `atomic` — операции без mutex
 
-Атомарные операции на примитивных типах без lock overhead.
+Атомарные операции на примитивных типах без lock overhead. Реализованы аппаратными инструкциями CPU (`LOCK XADD`, `CMPXCHG` на x86), а не блокировкой.
+
+### Пять механик (плюс And/Or в 1.23)
+
+Все атомарные операции сводятся к нескольким примитивам:
+
+| Операция | Что делает атомарно | Возвращает |
+|---|---|---|
+| `Load` | прочитать значение | значение |
+| `Store(new)` | записать значение | — |
+| `Swap(new)` | записать new | **старое** значение |
+| `Add(delta)` | прибавить delta (можно отрицательный) | **новое** значение |
+| `CompareAndSwap(old, new)` | если текущее == old → записать new | `bool` (удалось ли) |
+| `And(mask)` / `Or(mask)` ¹ | побитовые `&` / `\|` | старое значение |
+
+¹ — `And`/`Or` добавлены в Go 1.23 (`atomic.AndInt64`, метод `.And()` и т.п.).
+
+**CAS** (Compare-And-Swap) — фундамент всех lock-free алгоритмов: «поменяй, только если значение не изменилось с тех пор, как я его прочитал».
+
+### Два API: функции vs типизированные типы
 
 ```go
-import "sync/atomic"
-
+// Старый API — функции на *T (есть всегда):
 var counter int64
+atomic.AddInt64(&counter, 1)
+val := atomic.LoadInt64(&counter)
+atomic.CompareAndSwapInt64(&counter, val, val+1)
 
-atomic.AddInt64(&counter, 1)              // increment
-val := atomic.LoadInt64(&counter)         // read
-atomic.StoreInt64(&counter, 0)            // write
-old := atomic.SwapInt64(&counter, 100)    // swap
-swapped := atomic.CompareAndSwapInt64(&counter, old, old+1) // CAS
+// Новый API — типизированные обёртки (Go 1.19+), предпочтительнее:
+var counter2 atomic.Int64
+counter2.Add(1)
+val2 := counter2.Load()
+counter2.CompareAndSwap(val2, val2+1)
 ```
 
-### `atomic.Value` для произвольных типов
+Типизированный API лучше: нельзя случайно обратиться к переменной **не**атомарно (поле приватное), и не нужно следить за выравниванием 64-бит на 32-bit платформах (старый `atomic.*Int64` требовал 8-байтного выравнивания вручную).
+
+### Типизированные типы (Go 1.19+)
+
+| Тип | Для чего | `Add` | `CAS` | `And/Or` (1.23) |
+|---|---|:---:|:---:|:---:|
+| `atomic.Int32` / `Int64` | знаковые счётчики | ✅ | ✅ | ✅ |
+| `atomic.Uint32` / `Uint64` / `Uintptr` | беззнаковые, битмаски | ✅ | ✅ | ✅ |
+| `atomic.Bool` | флаги | ❌ | ✅ | ❌ |
+| `atomic.Pointer[T]` | указатели, **типобезопасно** | ❌ | ✅ | ❌ |
+| `atomic.Value` | произвольный тип (один!) | ❌ | ✅ | ❌ |
+
+### CAS-loop: оптимистичные обновления
+
+Когда нужной операции нет (нет `atomic.Mul`, атомарного max и т.п.) — делают через **CAS в цикле**: прочитать, посчитать, попытаться записать; если кто-то опередил — повторить.
 
 ```go
-var config atomic.Value
+var n atomic.Int64
 
-// Store (всегда один и тот же конкретный тип!)
-config.Store(&Config{MaxConn: 100})
-
-// Load
-cfg := config.Load().(*Config)
+// атомарно: n = max(n, x)
+func atomicMax(n *atomic.Int64, x int64) {
+    for {
+        old := n.Load()
+        if x <= old {
+            return // уже не меньше
+        }
+        if n.CompareAndSwap(old, x) {
+            return // успех
+        }
+        // кто-то изменил n между Load и CAS → повторяем с новым old
+    }
+}
 ```
 
-**Главное ограничение**: всегда сохраняй один и тот же конкретный тип — паника если типы разные.
+Это и есть **lock-free**: без блокировок, прогресс гарантирован (хотя отдельная горутина может «крутиться» при высокой конкуренции).
+
+### `atomic.Pointer[T]` и `atomic.Value`
+
+Для атомарной подмены целого объекта (hot-reload конфига, lock-free снапшот):
+
+```go
+// Современно (Go 1.19+): типобезопасно, без приведений и паник
+var cfg atomic.Pointer[Config]
+cfg.Store(&Config{MaxConn: 100})
+c := cfg.Load() // *Config, без .(...)
+
+// Старое: atomic.Value — хранит any, ПАНИКА если Store другого типа
+var cfgv atomic.Value
+cfgv.Store(&Config{MaxConn: 100})
+c2 := cfgv.Load().(*Config) // нужно приведение
+```
+
+`atomic.Pointer[T]` почти всегда лучше `atomic.Value`: компилятор не даст положить другой тип. Паттерн чтения-без-локов: писатель готовит новый `*Config` и `Store`-ит его одним атомарным действием; читатели делают `Load()` без блокировки.
 
 ### Когда atomic, когда mutex
 
@@ -458,33 +520,73 @@ cfg := config.Load().(*Config)
 |---|---|---|
 | Простые счётчики, флаги | ✅ | ❌ overhead |
 | Произвольные структуры | ❌ | ✅ |
-| CAS-循环 (оптимистичные обновления) | ✅ | ❌ |
-| Несколько полей атомарно | ❌ | ✅ |
+| CAS-loop (оптимистичные обновления) | ✅ | ❌ |
+| Несколько полей **согласованно** | ❌ | ✅ |
+| Атомарная подмена одного указателя | ✅ `Pointer[T]` | ⚠️ можно, но дороже |
 | Lock-free алгоритмы | ✅ | ❌ |
 
-**Практическое правило**: atomic для int-счётчиков и флагов (isRunning, requestCount). Для структур с несколькими полями — mutex.
+**Правило:** atomic — для одиночных счётчиков/флагов/указателей. Как только нужно поменять **несколько полей согласованно** — это уже инвариант, его держит mutex.
 
 ```go
-// Хороший use case: feature flag check (часто читается, редко пишется)
+// Хороший use case: feature flag (часто читается, редко пишется)
 var featureEnabled atomic.Bool
-
-// check (hot path — миллионы раз в секунду)
-if featureEnabled.Load() {
+if featureEnabled.Load() { // hot path, миллионы раз/сек
     doNewBehavior()
 }
-
-// update (редко)
-featureEnabled.Store(true)
+featureEnabled.Store(true) // редко
 ```
 
-### `atomic.Bool`, `atomic.Int64`, etc. (Go 1.19+)
+---
+
+## `singleflight` — дедупликация одинаковых запросов
+
+`golang.org/x/sync/singleflight` — не из stdlib, но де-факто стандарт. Решает **cache stampede / thundering herd**: когда N горутин одновременно промахиваются по кэшу и идут за **одним и тем же** ключом, реально выполняется **один** вызов, остальные ждут и получают тот же результат.
 
 ```go
-var running atomic.Bool
-running.Store(true)
-if running.Load() { ... }
-running.CompareAndSwap(true, false) // атомарный CAS
+import "golang.org/x/sync/singleflight"
+
+type Service struct {
+    sf    singleflight.Group
+    cache *Cache
+}
+
+func (s *Service) GetUser(ctx context.Context, id string) (*User, error) {
+    if u, ok := s.cache.Get(id); ok {
+        return u, nil
+    }
+    // Do: для одного id реально выполнится ЛИШЬ у первой горутины,
+    // остальные с тем же id заблокируются и получат тот же (v, err)
+    v, err, shared := s.sf.Do(id, func() (any, error) {
+        u, err := loadUserFromDB(ctx, id) // дорогой запрос — один на всех
+        if err == nil {
+            s.cache.Set(id, u)
+        }
+        return u, err
+    })
+    _ = shared // true, если результат разделён с другими вызовами
+    if err != nil {
+        return nil, err
+    }
+    return v.(*User), nil
+}
 ```
+
+### Методы
+
+| Метод | Поведение |
+|---|---|
+| `Do(key, fn)` | блокирующий; дедуплицирует по key; `(v, err, shared)` |
+| `DoChan(key, fn)` | возвращает `<-chan Result` — для `select` с `ctx.Done()` |
+| `Forget(key)` | убрать in-flight ключ (например, чтобы не «залипла» ошибка) |
+
+### Подводные камни
+
+- **Общий результат на всех.** Все ждущие получают **один и тот же** `v` и `err`. Если `fn` вернула ошибку — её получат все. Если `v` — мутабельный объект, его нельзя менять у получателей (это общий указатель).
+- **Отмена контекста.** `ctx` замыкается внутри `fn` от **первого** вызывающего. Если он отменится, упадут все ждущие. Когда у каждого свой дедлайн — используй `DoChan` + `select { case r := <-ch: case <-ctx.Done(): }`, чтобы конкретный вызывающий мог уйти по своему ctx.
+- **Head-of-line blocking.** Зависший `fn` держит всех ждущих этого ключа. `DoChan` + таймаут на стороне вызывающего спасает.
+- **Кэширование ошибок.** `Do` не кэширует результат сам — он лишь дедуплицирует *одновременные* вызовы. Между «волнами» кэшировать надо самому (как выше). `Forget(key)` помогает сбросить, если первый вызов завершился ошибкой и не нужно её «расшаривать» следующей волне.
+
+Разбор реализации и задача — в [coding-tasks/concurrency/06-singleflight](../../12-interview-practice/coding-tasks/concurrency/06-singleflight.md).
 
 ---
 
@@ -508,6 +610,12 @@ running.CompareAndSwap(true, false) // атомарный CAS
 
 Нужны счётчики/флаги без lock?
   → sync/atomic
+
+Нужна атомарная подмена целого объекта (hot-reload)?
+  → atomic.Pointer[T]
+
+N горутин запрашивают один ключ (cache stampede)?
+  → singleflight
 
 Нужен thread-safe map (read-heavy, разные ключи)?
   → sync.Map
@@ -675,3 +783,12 @@ atomic — для одиночных счётчиков/флагов (lock-free,
 
 **6. Почему нельзя копировать sync-типы?**
 `Mutex`, `WaitGroup`, `Once`, `Cond` содержат внутреннее состояние; копия = рассинхрон (lock на копии не блокирует оригинал). `go vet -copylocks` ловит «passes lock by value» — всегда передавай указателем.
+
+**7. Что такое CAS и зачем CAS-loop?**
+CAS (`CompareAndSwap`) — «запиши new, только если значение всё ещё == old». Это база lock-free алгоритмов. Когда нужной атомарной операции нет (max, умножение, обновление структуры по указателю), её делают через CAS в цикле: Load → посчитать → CompareAndSwap → при неудаче повторить. Прогресс гарантирован без блокировок.
+
+**8. atomic.Pointer vs atomic.Value?**
+Оба атомарно подменяют объект целиком (hot-reload конфига, lock-free снапшот). `atomic.Pointer[T]` (1.19+) типобезопасен — компилятор не даст положить другой тип. `atomic.Value` хранит `any` и **паникует**, если `Store` другого динамического типа. Предпочитай `Pointer[T]`.
+
+**9. Что такое singleflight и зачем?**
+`golang.org/x/sync/singleflight` дедуплицирует одновременные запросы по ключу: при cache stampede (N горутин промахнулись по одному ключу) реально выполняется один вызов, остальные ждут и получают тот же результат. Подводные камни: общий `err` на всех, отмена ctx первого вызывающего валит всех (нужен `DoChan` + свой `select`), head-of-line blocking.
