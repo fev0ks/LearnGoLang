@@ -462,7 +462,7 @@ Read: pick random suffix
 Подходит для counters (votes, likes), не для structured data.
 
 **5. Application-level memoization.**
-В Go: `singleflight` (см. [singleflight task](../13-interview-practice/coding-tasks/concurrency/06-singleflight.md)) дедуплицирует одновременные запросы.
+В Go: `singleflight` (см. [singleflight task](../12-interview-practice/coding-tasks/concurrency/06-singleflight.md)) дедуплицирует одновременные запросы.
 
 ### Detection
 
@@ -619,7 +619,7 @@ At 95% capacity: drop normal traffic, only critical
 At 100%: emergency, drop everything new, save current state
 ```
 
-Используется Cloudflare, Netflix. См. [04-backpressure (interview task)](../13-interview-practice/coding-tasks/streams/04-backpressure.md).
+Используется Cloudflare, Netflix. См. [04-backpressure (interview task)](../12-interview-practice/coding-tasks/streams/04-backpressure.md).
 
 ---
 
@@ -833,7 +833,7 @@ Rolling update для 10K pods занимает hours. Approaches:
 Tagging обязательно — per-team, per-feature attribution.
 Anomaly detection — alert при unusual spend (S3 случайно public например).
 
-См. [cloud cost guide](../11-devops-and-observability/cloud/02-cloud-cost-and-architecture.md).
+См. [cloud cost guide](../10-devops-and-observability/cloud/02-cloud-cost-and-architecture.md).
 
 ---
 
@@ -1111,7 +1111,7 @@ Total fleet:
 - [Saga и Outbox](../04-architecture-and-patterns/patterns/09-saga-and-outbox.md) — async-first ground truth
 - [Database sharding (Postgres)](../06-databases/database-systems-catalog/postgresql/12-sharding.md)
 - [Kafka](../07-message-brokers-and-streaming/01-kafka.md) — backbone для async
-- [Cloud cost](../11-devops-and-observability/cloud/02-cloud-cost-and-architecture.md)
+- [Cloud cost](../10-devops-and-observability/cloud/02-cloud-cost-and-architecture.md)
 - Interview cases с highload элементами:
   - [Uber ride-sharing](interview-cases/06-uber-ride-sharing.md) — geo + real-time
   - [YouTube](interview-cases/07-youtube-video-platform.md) — video at scale

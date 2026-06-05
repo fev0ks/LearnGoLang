@@ -150,7 +150,7 @@ go doBackgroundWork(bgCtx)
 
 **Тонкий момент:** если goroutine продолжается после завершения request — пользоваться `r.Context()` нельзя, он отменится. Создавай отдельный context (Background или WithoutCancel).
 
-См. [09-concurrency-and-performance/04-context-patterns.md](../../../09-concurrency-and-performance/04-context-patterns.md) — детально про context patterns в concurrency.
+См. [01-go-core/concurrency-and-performance/04-context-patterns.md](../../../01-go-core/concurrency-and-performance/04-context-patterns.md) — детально про context patterns в concurrency.
 
 ---
 
@@ -434,7 +434,7 @@ log.Error("get order",
 )
 ```
 
-См. [11-devops-and-observability/logging-and-log-shipping/](../../../11-devops-and-observability/logging-and-log-shipping/) — про structured logging в Go.
+См. [10-devops-and-observability/logging-and-log-shipping/](../../../10-devops-and-observability/logging-and-log-shipping/) — про structured logging в Go.
 
 ### Что не делать
 
@@ -461,7 +461,7 @@ log.Info("user login", "password", req.Password)  // ❌ пароль в лог�
 log.Info("payment", "credit_card", card.Number)   // ❌ PCI compliance violation
 ```
 
-См. [12-security/authentication/04-auth-audit-logging.md](../../../12-security/authentication/04-auth-audit-logging.md) — что нельзя логировать.
+См. [11-security/authentication/04-auth-audit-logging.md](../../../11-security/authentication/04-auth-audit-logging.md) — что нельзя логировать.
 
 **3. Слишком verbose error chain.**
 
@@ -508,9 +508,9 @@ return fmt.Errorf("OrderService.CreateOrder: validation: input.Items.Length: inv
 ## Что почитать
 
 - [Go blog: error wrapping](https://go.dev/blog/go1.13-errors) — оригинальный пост про %w
-- [09-concurrency-and-performance/04-context-patterns.md](../../../09-concurrency-and-performance/04-context-patterns.md) — context в concurrency контексте
+- [01-go-core/concurrency-and-performance/04-context-patterns.md](../../../01-go-core/concurrency-and-performance/04-context-patterns.md) — context в concurrency контексте
 - [01-go-core/07-error-handling.md](../../../01-go-core/07-error-handling.md) — глубоко про error handling в Go
-- [11-devops-and-observability/logging-and-log-shipping/02-logging-in-go-and-why-wrap-logger.md](../../../11-devops-and-observability/logging-and-log-shipping/02-logging-in-go-and-why-wrap-logger.md) — про structured logging
+- [10-devops-and-observability/logging-and-log-shipping/02-logging-in-go-and-why-wrap-logger.md](../../../10-devops-and-observability/logging-and-log-shipping/02-logging-in-go-and-why-wrap-logger.md) — про structured logging
 
 ---
 

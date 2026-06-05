@@ -12,9 +12,12 @@
 - [06. Memory Model](./06-memory-model.md) — happens-before, channel/mutex/Once/atomic гарантии, data race, race detector
 - [07. Error Handling](./07-error-handling.md) — errors.Is/As, wrapping chain, sentinel vs typed errors, errgroup, errCh паттерн, errors.Join
 - [08. Generics](./08-generics.md) — type parameters, constraints, any/comparable, ~underlying type, слайс-утилиты, stdlib slices/maps/cmp, подводные камни, производительность
+- [09. Strings](./09-strings.md) — string header (ptr/len), immutability, byte vs rune, UTF-8, len=байты, range по рунам, конверсии и аллокации, substring retention, strings.Builder, string(int) ловушка, unsafe-конверсии
 - [Runtime Scheduler](./runtime-scheduler/) — GMP scheduler, syscall handoff, netpoller (подраздел)
 - [Map Internals](./map-internals/) — hmap+bmap (до 1.24), Swiss Tables (1.24+), ctrl bytes, matchH2, tombstones (подраздел)
 - [Memory Internals](./memory-internals/) — стек и heap, аллокатор, escape analysis, GC (подраздел)
+- [Concurrency & Performance](./concurrency-and-performance/) — goroutines/channels, sync-примитивы, worker pool, context (подраздел)
+- [Profiling](./profiling/) — pprof, CPU/memory/goroutine/block/mutex профили, execution tracer, benchmarks (подраздел)
 
 ## Runtime Scheduler (подраздел)
 
@@ -41,6 +44,27 @@
 - [03. Escape Analysis](./memory-internals/03-escape-analysis.md) — stack vs heap решение компилятора, `-gcflags=-m`
 - [04. Garbage Collector](./memory-internals/04-garbage-collector.md) — tri-color, write barrier, GOGC, GOMEMLIMIT, gctrace
 
+## Concurrency & Performance (подраздел)
+
+Конкурентность — фундамент Go, поэтому держим рядом с остальными основами:
+
+- [01. Goroutines And Channels](./concurrency-and-performance/01-goroutines-and-channels.md) — lifecycle, buffered/unbuffered, pipeline, fan-out/fan-in, goroutine leak, select
+- [02. Sync Primitives](./concurrency-and-performance/02-sync-primitives.md) — Mutex/RWMutex, WaitGroup, Once, Cond, Pool, Map, atomic
+- [03. Worker Pool](./concurrency-and-performance/03-worker-pool.md) — баги типовой реализации, errCh, graceful shutdown, semaphore
+- [04. Context Patterns](./concurrency-and-performance/04-context-patterns.md) — WithCancel/Timeout/Deadline, propagation, context.Value анти-паттерны
+
+## Profiling (подраздел)
+
+Профилирование общее для всего Go (не только concurrency), поэтому вынесено отдельным подразделом:
+
+- [01. pprof: инструменты и workflow](./profiling/01-pprof-tools-and-workflow.md)
+- [02. CPU Profiling](./profiling/02-cpu-profiling.md)
+- [03. Memory Profiling](./profiling/03-memory-profiling.md)
+- [04. Goroutine & Concurrency Profiling](./profiling/04-goroutine-concurrency-profiling.md)
+- [05. Execution Tracer](./profiling/05-execution-tracer.md)
+- [06. Benchmarks](./profiling/06-benchmarks.md)
+- [07. Case Studies](./profiling/07-case-studies.md)
+
 ## Вопросы senior-уровня
 
 - почему `s2 := s1` не копирует данные slice и как это приводит к неожиданным изменениям
@@ -48,6 +72,9 @@
 - почему `copy(dst, src)` может скопировать 0 элементов даже с непустым src
 - чем nil slice отличается от empty slice и где это важно
 - почему sub-slice может держать большой массив в памяти
+- почему `len("привет")` == 12, а не 6, и чем `byte` отличается от `rune`
+- почему `s[i]` возвращает байт, а `range` идёт по рунам
+- почему substring держит всю исходную строку в памяти и при чём тут `strings.Clone`
 - как GMP модель объясняет, почему миллион горутин не означает миллион threads
 - почему goroutine stack начинается с 2 KB и как растёт
 - как устроен Go аллокатор: mcache/mcentral/mheap

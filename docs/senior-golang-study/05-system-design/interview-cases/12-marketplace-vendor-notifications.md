@@ -804,7 +804,7 @@ assert abs(now - timestamp) < 5_minutes  # replay attack защита
 
 Vendor webhook URL должен быть HTTPS, public. Reject `http://`, `localhost`, private IPs (SSRF protection).
 
-См. [12-security/owasp-top10/03-ssrf.md](../../12-security/owasp-top10/03-ssrf.md).
+См. [11-security/owasp-top10/03-ssrf.md](../../11-security/owasp-top10/03-ssrf.md).
 
 ### 5. Rate limit per vendor
 
@@ -1042,7 +1042,7 @@ Industry standard: **sync с aggressive timeout** (5-10s) + retry.
 - [Idempotency](../reliability-patterns/06-idempotency.md) — at-least-once → idempotent processing
 - [Circuit Breaker](../reliability-patterns/03-circuit-breaker.md) — per-vendor isolation
 - [Retry с Backoff](../reliability-patterns/02-retries-and-backoff.md)
-- [SSRF Protection](../../12-security/owasp-top10/03-ssrf.md) — URL validation
+- [SSRF Protection](../../11-security/owasp-top10/03-ssrf.md) — URL validation
 - [Notification Service case](./02-notification-service.md) — близкий case, fan-out push notifications
 - [Stripe Webhooks Documentation](https://stripe.com/docs/webhooks) — production reference
 - [Shopify Webhooks](https://shopify.dev/docs/apps/webhooks) — другой production reference

@@ -95,7 +95,7 @@ Goroutine stack:       начинается с 2 KB, растёт по необ�
 Почему OS-поток такой тяжёлый:
 - OS-ядро резервирует фиксированный диапазон адресов при создании (размер задан, не растёт);
 - помимо стека есть kernel-структуры на поток, TLS, guard pages;
-- переключение между потоками идёт через OS-ядро (см. [context-switching](../../11-devops-and-observability/hardware-and-os/07-context-switching-and-scheduling.md)).
+- переключение между потоками идёт через OS-ядро (см. [context-switching](../../10-devops-and-observability/hardware-and-os/07-context-switching-and-scheduling.md)).
 
 Горутина — это структура `runtime.g` в user-space. Её стек аллоцируется через `malg` и растёт копированием. Планировщик Go мультиплексирует горутины на потоки (модель M:N), не трогая OS-ядро на каждом переключении.
 

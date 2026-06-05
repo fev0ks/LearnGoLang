@@ -287,7 +287,7 @@ svc := NewOrderService(repo, ...)
 // Test без БД
 ```
 
-Подробнее про тестирование — [10-testing-and-quality/](../../../10-testing-and-quality/).
+Подробнее про тестирование — [09-testing-and-quality/](../../../09-testing-and-quality/).
 
 ### Generic repository — анти-паттерн
 

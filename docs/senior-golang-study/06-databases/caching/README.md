@@ -17,6 +17,6 @@
 
 ## Связанные разделы
 
-- [Redis cache testing](../../10-testing-and-quality/08-redis-and-cache-testing.md) — testcontainers, miniredis, FastForward для TTL
+- [Redis cache testing](../../09-testing-and-quality/08-redis-and-cache-testing.md) — testcontainers, miniredis, FastForward для TTL
 - [Background workers](../../04-architecture-and-patterns/patterns/04-background-workers.md) — async обновление кэша
 - [Reliability patterns](../../05-system-design/reliability-patterns/) — circuit breaker для Redis fallback
