@@ -2,6 +2,10 @@
 
 Сюда собирай заметки по стандартной библиотеке и официальным инструментам.
 
+## Материалы
+
+- [01. Sort And Slices](./01-sort-and-slices.md) — sort vs slices/cmp (Go 1.21+), компараторы, multi-key (cmp.Or), бинарный поиск (lower/upper bound), stable vs unstable, паттерны в алго-задачах
+
 Что покрыть:
 - `net/http`, middleware, transports, connection reuse;
 - `context`, `database/sql`, `sync`, `sync/atomic`;
