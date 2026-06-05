@@ -6,11 +6,13 @@
 
 - [01. hmap + bmap (до Go 1.24)](./01-hmap-before-1.24.md) — hmap struct, bmap bucket layout, tophash, lookup, overflow chains, инкрементальная эвакуация
 - [02. Swiss Tables (с Go 1.24)](./02-swiss-tables-since-1.24.md) — open addressing, ctrl bytes, matchH2 bitset, tombstones, batch copy рост, directory
+- [03. Задачки и подводные камни](./03-puzzles-and-gotchas.md) — version-agnostic гочи: порядок итерации, NaN-ключ, nil map, concurrent fatal, неадресуемость, map не сжимаются
 
 ## Порядок чтения
 
 1. Начни с `01-hmap-before-1.24.md` — понять, что было до
 2. Затем `02-swiss-tables-since-1.24.md` — что заменили и почему
+3. `03-puzzles-and-gotchas.md` — задачки на поведение map (одинаково в обеих версиях)
 
 ## Вопросы senior-уровня
 
@@ -29,4 +31,4 @@
 
 - [Memory Internals: Allocator](../memory-internals/02-allocator.md) — как Go аллоцирует память под map elements
 - [Memory Internals: GC](../memory-internals/04-garbage-collector.md) — write barrier при записи в map
-- [07. Scheduler](../runtime-scheduler/01-scheduler-and-preemption.md) — GMP, почему concurrent map access не thread-safe
+- [Scheduler](../runtime-scheduler/01-scheduler-and-preemption.md) — GMP, почему concurrent map access не thread-safe

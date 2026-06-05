@@ -33,6 +33,7 @@
 
 - [01. hmap + bmap](./map-internals/01-hmap-before-1.24.md) — до Go 1.24: bucket layout, tophash, overflow chains, incremental evacuation
 - [02. Swiss Tables](./map-internals/02-swiss-tables-since-1.24.md) — с Go 1.24: open addressing, ctrl bytes, matchH2 bitset, directory
+- [03. Задачки и подводные камни](./map-internals/03-puzzles-and-gotchas.md) — гочи map: итерация, NaN-ключ, nil map, concurrent fatal, неадресуемость
 
 ## Memory Internals (подраздел)
 
