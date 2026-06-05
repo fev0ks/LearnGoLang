@@ -2,6 +2,21 @@
 
 Конкурентность в Go строится на двух примитивах: горутины (дешёвые потоки, управляемые рантаймом) и каналы (безопасная передача данных между горутинами). Плюс `select` для мультиплексирования.
 
+## Содержание
+
+- [Goroutine lifecycle](#goroutine-lifecycle)
+- [Unbuffered vs buffered channel](#unbuffered-vs-buffered-channel)
+- [Pipeline паттерн](#pipeline-паттерн)
+- [Fan-out / Fan-in](#fan-out--fan-in)
+- [Done-channel для отмены](#done-channel-для-отмены)
+- [Goroutine leak](#goroutine-leak)
+- [`context` для отмены](#context-для-отмены)
+- [`select` — мультиплексирование каналов](#select--мультиплексирование-каналов)
+- [nil-канал как выключатель ветки select](#nil-канал-как-выключатель-ветки-select)
+- [Закрытие канала](#закрытие-канала)
+- [Разбор примеров-загадок](#разбор-примеров-загадок)
+- [Interview-ready answer](#interview-ready-answer)
+
 ---
 
 ## Goroutine lifecycle

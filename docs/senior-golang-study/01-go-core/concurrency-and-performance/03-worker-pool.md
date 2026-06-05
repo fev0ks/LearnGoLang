@@ -2,6 +2,17 @@
 
 Worker pool — один из самых частых паттернов в Go-коде: bounded concurrency для CPU-bound или I/O-bound задач. Здесь — разбор реального баг-репорта с собеседования и правильная реализация.
 
+## Содержание
+
+- [Разбор задачи с собеседования: task_before.go](#разбор-задачи-с-собеседования-task_beforego)
+- [Правильная реализация: task_after_gpt.go](#правильная-реализация-task_after_gptgo)
+- [Worker pool шаблон — универсальный](#worker-pool-шаблон--универсальный)
+- [Паттерн errCh: `chan error, 1` — первая ошибка wins](#паттерн-errch-chan-error-1--первая-ошибка-wins)
+- [Graceful shutdown: ctx.Done() в producer и workers](#graceful-shutdown-ctxdone-в-producer-и-workers)
+- [Semaphore через buffered channel как альтернатива pool](#semaphore-через-buffered-channel-как-альтернатива-pool)
+- [Разбор примеров-загадок](#разбор-примеров-загадок)
+- [Interview-ready answer](#interview-ready-answer)
+
 ---
 
 ## Разбор задачи с собеседования: task_before.go

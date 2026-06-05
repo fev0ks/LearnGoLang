@@ -2,6 +2,20 @@
 
 Пакет `sync` и `sync/atomic` — низкоуровневые примитивы синхронизации. Каналы хороши для передачи данных; `sync` — для защиты состояния.
 
+## Содержание
+
+- [`sync.Mutex` vs `sync.RWMutex`](#syncmutex-vs-syncrwmutex)
+- [Типичные ошибки с Mutex](#типичные-ошибки-с-mutex)
+- [`sync.WaitGroup`](#syncwaitgroup)
+- [`sync.Once`](#synconce)
+- [`sync.Cond`](#synccond)
+- [`sync.Pool`](#syncpool)
+- [`sync.Map`](#syncmap)
+- [`atomic` — операции без mutex](#atomic--операции-без-mutex)
+- [Шпаргалка: выбор примитива](#шпаргалка-выбор-примитива)
+- [Разбор примеров-загадок](#разбор-примеров-загадок)
+- [Interview-ready answer](#interview-ready-answer)
+
 ---
 
 ## `sync.Mutex` vs `sync.RWMutex`

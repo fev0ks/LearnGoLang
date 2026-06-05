@@ -2,6 +2,20 @@
 
 `context.Context` — стандартный способ передавать сигналы отмены, таймауты и request-scoped данные через цепочку вызовов. Один из немногих интерфейсов, который стоит изучить до конца.
 
+## Содержание
+
+- [`context.Background()` vs `context.TODO()`](#contextbackground-vs-contexttodo)
+- [WithCancel, WithTimeout, WithDeadline](#withcancel-withtimeout-withdeadline)
+- [Propagation: почему ctx первый аргумент, не поле struct](#propagation-почему-ctx-первый-аргумент-не-поле-struct)
+- [`context.Value` — когда допустимо, когда анти-паттерн](#contextvalue--когда-допустимо-когда-анти-паттерн)
+- [Отмена и cleanup: `defer cancel()` всегда](#отмена-и-cleanup-defer-cancel-всегда)
+- [context в HTTP сервере](#context-в-http-сервере)
+- [Типичные ошибки](#типичные-ошибки)
+- [Производные контексты — дерево](#производные-контексты--дерево)
+- [`context.WithoutCancel` (Go 1.21+)](#contextwithoutcancel-go-121)
+- [Разбор примеров-загадок](#разбор-примеров-загадок)
+- [Interview-ready answer](#interview-ready-answer)
+
 ---
 
 ## `context.Background()` vs `context.TODO()`
