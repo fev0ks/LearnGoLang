@@ -11,6 +11,7 @@
 - [Addressability и interface satisfaction](#addressability-и-interface-satisfaction)
 - [Interface design: практические правила](#interface-design-практические-правила)
 - [Production-антипаттерны](#production-антипаттерны)
+- [Разбор примеров-загадок](#разбор-примеров-загадок)
 - [Interview-ready answer](#interview-ready-answer)
 
 ## Runtime представление интерфейса
@@ -316,16 +317,231 @@ c1 := Counter{}
 c2 := c1  // BUG: копируем mutex → c2 работает с копией lock, не с оригиналом
 ```
 
+## Разбор примеров-загадок
+
+### Загадка 1: typed nil через error
+
+```go
+type MyError struct{ msg string }
+func (e *MyError) Error() string { return e.msg }
+
+func find() error {
+    var e *MyError  // nil-указатель
+    return e        // возвращаем конкретный тип
+}
+
+func main() {
+    err := find()
+    fmt.Println(err == nil)  // ?
+}
+```
+
+<details>
+<summary>Ответ</summary>
+
+```
+false
+```
+
+`err` — это interface value `{ tab: *MyError, data: nil }`. Поле типа **не nil** (тип известен — `*MyError`), поэтому весь интерфейс ≠ nil, хотя внутри лежит nil-указатель.
+
+Это та самая «typed nil trap». Фикс — не возвращать typed nil: проверить `if e != nil { return e }; return nil`, либо вообще объявлять функцию с конкретным типом возврата, а интерфейс отдавать на самом верхнем уровне.
+
+> Бонус: `fmt.Println(err)` тут не напечатает `<nil>`, а попробует вызвать `Error()` на nil-указателе → `e.msg` разыменует nil → panic. fmt перехватит её и выведет `%!v(PANIC=Error method: ...)`.
+</details>
+
+---
+
+### Загадка 2: метод на nil-указателе не паникует
+
+```go
+type Node struct{ next *Node }
+func (n *Node) Len() int {
+    if n == nil {
+        return 0
+    }
+    return 1 + n.next.Len()
+}
+
+func main() {
+    var n *Node  // nil
+    fmt.Println(n.Len())  // ?
+}
+```
+
+<details>
+<summary>Ответ</summary>
+
+```
+0
+```
+
+Вызов метода на nil-указателе **сам по себе не паника** — паникует только *разыменование* nil. Здесь receiver `n == nil`, метод это проверяет и возвращает 0, не трогая поля.
+
+Это легально и даже используется в дизайне (рекурсивные структуры, nil как «пустой список»). `n.Len()` компилируется в `(*Node).Len(n)` — указатель просто передаётся аргументом, и пока его не разыменовали, всё ок.
+</details>
+
+---
+
+### Загадка 3: сравнение интерфейсов с несравнимым типом
+
+```go
+func main() {
+    var a interface{} = []int{1, 2}
+    var b interface{} = []int{1, 2}
+    fmt.Println(a == b)  // ?
+}
+```
+
+<details>
+<summary>Ответ</summary>
+
+```
+panic: runtime error: comparing uncomparable type []int
+```
+
+`==` на интерфейсах сравнивает (тип, значение). Компилируется без ошибок — статический тип `interface{}` сравним. Но **в рантайме**, если внутри лежит несравнимый тип (`slice`, `map`, `func`), Go паникует.
+
+Поэтому `interface{}` с неизвестным содержимым опасно сравнивать через `==` — нужен `reflect.DeepEqual`. Та же ловушка взрывается неявно: такой тип как ключ map или в `==` внутри `switch` → рантайм-паника.
+</details>
+
+---
+
+### Загадка 4: nil concrete-типа в интерфейсе
+
+```go
+func main() {
+    var s []int           // nil slice
+    var m map[string]int  // nil map
+    var i interface{} = s
+    var j interface{} = m
+
+    fmt.Println(s == nil, m == nil)  // ?
+    fmt.Println(i == nil, j == nil)  // ?
+}
+```
+
+<details>
+<summary>Ответ</summary>
+
+```
+true true
+false false
+```
+
+Сам по себе nil slice/map/chan/func **равен nil**. Но как только его кладут в `interface{}`, у интерфейса появляется тип → интерфейс становится non-nil. Это обобщение typed-nil-ловушки не только на указатели: **любой** конкретный nil, завёрнутый в интерфейс, делает интерфейс ≠ nil.
+</details>
+
+---
+
+### Загадка 5: method value захватывает копию receiver
+
+```go
+type Counter struct{ n int }
+func (c Counter) Get() int { return c.n }  // value receiver
+
+func main() {
+    c := Counter{n: 1}
+    f := c.Get        // method value
+    c.n = 100
+    fmt.Println(f())      // ?
+    fmt.Println(c.Get())  // ?
+}
+```
+
+<details>
+<summary>Ответ</summary>
+
+```
+1
+100
+```
+
+`f := c.Get` — это **method value**: receiver вычисляется и **сохраняется копией прямо сейчас**. Поскольку receiver — по значению, `f` держит снимок `Counter{n: 1}`. Последующее `c.n = 100` на снимок не влияет → `f()` == 1.
+
+Если бы receiver был указателем (`func (c *Counter) Get()`), `c.Get` сохранил бы `&c`, и `f()` увидел бы 100. Различие «value receiver method value = снимок копии» — частый сюрприз с замыканиями и колбэками.
+</details>
+
+---
+
+### Загадка 6: String() с бесконечной рекурсией
+
+```go
+type Celsius float64
+func (c Celsius) String() string {
+    return fmt.Sprintf("%v°C", c)  // ?
+}
+
+func main() {
+    var c Celsius = 20
+    fmt.Println(c)
+}
+```
+
+<details>
+<summary>Ответ</summary>
+
+```
+fatal error: stack overflow
+```
+
+`fmt.Println(c)` видит, что `Celsius` реализует `Stringer`, и зовёт `String()`. Внутри `%v` снова применяется к `Celsius` → снова `String()` → бесконечная рекурсия → переполнение стека.
+
+Фикс — на время форматирования убрать метод, приведя к базовому типу: `fmt.Sprintf("%v°C", float64(c))`. Классический реальный баг при добавлении `String()`/`Error()` к типу.
+</details>
+
+---
+
+### Загадка 7: nil embedded interface
+
+```go
+type Service struct {
+    io.Reader  // встроенный интерфейс, по умолчанию nil
+}
+
+func main() {
+    s := Service{}
+    buf := make([]byte, 8)
+    _, err := s.Read(buf)  // ?
+    _ = err
+}
+```
+
+<details>
+<summary>Ответ</summary>
+
+```
+panic: runtime error: invalid memory address or nil pointer dereference
+```
+
+Встроенный в структуру **интерфейс** (`io.Reader`) по умолчанию `nil`. Метод `Read` промоутится в `Service`, но вызывается на nil-интерфейсе → паника. В отличие от Загадки 2 (nil *указатель* + receiver-метод), здесь нет конкретного типа вообще — звать нечего.
+
+Поэтому встраивание интерфейса требует его инициализации: `Service{Reader: r}`. Приём встречается в декораторах (обернуть `io.Reader`, переопределив часть методов) — но забытая инициализация = nil-паника.
+</details>
+
+---
+
 ## Interview-ready answer
 
-**"Чем iface отличается от eface?"**
+Короткие ответы на реально частые вопросы про интерфейсы.
 
-`eface` — представление пустого интерфейса (`any`): два поля `{ *_type, unsafe.Pointer }`. `iface` — непустого: `{ *itab, unsafe.Pointer }`, где `itab` содержит указатель на vtable методов конкретного типа. Вызов метода через интерфейс — два pointer dereference (iface.tab → fun[i]) + call, поэтому не инлайнится.
+**1. Чем `iface` отличается от `eface`?**
+`eface` — пустой интерфейс (`any`): `{ *_type, data }`. `iface` — с методами: `{ *itab, data }`, где `itab` хранит конкретный тип и vtable методов. Вызов метода — два pointer load (`tab → fun[i]`) + call, потому не инлайнится.
 
-**"Что такое nil interface trap?"**
+**2. Когда interface value равен nil?**
+Только когда **оба** поля (тип и data) nil. Завёрнутый конкретный nil (`*T`, nil slice/map/chan) даёт non-nil интерфейс — это typed nil trap. Фикс: не возвращать typed nil, отдавать `nil` явно.
 
-Interface value == nil только когда **оба** поля (type и data) nil. Если вернуть `*MyError(nil)` как `error` — в interface поле type = `*MyError`, data = nil, и `err == nil` вернёт **false**. Фикс: возвращать `nil` явно, не возвращать typed nil pointer.
+**3. Value receiver vs pointer receiver в method set?**
+Метод с value receiver входит в set и `T`, и `*T`. С pointer receiver — только `*T`. Значит интерфейс с pointer-receiver методами удовлетворяет только `*T`. Невозможность присвоить — частая ошибка компиляции (`T does not implement I`).
 
-**"Расскажи про method sets"**
+**4. Когда укладывание значения в интерфейс аллоцирует?**
+Когда значение не помещается в одно слово-указатель: struct, array, большой тип → копия escapes в heap. Указатели, маленькие inline-значения — без аллокации. Важно на горячих путях (`fmt`, `json` в цикле).
 
-Value receiver метод входит в method set и типа T, и *T. Pointer receiver — только в *T. Поэтому только `*T` может удовлетворять интерфейсу с pointer receiver методами. Это защищает от случайного изменения копии.
+**5. Можно ли вызвать метод на nil?**
+На nil-**указателе** — да, если метод не разыменовывает receiver (часто проверяют `if n == nil`). На nil-**интерфейсе** — нет, паника (нет ни типа, ни данных).
+
+**6. Почему `interface{} == interface{}` может паниковать?**
+`==` сравнивает (тип, значение). Если внутри несравнимый тип (slice/map/func) — рантайм-паника `comparing uncomparable type`. Для произвольного содержимого — `reflect.DeepEqual`.
+
+**7. Где объявлять интерфейс?**
+На стороне потребителя, маленьким (1–3 метода). «Accept interfaces, return concrete types». Интерфейс «на будущее» без второй реализации — преждевременная абстракция.
