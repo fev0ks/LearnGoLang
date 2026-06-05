@@ -39,14 +39,14 @@
 
 | Файл | Что внутри | Приоритет |
 |------|-----------|-----------|
-| [01. Primitive Types And Zero Values](../01-go-core/01-primitive-types-and-zero-values.md) | zero values, nil slice/map/chan поведение | ★ |
-| [02. Numeric Types, Sizes And Overflow](../01-go-core/02-numeric-types-integer-sizes-and-overflow.md) | int vs int64, диапазоны, overflow | ★ |
-| [03. Value vs Pointer Semantics](../01-go-core/03-value-vs-pointer-semantics.md) | когда копировать, mutex copy bug, slice aliasing | ★★ |
-| [04. Interfaces, Method Sets And Nil](../01-go-core/04-interfaces-method-sets-and-nil.md) | iface/eface layout, itab vtable, typed nil trap | ★★★ |
-| [05. Slices](../01-go-core/05-slices.md) | slice header, shared backing array, append реаллокация, copy ловушки, memory retention | ★★★ |
-| [06. Memory Model](../01-go-core/06-memory-model.md) | happens-before, channel/mutex/Once/atomic гарантии, data race | ★★★ |
-| [07. Error Handling](../01-go-core/07-error-handling.md) | errors.Is/As, wrapping chain, sentinel vs typed, errgroup, errors.Join | ★★ |
-| [08. Generics](../01-go-core/08-generics.md) | type parameters, constraints, ~underlying, slices/maps/cmp, производительность | ★★ |
+| [01. Primitive Types, Sizes And Overflow](../01-go-core/01-primitive-types-and-zero-values.md) | zero values, nil slice/map/chan, размеры, диапазоны, int vs int64, overflow, конверсии | ★ |
+| [02. Value vs Pointer Semantics](../01-go-core/02-value-vs-pointer-semantics.md) | когда копировать, mutex copy bug, slice aliasing | ★★ |
+| [03. Interfaces, Method Sets And Nil](../01-go-core/03-interfaces-method-sets-and-nil.md) | iface/eface layout, itab vtable, typed nil trap | ★★★ |
+| [04. Slices](../01-go-core/04-slices.md) | slice header, shared backing array, append реаллокация, copy ловушки, memory retention | ★★★ |
+| [05. Memory Model](../01-go-core/05-memory-model.md) | happens-before, channel/mutex/Once/atomic гарантии, data race | ★★★ |
+| [06. Error Handling](../01-go-core/06-error-handling.md) | errors.Is/As, wrapping chain, sentinel vs typed, errgroup, errors.Join | ★★ |
+| [07. Generics](../01-go-core/07-generics.md) | type parameters, constraints, ~underlying, slices/maps/cmp, производительность | ★★ |
+| [08. Strings](../01-go-core/08-strings.md) | string header, immutability, byte vs rune, UTF-8, range по рунам, конверсии, substring retention | ★★ |
 
 #### 01 Go Core — Runtime Scheduler (подраздел)
 

@@ -1,6 +1,6 @@
-# Primitive Types And Zero Values
+# Primitive Types, Sizes And Overflow
 
-Быстрый справочник по встроенным типам и их zero values. Главное для интервью — поведение nil-типов и подводные камни.
+Справочник по встроенным типам: zero values, размеры, диапазоны числовых типов, переполнение и конверсии. Главное для интервью — поведение nil-типов, overflow и подводные камни.
 
 ## Таблица типов и zero values
 
@@ -35,6 +35,100 @@
 ² — зависит от платформы: 4 байта на 32-bit, 8 байт на 64-bit (обычно).
 
 Проверить размер любого типа: `unsafe.Sizeof(x)`.
+
+## Числовые типы: диапазоны и знак
+
+| Тип | Bits | Signed | Диапазон |
+|-----|------|--------|----------|
+| `int8` | 8 | yes | -128 .. 127 |
+| `int16` | 16 | yes | -32768 .. 32767 |
+| `int32` / `rune` | 32 | yes | -2³¹ .. 2³¹-1 ≈ ±2.1B |
+| `int64` | 64 | yes | -2⁶³ .. 2⁶³-1 ≈ ±9.2×10¹⁸ |
+| `int` | 32 или 64 | yes | зависит от платформы |
+| `uint8` / `byte` | 8 | no | 0 .. 255 |
+| `uint16` | 16 | no | 0 .. 65535 |
+| `uint32` | 32 | no | 0 .. 2³²-1 ≈ 4.3B |
+| `uint64` | 64 | no | 0 .. 2⁶⁴-1 ≈ 1.8×10¹⁹ |
+| `uint` | 32 или 64 | no | зависит от платформы |
+| `float32` | 32 | — | ≈ ±3.4×10³⁸, ~7 значащих цифр |
+| `float64` | 64 | — | ≈ ±1.8×10³⁰⁸, ~15 значащих цифр |
+
+`int` на современных 64-bit серверах = 64 бита, но это **не гарантировано** спецификацией.
+
+### Когда `int`, а когда `int64`
+
+```go
+// int — для индексов, длин, счётчиков внутри процесса (native word size)
+for i := 0; i < len(s); i++ { ... }
+n := len(items)
+
+// int64 — для внешних контрактов: DB-схема, API-поля, protobuf, timestamps
+type User struct {
+    ID        int64  // DB primary key — фиксированный размер важен
+    CreatedAt int64  // unix timestamp
+    Score     int64  // поле в API
+}
+
+// float64 — стандарт для вычислений; float32 — только для GPU/graphics
+var ratio float64 = float64(count) / float64(total)
+```
+
+## Переполнение (overflow)
+
+Integer overflow в Go — **defined behavior** (в отличие от C/C++): оборачивается по модулю 2ⁿ.
+
+```go
+var x int8 = 127
+x++
+fmt.Println(x) // -128 — overflow, обернулся
+
+var u uint8 = 255
+u++
+fmt.Println(u) // 0 — overflow
+
+// Compile-time constant overflow компилятор ЛОВИТ:
+const big = int8(200) // ошибка компиляции: constant 200 overflows int8
+
+// Runtime overflow НЕ ловится — нужно проверять вручную:
+func safeAdd(a, b int64) (int64, error) {
+    if b > 0 && a > math.MaxInt64-b {
+        return 0, errors.New("overflow")
+    }
+    if b < 0 && a < math.MinInt64-b {
+        return 0, errors.New("overflow")
+    }
+    return a + b, nil
+}
+```
+
+### Полезные константы
+
+```go
+import "math"
+
+math.MaxInt8    // 127
+math.MinInt8    // -128
+math.MaxInt32   // 2147483647
+math.MaxInt64   // 9223372036854775807   (2⁶³ - 1)
+math.MaxUint64  // 18446744073709551615
+math.MaxInt     // зависит от платформы: на 64-bit = MaxInt64
+math.MaxFloat64 // 1.7976931348623157e+308
+```
+
+## Конверсии числовых типов
+
+```go
+// Преобразование между числовыми типами — всегда ЯВНОЕ, не неявное
+var i int = 42
+var f float64 = float64(i)
+var u uint = uint(f)
+
+// Усечение при конверсии в меньший тип — молча, без panic:
+var big int64 = 1000
+var small int8 = int8(big) // -24 — усечение! не ошибка
+
+// Рекомендация: проверяй диапазон перед конверсией из большого в малый тип
+```
 
 ## Критически важное поведение nil-типов
 
@@ -87,9 +181,25 @@ s := new([]int)    // *[]int, *s = nil — НЕ готова к append без и
 cfg := Config{Timeout: 5 * time.Second}
 ```
 
-## Что спрашивают на интервью
+## Interview-ready answer
 
-- **Чем `byte` отличается от `rune`?** `byte` = `uint8` (8 бит, ASCII символ), `rune` = `int32` (32 бита, Unicode code point).
-- **Почему `nil` map и `nil` slice ведут себя по-разному?** Slice структурно готов к append (runtime аллоцирует массив при первом append). Map требует явной инициализации через `make`.
-- **Что такое `nil` interface?** Оба поля (type и data) равны nil. Typed nil pointer в interface — не nil interface.
-- **Чем `string` отличается от `[]byte`?** `string` — immutable (неизменяемая последовательность байт). `[]byte` — mutable. Конверсия между ними аллоцирует копию.
+**1. Чем `byte` отличается от `rune`?**
+`byte` = `uint8` (8 бит, один байт/ASCII), `rune` = `int32` (32 бита, один Unicode code point). Подробнее про строки — в [08-strings](./08-strings.md).
+
+**2. Почему `nil` map и `nil` slice ведут себя по-разному?**
+Чтение обоих безопасно. Но в nil slice можно `append` (runtime аллоцирует массив при первом append), а запись в nil map паникует (`assignment to entry in nil map`) — map требует `make`. `delete` на nil map — безопасный no-op.
+
+**3. Что такое `nil` interface trap?**
+Interface == nil только когда **оба** поля (type и data) nil. Typed nil pointer (`*MyError(nil)`), завёрнутый в interface, делает его non-nil. Детали — в [04-interfaces](./03-interfaces-method-sets-and-nil.md).
+
+**4. Чем `string` отличается от `[]byte`?**
+`string` immutable, `[]byte` mutable; конверсия между ними копирует. Размер заголовка: `string` = 16 байт (`{ptr, len}`), `[]T` = 24 байта (`{ptr, len, cap}`).
+
+**5. Чем `int` отличается от `int64`?**
+`int` зависит от платформы (32/64 бита, native word size), `int64` — всегда 64 бита. На 64-bit сервере размер одинаков, но типы **не** взаимозаменяемы без явной конверсии. `int` — для индексов/длин/счётчиков, `int64` — для внешних контрактов (DB, API, protobuf, timestamps).
+
+**6. Как ведёт себя overflow?**
+Defined behavior — оборачивание по модулю 2ⁿ (не UB как в C). Compile-time константы компилятор проверяет (`const big = int8(200)` — ошибка). Runtime overflow не ловится — проверяй вручную через `math.MaxIntN`. Конверсия в меньший тип молча усекает.
+
+**7. make vs new?**
+`make` — только для slice/map/chan, возвращает готовый к работе тип. `new(T)` — для любого типа, возвращает `*T` со zero value (`new([]int)` даёт `*[]int` на nil slice — не готов к индексации без инициализации).

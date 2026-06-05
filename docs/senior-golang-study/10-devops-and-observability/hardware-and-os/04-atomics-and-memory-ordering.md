@@ -398,7 +398,7 @@ var b atomic.Bool              // atomic boolean
 
 В отличие от C++/Rust, где atomic может быть с разными memory orders (relaxed, acquire, release, acq_rel, seq_cst), Go даёт только один — самый сильный.
 
-Подробнее: [01-go-core/06-memory-model.md](../../01-go-core/06-memory-model.md).
+Подробнее: [01-go-core/05-memory-model.md](../../01-go-core/05-memory-model.md).
 
 ---
 
@@ -495,7 +495,7 @@ if done.Load() {        // (3) — atomic load
 
 Сейчас (1) happens-before (3) через atomic synchronisation.
 
-Подробнее — [Go Memory Model](https://go.dev/ref/mem) и [01-go-core/06-memory-model.md](../../01-go-core/06-memory-model.md).
+Подробнее — [Go Memory Model](https://go.dev/ref/mem) и [01-go-core/05-memory-model.md](../../01-go-core/05-memory-model.md).
 
 ---
 

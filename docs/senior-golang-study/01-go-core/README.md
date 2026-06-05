@@ -4,15 +4,14 @@
 
 ## Материалы
 
-- [01. Primitive Types And Zero Values](./01-primitive-types-and-zero-values.md) — встроенные типы, zero values, поведение nil slice/map/chan
-- [02. Numeric Types, Sizes And Overflow](./02-numeric-types-integer-sizes-and-overflow.md) — int vs int64, диапазоны, overflow
-- [03. Value vs Pointer Semantics](./03-value-vs-pointer-semantics.md) — когда копировать, когда брать указатель; mutex copy bug; slice aliasing
-- [04. Interfaces, Method Sets And Nil](./04-interfaces-method-sets-and-nil.md) — iface/eface layout, itab vtable, typed nil trap, method sets
-- [05. Slices](./05-slices.md) — slice header (ptr/len/cap), shared backing array, append реаллокация, sub-slice, copy ловушки, nil vs empty, memory retention
-- [06. Memory Model](./06-memory-model.md) — happens-before, channel/mutex/Once/atomic гарантии, data race, race detector
-- [07. Error Handling](./07-error-handling.md) — errors.Is/As, wrapping chain, sentinel vs typed errors, errgroup, errCh паттерн, errors.Join
-- [08. Generics](./08-generics.md) — type parameters, constraints, any/comparable, ~underlying type, слайс-утилиты, stdlib slices/maps/cmp, подводные камни, производительность
-- [09. Strings](./09-strings.md) — string header (ptr/len), immutability, byte vs rune, UTF-8, len=байты, range по рунам, конверсии и аллокации, substring retention, strings.Builder, string(int) ловушка, unsafe-конверсии
+- [01. Primitive Types, Sizes And Overflow](./01-primitive-types-and-zero-values.md) — встроенные типы, zero values, поведение nil slice/map/chan, размеры, диапазоны числовых типов, overflow, конверсии
+- [02. Value vs Pointer Semantics](./02-value-vs-pointer-semantics.md) — когда копировать, когда брать указатель; mutex copy bug; slice aliasing
+- [03. Interfaces, Method Sets And Nil](./03-interfaces-method-sets-and-nil.md) — iface/eface layout, itab vtable, typed nil trap, method sets
+- [04. Slices](./04-slices.md) — slice header (ptr/len/cap), shared backing array, append реаллокация, sub-slice, copy ловушки, nil vs empty, memory retention
+- [05. Memory Model](./05-memory-model.md) — happens-before, channel/mutex/Once/atomic гарантии, data race, race detector
+- [06. Error Handling](./06-error-handling.md) — errors.Is/As, wrapping chain, sentinel vs typed errors, errgroup, errCh паттерн, errors.Join
+- [07. Generics](./07-generics.md) — type parameters, constraints, any/comparable, ~underlying type, слайс-утилиты, stdlib slices/maps/cmp, подводные камни, производительность
+- [08. Strings](./08-strings.md) — string header (ptr/len), immutability, byte vs rune, UTF-8, len=байты, range по рунам, конверсии и аллокации, substring retention, strings.Builder, string(int) ловушка, unsafe-конверсии
 - [Runtime Scheduler](./runtime-scheduler/) — GMP scheduler, syscall handoff, netpoller (подраздел)
 - [Map Internals](./map-internals/) — hmap+bmap (до 1.24), Swiss Tables (1.24+), ctrl bytes, matchH2, tombstones (подраздел)
 - [Memory Internals](./memory-internals/) — стек и heap, аллокатор, escape analysis, GC (подраздел)
