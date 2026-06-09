@@ -9,20 +9,30 @@
 - [03. log/slog](./03-slog.md) — структурированное логирование, Handler/Logger, проброс trace_id/request_id/user_id из ctx через кастомный Handler, LogValuer, LevelVar, загадки
 - [04. reflect](./04-reflect.md) — интроспекция типов, три закона рефлексии, Type vs Kind, settability, теги/поля/методы, DeepEqual, цена reflection (бенчмарк), когда заменять дженериками
 
-> `context` подробно разобран в [01-go-core/concurrency-and-performance/05-context-patterns](../01-go-core/concurrency-and-performance/05-context-patterns.md).
+## Многие stdlib-темы разобраны в профильных секциях
 
-Что покрыть:
-- `net/http`, middleware, transports, connection reuse;
-- `database/sql`, `sync`, `sync/atomic`;
-- `expvar`, `pprof`, `runtime`, `runtime/trace`;
-- `testing`, `httptest`, benchmark и fuzzing;
-- `go test`, `go vet`, `go tool pprof`, `go tool trace`, `go generate`.
+Чтобы не дублировать, эти пакеты живут там, где они в контексте. Здесь — карта ссылок:
 
-Полезные сравнения:
-- `http.Client` reuse vs создание клиента на каждый запрос;
-- `sync.Mutex` vs `sync.RWMutex`;
-- channels vs mutexes;
-- `database/sql` напрямую vs ORM/query builder поверх него.
+| Пакет / тема | Где разобрано |
+|---|---|
+| `context` | [concurrency/05-context-patterns](../01-go-core/concurrency-and-performance/05-context-patterns.md) |
+| `sync`, `sync/atomic` (Mutex/RWMutex, Once, Pool, Map, atomic, singleflight) | [concurrency/03-sync-primitives](../01-go-core/concurrency-and-performance/03-sync-primitives.md) |
+| Модель памяти, happens-before, race detector | [concurrency/01-memory-model](../01-go-core/concurrency-and-performance/01-memory-model.md) |
+| `errors` (Is/As/Join, wrapping `%w`) | [01-go-core/05-error-handling](../01-go-core/05-error-handling.md) |
+| `strings`/`bytes`/`unicode/utf8` (byte vs rune, Builder) | [01-go-core/07-strings](../01-go-core/07-strings.md) |
+| `time` (Timer/Ticker, утечки, `time.After` в select) | [runtime-scheduler/04-timers](../01-go-core/runtime-scheduler/04-timers.md) |
+| `net/http` — сервер | [networking/protocols/02-http-server](../08-networking-and-api/protocols/02-http-server.md), [http-servers/01-stdlib-net-http](../03-go-libraries-and-ecosystem/http-servers/01-stdlib-net-http.md) |
+| `net/http` — клиент, Transport, reuse | [networking/protocols/03-http-client](../08-networking-and-api/protocols/03-http-client.md) |
+| Таймауты и deadlines | [reliability/01-timeouts-and-deadlines](../05-system-design/reliability-patterns/01-timeouts-and-deadlines.md) |
+| Graceful shutdown | [patterns/08-graceful-shutdown](../04-architecture-and-patterns/patterns/08-graceful-shutdown.md) |
+| `database/sql`, пул соединений | [go-database-libraries/02-standard-library-database-sql](../06-databases/go-database-libraries/02-standard-library-database-sql.md), [05-connection-pooling-and-production-issues](../06-databases/relational-databases-and-sql/05-connection-pooling-and-production-issues.md) |
+| `testing`, `httptest`, fuzzing, race | [09-testing-and-quality](../09-testing-and-quality/README.md), [11-race-fuzz-and-benchmarks](../09-testing-and-quality/11-race-fuzz-and-benchmarks.md) |
+| `runtime/pprof`, `runtime/trace`, benchmarks, `go tool pprof/trace` | [01-go-core/profiling](../01-go-core/profiling/README.md), [06-benchmarks](../01-go-core/profiling/06-benchmarks.md) |
+
+Ещё не покрыто (кандидаты на отдельные файлы здесь):
+- `io` / `bufio` — `Reader`/`Writer`/`Closer` как композиция, `io.Copy`/`ReaderFrom`/`WriterTo`, `bufio.Scanner` (лимит токена), семантика `io.EOF`, `io.Pipe`/`MultiReader`/`TeeReader`;
+- `regexp` — RE2 (без backtracking), `MustCompile`, флаги, типичные ошибки производительности;
+- `encoding/binary`, `flag`, `embed` — нишевые, по необходимости.
 
 ## Подборка
 
@@ -33,12 +43,3 @@
 - [Fuzzing](https://go.dev/doc/fuzz/)
 - [Profile-guided optimization](https://go.dev/doc/pgo)
 - [Package testing](https://pkg.go.dev/testing)
-
-## Вопросы
-
-- почему `http.Client` обычно должен жить долго;
-- когда `RWMutex` дает выигрыш, а когда делает хуже;
-- чем `context.Context` отличается от контейнера для любых значений;
-- какие типовые ошибки совершают при работе с `database/sql`;
-- что ты делаешь первым при unexplained latency spike в Go-сервисе;
-- когда benchmark в Go врет и как это заметить.
