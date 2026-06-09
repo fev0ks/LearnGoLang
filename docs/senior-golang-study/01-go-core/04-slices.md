@@ -12,8 +12,9 @@ Slice — одна из самых частых тем на Go-интервью.
 - [nil slice vs empty slice](#nil-slice-vs-empty-slice)
 - [Передача slice в функцию](#передача-slice-в-функцию)
 - [Memory retention: скрытая утечка](#memory-retention-скрытая-утечка)
-- [make([]T, len) vs make([]T, 0, cap)](#maketlen-vs-maket-0-cap)
+- [make([]T, len) vs make([]T, 0, cap)](#maket-len-vs-maket-0-cap)
 - [Индекс за len: panic (даже если cap больше)](#индекс-за-len-panic-даже-если-cap-больше)
+- [Пакет slices: современные хелперы (Go 1.21+)](#пакет-slices-современные-хелперы-go-121)
 - [Разбор примеров-загадок](#разбор-примеров-загадок)
 - [Interview-ready answer](#interview-ready-answer)
 
@@ -275,6 +276,57 @@ s[low:high]   → len = high-low,  cap = cap(s)-low
 s[low:high:max] → len = high-low,  cap = max-low   (max ≤ cap(s))
 ```
 
+### Границы среза и ошибки
+
+Допустимые индексы (для **слайса**):
+
+```
+s[low:high]      требует  0 ≤ low ≤ high ≤ cap(s)
+s[low:high:max]  требует  0 ≤ low ≤ high ≤ max ≤ cap(s)
+```
+
+Два неинтуитивных момента:
+
+- **верхняя граница — это `cap`, а не `len`.** Срезать можно за пределы длины, до ёмкости — так «достают» скрытые за `len` слоты:
+
+  ```go
+  s := make([]int, 5, 10)  // len=5, cap=10
+  _ = s[0:8]               // OK! high=8 ≤ cap=10 (хотя 8 > len=5)
+  ```
+  (для **строк** и **массивов** верхняя граница — `len`, не cap.)
+
+- **нельзя сделать `cap < len`.** Это и есть случай «ёмкость меньше длины»: `max` обязан быть `≥ high`, иначе результат имел бы `len > cap` — запрещено.
+
+**Compile-time ошибки** — когда индексы **константы** и нарушают **порядок** `low ≤ high ≤ max` (компилятор проверяет это сразу):
+
+```go
+s := make([]int, 5, 10)
+_ = s[3:2]      // ❌ invalid slice indices: 2 < 3   (low > high)
+_ = s[0:5:3]    // ❌ invalid slice indices: 3 < 5   (max < high → cap<len)
+_ = s[2:1:4]    // ❌ invalid slice indices: 1 < 2
+
+arr := [3]int{}
+_ = arr[0:5]    // ❌ invalid argument: index 5 out of bounds [0:4]  (массив, const > len)
+```
+
+**Runtime-паники** — когда индексы в **переменных** или выходят за `cap` (верхнюю границу против `cap` компилятор не проверяет: `cap` слайса не известна на этапе компиляции):
+
+```go
+s := make([]int, 5, 10)
+
+hi := 12
+_ = s[0:hi]     // panic: slice bounds out of range [:12] with capacity 10
+_ = s[0:3:11]   // panic: slice bounds out of range [::11] with capacity 10  (max > cap, даже с константой)
+
+lo, h := 3, 2
+_ = s[lo:h]     // panic: slice bounds out of range [3:2]      (low > high в переменных)
+
+m := 5
+_ = s[0:m:3]    // panic: slice bounds out of range [:5:3]     (max < high в переменных)
+```
+
+> Закономерность: **нарушение порядка с константами** ловится компилятором (`invalid slice indices`); **выход за `cap`** и любые нарушения с **переменными** — рантайм-паника (`slice bounds out of range … with capacity N`). Случай `s[0:3:11]` показателен: ordering корректен (`0≤3≤11`), но `11 > cap` известно лишь в рантайме → паника, а не compile-ошибка.
+
 ---
 
 ## copy: типичные ошибки
@@ -290,16 +342,6 @@ copy(dst, src)       // скопирует 0 элементов!
 // Правильно:
 dst = make([]int, len(src))
 copy(dst, src)
-```
-
-```go
-// Из кода Tupanul():
-var sCopy []int
-copy(sCopy, s2)  // ничего не скопировалось: len(sCopy) == 0
-fmt.Println(sCopy) // []
-
-sCopy2 := make([]int, len(s2))  // выделить нужный len
-copy(sCopy2, s2)                // теперь скопируется всё
 ```
 
 ### Ошибка 2: думать что copy создаёт нужный размер
@@ -503,7 +545,7 @@ func getSubSlice() []int {
 ```go
 // ❌ Подстрока держит исходную строку (строки immutable, но та же механика)
 func extractCode(longLine string) string {
-    return longLine[10:15]  // 5 символов держат всю строку
+    return longLine[10:15]  // 5 БАЙТ держат всю строку
 }
 
 // ✅ Полная копия — исходная строка может быть GC
@@ -512,6 +554,8 @@ func extractCode(longLine string) string {
     return strings.Clone(code)  // Go 1.20+
 }
 ```
+
+> ⚠️ Срез строки идёт **по байтам**, не по символам: `longLine[10:15]` — это 5 байт по байтовым смещениям, а не «5 символов». На ASCII байт = символ, но на многобайтовых рунах (кириллица — 2 байта, эмодзи — 4) такой срез может **разрезать руну пополам** и дать невалидный UTF-8. Для резки по символам — `[]rune(s)` или `range`/`utf8`-границы. Детали — в [07-strings](./07-strings.md).
 
 ---
 
@@ -528,18 +572,19 @@ s2 := make([]int, 0, 3)  // len=0, cap=3: []
 s2 = append(s2, 1)       // добавляет с начала: [1]
 ```
 
-```go
-// Из subSLice():
-sl2 := make([]int, 3)
-sl2 = append(sl2, 123)
-fmt.Println(sl2) // [0 0 0 123]  ← 123 идёт после трёх нулей!
+**Правило:** если собираешь slice через append — используй `make([]T, 0, hint)`. Если нужен slice с готовыми нулями — `make([]T, n)`.
 
-sl21 := make([]int, 0, 3)
-sl21 = append(sl21, 123)
-fmt.Println(sl21) // [123]  ← правильно
+### Пред-аллокация экономит аллокации
+
+Когда известна (хотя бы примерно) итоговая длина, `make([]T, 0, n)` убирает все промежуточные реаллокации. Бенчмарк сборки слайса из 1000 `int` (`go test -bench -benchmem`, arm64):
+
+```
+BenchmarkAppendNil-16        2238 ns/op    25208 B/op    12 allocs/op   // var s []int + append
+BenchmarkAppendPrealloc-16    416 ns/op        0 B/op     0 allocs/op   // make([]int, 0, 1000)
+BenchmarkGrow-16              925 ns/op     8192 B/op     1 allocs/op   // slices.Grow(nil, 1000)
 ```
 
-**Правило:** если собираешь slice через append — используй `make([]T, 0, hint)`. Если нужен slice с готовыми нулями — `make([]T, n)`.
+Старт с `nil` проходит ~12 реаллокаций (0→1→2→4→…→1024) и копирует данные на каждой; пред-аллокация — **ноль** аллокаций в цикле. Если длина известна не точно, а как «не меньше N» — `slices.Grow` (ниже) добавляет ёмкость одним блоком.
 
 ---
 
@@ -584,6 +629,58 @@ func main() {
 ```
 
 > На практике границы проверяют явно (`if i < len(s)`), а не через recover — recover здесь для демонстрации, что index-out-of-range это именно panic, а не ошибка-значение.
+
+---
+
+## Пакет slices: современные хелперы (Go 1.21+)
+
+Стандартный пакет `slices` (Go 1.21+) закрывает рутину, которую раньше писали руками, — и часть функций напрямую решает ловушки из этого файла. Дженерик-типизированы, без reflection.
+
+```go
+import "slices"
+
+// Копия (полный клон header + данных) — fix memory retention и shared backing array
+clone := slices.Clone(src)            // = make + copy, но короче
+
+// Сравнение поэлементно (вместо reflect.DeepEqual для слайсов)
+slices.Equal(a, b)                    // bool
+slices.Index(s, v); slices.Contains(s, v)
+
+// Вставка/удаление со сдвигом (сами правят len и двигают элементы)
+s = slices.Insert(s, i, x, y)         // вставить перед индексом i
+s = slices.Delete(s, i, j)            // удалить [i:j)
+s = slices.Replace(s, i, j, vals...)
+
+s = slices.Reverse(s)                 // на месте
+s = slices.Compact(s)                 // убрать ПОДРЯД идущие дубли (после Sort = дедуп)
+```
+
+Две функции прямо относятся к внутреннему устройству — стоит знать отдельно.
+
+### `slices.Clip` — обрезать cap до len (лечит memory retention)
+
+`slices.Clip(s)` возвращает `s[:len(s):len(s)]` — ужимает `cap` до `len`. Это **тот самый three-index приём** из раздела про retention, но читаемо. После `Clip` следующий `append` обязан реаллоцировать → исходный большой массив больше не удерживается и не перезаписывается:
+
+```go
+big := make([]int, 1_000_000)
+small := slices.Clip(big[:2])  // len=2, cap=2 (а не cap до конца big)
+return small                   // держит ~16 байт, а не 8 MB; append безопасен
+```
+
+То есть `Clip` решает разом две ловушки: удержание большого backing array в памяти и случайную перезапись соседей через свободный cap.
+
+### `slices.Grow` — пред-аллокация под будущий append
+
+`slices.Grow(s, n)` гарантирует, что в `s` влезет ещё `n` элементов без реаллокации (увеличивает cap **одним** блоком, если нужно). Полезно, когда точную длину заранее не знаешь, но знаешь нижнюю границу:
+
+```go
+out := slices.Grow(out, len(items))   // одна аллокация вместо ~log(N) реаллокаций
+for _, it := range items {
+    out = append(out, transform(it))  // дальше append пишет на месте
+}
+```
+
+> Дополнительно про сортировку/бинарный поиск (`slices.Sort`, `slices.BinarySearch`, `cmp`) — в [02-go-stdlib-and-tools/01-sort-and-slices](../02-go-stdlib-and-tools/01-sort-and-slices.md).
 
 ---
 
@@ -896,22 +993,26 @@ fmt.Println(c[3])  // ?
 
 ## Interview-ready answer
 
-**"Что такое slice в Go и какие есть ловушки?"**
+**1. Что такое slice физически?**
+Заголовок из трёх машинных слов (24 байта на 64-bit): `ptr` на backing array, `len`, `cap`. Сам массив — в heap и может быть **общим** для нескольких slice. Присваивание/передача копируют только заголовок, не данные.
 
-Slice — это заголовок из трёх полей: указатель на backing array, len и cap. Сам массив находится в heap и может быть **общим** для нескольких slice.
+**2. Когда append копирует, а когда пишет на месте?**
+Если `len < cap` — пишет в существующий массив (на месте), `cap` тот же. Если `len == cap` — выделяет новый массив (~2×, для больших ~1.25×), копирует элементы. Поэтому два slice от общего массива то делят элементы (нет реаллокации), то расходятся (была реаллокация) — отсюда «непредсказуемость» append. На конкретный `cap` полагаться нельзя (округление по size class аллокатора).
 
-**Главные ловушки:**
+**3. Почему append незаметно связывает или ломает соседние slice?**
+sub-slice `a[i:j]` наследует `cap` до конца исходного массива. Если в нём есть свободный cap, `append` пишет **поверх** элементов родителя или соседнего sub-slice. Изоляция — three-index `a[i:j:j]` (или `slices.Clip`), либо явный `copy`/`slices.Clone`.
 
-1. **Shared backing array:** `s2 := s1` копирует только заголовок. `s2[0] = x` меняет `s1[0]` тоже.
+**4. Почему `copy` ничего не скопировал?**
+`copy` берёт `min(len(dst), len(src))` и смотрит на **len**, не cap. `var dst []int; copy(dst, src)` → 0 элементов. Нужно `dst = make([]int, len(src))` (или `slices.Clone(src)`).
 
-2. **append незаметно связывает slice:** если `cap > len`, append пишет на месте — два slice начинают делить элемент. Безопасно только если после append есть реаллокация. Для изоляции — three-index slice `a[i:j:j]` или явный `copy`.
+**5. Почему append внутри функции не виден снаружи?**
+Функция получает копию заголовка. Новый элемент может лечь в общий backing array (если cap хватило), но `len` у вызывающего не обновится — элемент «есть, но невидим». Чтобы менять `len`/`cap` снаружи — передавать `*[]T` или возвращать новый slice.
 
-3. **copy смотрит на len(dst), не cap:** `var dst []int; copy(dst, src)` скопирует 0 элементов. Нужен `dst = make([]int, len(src))`.
+**6. Что такое memory retention у слайсов?**
+sub-slice удерживает **весь** backing array живым. `big[999996:]` — 2 элемента, но GC не освободит 8 MB. Fix: `slices.Clone` / `copy` в новый slice / `slices.Clip`.
 
-4. **append в функции не виден снаружи:** функция получает копию заголовка. Новый элемент может записаться в backing array (если cap хватило), но len у вызывающего не обновится. Для изменения len — передавать `*[]T`.
+**7. nil slice vs empty slice?**
+`var s []int` — nil (`ptr=nil`), `== nil` true, JSON → `null`. `[]int{}`/`make([]int,0)` — не nil, JSON → `[]`. Оба безопасны для `len`/`range`/`append`. Для API-ответов различие важно.
 
-5. **Memory retention:** sub-slice держит весь backing array. `big[999996:]` — 2 элемента, но 8 MB в памяти. Fix: `copy` в новый slice.
-
-6. **nil vs empty slice:** `var s []int` — nil, сериализуется в JSON как `null`. `make([]int, 0)` — не nil, сериализуется как `[]`. При написании API важно различать.
-
-7. **make([]T, n) vs make([]T, 0, n):** первый создаёт n нулей + append добавляет после них. Второй — пустой с capacity n + append с нуля.
+**8. `make([]T, n)` vs `make([]T, 0, n)`?**
+Первый — n готовых нулей, `append` добавит **после** них. Второй — пустой с запасом cap, `append` пишет с начала. Под сбор через append — всегда второй; пред-аллокация (или `slices.Grow`) убирает промежуточные реаллокации (в бенчмарке — 0 allocs против ~12).
