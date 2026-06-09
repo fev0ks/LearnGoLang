@@ -8,11 +8,10 @@
 - [02. Value vs Pointer Semantics](./02-value-vs-pointer-semantics.md) — когда копировать, когда брать указатель; mutex copy bug; slice aliasing
 - [03. Interfaces, Method Sets And Nil](./03-interfaces-method-sets-and-nil.md) — iface/eface layout, itab vtable, typed nil trap, method sets
 - [04. Slices](./04-slices.md) — slice header (ptr/len/cap), shared backing array, append реаллокация, sub-slice, copy ловушки, nil vs empty, memory retention
-- [05. Memory Model](./05-memory-model.md) — happens-before, channel/mutex/Once/atomic гарантии, data race, race detector
-- [06. Error Handling](./06-error-handling.md) — errors.Is/As, wrapping chain, sentinel vs typed errors, errgroup, errCh паттерн, errors.Join
-- [07. Generics](./07-generics.md) — type parameters, constraints, any/comparable, ~underlying type, слайс-утилиты, stdlib slices/maps/cmp, подводные камни, производительность
-- [08. Strings](./08-strings.md) — string header (ptr/len), immutability, byte vs rune, UTF-8, len=байты, range по рунам, конверсии и аллокации, substring retention, strings.Builder, string(int) ловушка, unsafe-конверсии
-- [09. Unsafe And Low-Level](./09-unsafe-and-low-level.md) — unsafe.Pointer vs uintptr, Sizeof/Alignof/Offsetof, padding/alignment, zero-copy string↔[]byte, layout, где используется в рантайме
+- [05. Error Handling](./05-error-handling.md) — errors.Is/As, wrapping chain, sentinel vs typed errors, errgroup, errCh паттерн, errors.Join
+- [06. Generics](./06-generics.md) — type parameters, constraints, any/comparable, ~underlying type, слайс-утилиты, stdlib slices/maps/cmp, подводные камни, производительность
+- [07. Strings](./07-strings.md) — string header (ptr/len), immutability, byte vs rune, UTF-8, len=байты, range по рунам, конверсии и аллокации, substring retention, strings.Builder, string(int) ловушка, unsafe-конверсии
+- [08. Unsafe And Low-Level](./08-unsafe-and-low-level.md) — unsafe.Pointer vs uintptr, Sizeof/Alignof/Offsetof, padding/alignment, zero-copy string↔[]byte, layout, где используется в рантайме
 - [Runtime Scheduler](./runtime-scheduler/) — GMP scheduler, syscall handoff, netpoller (подраздел)
 - [Map Internals](./map-internals/) — hmap+bmap (до 1.24), Swiss Tables (1.24+), ctrl bytes, matchH2, tombstones (подраздел)
 - [Memory Internals](./memory-internals/) — стек и heap, аллокатор, escape analysis, GC (подраздел)
@@ -49,10 +48,11 @@
 
 Конкурентность — фундамент Go, поэтому держим рядом с остальными основами:
 
-- [01. Goroutines And Channels](./concurrency-and-performance/01-goroutines-and-channels.md) — lifecycle, buffered/unbuffered, pipeline, fan-out/fan-in, goroutine leak, select
-- [02. Sync Primitives](./concurrency-and-performance/02-sync-primitives.md) — Mutex/RWMutex, WaitGroup, Once, Cond, Pool, Map, atomic
-- [03. Worker Pool](./concurrency-and-performance/03-worker-pool.md) — баги типовой реализации, errCh, graceful shutdown, semaphore
-- [04. Context Patterns](./concurrency-and-performance/04-context-patterns.md) — WithCancel/Timeout/Deadline, propagation, context.Value анти-паттерны
+- [01. Memory Model](./concurrency-and-performance/01-memory-model.md) — happens-before, channel/mutex/Once/atomic гарантии, data race, race detector
+- [02. Goroutines And Channels](./concurrency-and-performance/02-goroutines-and-channels.md) — lifecycle, buffered/unbuffered, pipeline, fan-out/fan-in, goroutine leak, select
+- [03. Sync Primitives](./concurrency-and-performance/03-sync-primitives.md) — Mutex/RWMutex, WaitGroup, Once, Cond, Pool, Map, atomic, singleflight
+- [04. Worker Pool](./concurrency-and-performance/04-worker-pool.md) — баги типовой реализации, errCh, graceful shutdown, semaphore
+- [05. Context Patterns](./concurrency-and-performance/05-context-patterns.md) — WithCancel/Timeout/Deadline, propagation, context.Value анти-паттерны
 
 ## Profiling (подраздел)
 

@@ -43,11 +43,10 @@
 | [02. Value vs Pointer Semantics](../01-go-core/02-value-vs-pointer-semantics.md) | когда копировать, mutex copy bug, slice aliasing | ★★ |
 | [03. Interfaces, Method Sets And Nil](../01-go-core/03-interfaces-method-sets-and-nil.md) | iface/eface layout, itab vtable, typed nil trap | ★★★ |
 | [04. Slices](../01-go-core/04-slices.md) | slice header, shared backing array, append реаллокация, copy ловушки, memory retention | ★★★ |
-| [05. Memory Model](../01-go-core/05-memory-model.md) | happens-before, channel/mutex/Once/atomic гарантии, data race | ★★★ |
-| [06. Error Handling](../01-go-core/06-error-handling.md) | errors.Is/As, wrapping chain, sentinel vs typed, errgroup, errors.Join | ★★ |
-| [07. Generics](../01-go-core/07-generics.md) | type parameters, constraints, ~underlying, slices/maps/cmp, производительность | ★★ |
-| [08. Strings](../01-go-core/08-strings.md) | string header, immutability, byte vs rune, UTF-8, range по рунам, конверсии, substring retention | ★★ |
-| [09. Unsafe And Low-Level](../01-go-core/09-unsafe-and-low-level.md) | unsafe.Pointer vs uintptr, Sizeof/Alignof/Offsetof, padding, zero-copy string↔[]byte | ★ |
+| [05. Error Handling](../01-go-core/05-error-handling.md) | errors.Is/As, wrapping chain, sentinel vs typed, errgroup, errors.Join | ★★ |
+| [06. Generics](../01-go-core/06-generics.md) | type parameters, constraints, ~underlying, slices/maps/cmp, производительность | ★★ |
+| [07. Strings](../01-go-core/07-strings.md) | string header, immutability, byte vs rune, UTF-8, range по рунам, конверсии, substring retention | ★★ |
+| [08. Unsafe And Low-Level](../01-go-core/08-unsafe-and-low-level.md) | unsafe.Pointer vs uintptr, Sizeof/Alignof/Offsetof, padding, zero-copy string↔[]byte | ★ |
 
 #### 01 Go Core — Runtime Scheduler (подраздел)
 
@@ -78,7 +77,14 @@
 
 #### 01 Go Core — Concurrency & Performance (подраздел)
 
-Темы: goroutine lifecycle, channel vs mutex, worker pool, race detector, allocation hotspots, pprof.
+| Файл | Что внутри | Приоритет |
+|------|-----------|-----------|
+| [01. Memory Model](../01-go-core/concurrency-and-performance/01-memory-model.md) | happens-before, channel/mutex/Once/atomic гарантии, data race, race detector | ★★★ |
+| [02. Goroutines And Channels](../01-go-core/concurrency-and-performance/02-goroutines-and-channels.md) | lifecycle, buffered/unbuffered, pipeline, fan-out/fan-in, goroutine leak, select | ★★★ |
+| [03. Sync Primitives](../01-go-core/concurrency-and-performance/03-sync-primitives.md) | Mutex/RWMutex, WaitGroup, Once, Cond, Pool, Map, atomic, singleflight | ★★★ |
+| [04. Worker Pool](../01-go-core/concurrency-and-performance/04-worker-pool.md) | баги типовой реализации, errCh, graceful shutdown, semaphore | ★★ |
+| [05. Context Patterns](../01-go-core/concurrency-and-performance/05-context-patterns.md) | WithCancel/Timeout/Deadline, propagation, context.Value анти-паттерны | ★★ |
+
 → [README с темами и вопросами](../01-go-core/concurrency-and-performance/README.md)
 
 #### 15 Go Version Differences

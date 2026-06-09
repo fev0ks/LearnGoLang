@@ -264,77 +264,21 @@ go func() {
 
 ## Паттерны синхронизации
 
-**Channel для передачи владения (ownership transfer):**
-```go
-// Горутина 1 создает данные и передает их горутине 2
-ch := make(chan []byte, 1)
+Каждый практический приём синхронизации — это применение конкретного HB-правила выше. Сводка «какой edge зачем»:
 
-go func() {
-    buf := make([]byte, 1024)
-    // заполняем buf
-    ch <- buf // передаем владение; после этого не трогаем buf
-}()
+| Приём | Какой HB-edge использует | Когда |
+|---|---|---|
+| Передача владения через канал | send HB receive | отдать данные другой горутине и больше их не трогать |
+| Mutex вокруг shared state | `Unlock` HB следующий `Lock` | несколько полей менять согласованно |
+| `sync.Once` для ленивой инициализации | завершение `f` HB любой последующий `Do` | один раз построить синглтон/конфиг |
+| `atomic.Value` / `atomic.Pointer[T]` snapshot | `Store` HB наблюдающий `Load` (Go 1.19+ seq-consistent) | read-heavy hot-reload без локов |
 
-go func() {
-    buf := <-ch // принимаем владение; безопасно работать с buf
-    process(buf)
-}()
-```
+Реализации и подводные камни этих примитивов — в соседних файлах:
 
-**Mutex для защиты shared mutable state:**
-```go
-type SafeCounter struct {
-    mu    sync.Mutex
-    count int
-}
+- каналы, ownership transfer, fan-in/out, goroutine leak → [02-goroutines-and-channels](./02-goroutines-and-channels.md);
+- Mutex/RWMutex, `sync.Once`, `sync.Pool`, `sync.Map`, `atomic`, CAS-loop, `atomic.Pointer` vs `atomic.Value` → [03-sync-primitives](./03-sync-primitives.md).
 
-func (c *SafeCounter) Inc() {
-    c.mu.Lock()
-    defer c.mu.Unlock()
-    c.count++
-}
-
-func (c *SafeCounter) Value() int {
-    c.mu.Lock()
-    defer c.mu.Unlock()
-    return c.count
-}
-```
-
-**sync.Once для ленивой инициализации:**
-```go
-var (
-    instance *DB
-    once     sync.Once
-)
-
-func GetDB() *DB {
-    once.Do(func() {
-        instance = openDB()
-    })
-    return instance
-}
-```
-
-**atomic.Value для read-heavy snapshot:**
-```go
-type config struct {
-    timeout time.Duration
-    maxConn int
-}
-
-var cfg atomic.Value // хранит *config
-
-// Запись (редко): background goroutine
-func updateConfig(newCfg *config) {
-    cfg.Store(newCfg) // atomic store — HB для последующих Load
-}
-
-// Чтение (часто): zero allocation, no lock
-func getTimeout() time.Duration {
-    return cfg.Load().(*config).timeout
-}
-```
+Здесь важно лишь: **каждый из них создаёт synchronization edge**, превращая «нет HB → undefined» в «есть HB → запись видна».
 
 ## Race detector
 
@@ -370,77 +314,42 @@ Previous read at 0x00c0000b4010 by goroutine 8:
 
 ## Типичные ошибки
 
-**Closure захватывает переменную цикла (исправлено в Go 1.22):**
+Все они — частный случай одного: **общая память без synchronization edge между записью и чтением**.
+
+**Незащищённый результат из горутины** — нет HB между записью в горутине и чтением в main:
 ```go
-// До Go 1.22: все горутины видят последнее значение i
-for i := 0; i < 5; i++ {
-    go func() {
-        fmt.Println(i) // RACE + все печатают 5
-    }()
-}
-
-// Фикс (до Go 1.22): передавать как аргумент
-for i := 0; i < 5; i++ {
-    go func(i int) {
-        fmt.Println(i) // OK
-    }(i)
-}
-
-// Go 1.22+: переменная цикла имеет per-iteration scope, гонки нет
-```
-
-**WaitGroup counter race:**
-```go
-// ПЛОХО: Add вызван внутри горутины — race с Wait
-var wg sync.WaitGroup
-for _, item := range items {
-    go func(item Item) {
-        wg.Add(1)        // может быть вызван после Wait()
-        defer wg.Done()
-        process(item)
-    }(item)
-}
-wg.Wait()
-
-// ПРАВИЛЬНО: Add вызывать до запуска горутины
-for _, item := range items {
-    wg.Add(1)
-    go func(item Item) {
-        defer wg.Done()
-        process(item)
-    }(item)
-}
-wg.Wait()
-```
-
-**Возврат указателя на локальный slice из горутины:**
-```go
-// ПЛОХО
+// ПЛОХО: запись в горутине и чтение в main без HB → data race
 var result []int
-go func() {
-    result = []int{1, 2, 3} // запись без синхронизации
-}()
-fmt.Println(result) // чтение без синхронизации → race
-
-// ПРАВИЛЬНО: через channel
-ch := make(chan []int, 1)
-go func() {
-    ch <- []int{1, 2, 3}
-}()
-result := <-ch
+go func() { result = []int{1, 2, 3} }()
 fmt.Println(result)
+
+// ПРАВИЛЬНО: канал создаёт edge send HB receive
+ch := make(chan []int, 1)
+go func() { ch <- []int{1, 2, 3} }()
+fmt.Println(<-ch)
 ```
+
+Ещё две классические гонки разобраны как загадки в соседних файлах (тоже «нет HB»):
+
+- **захват переменной цикла горутиной** (до Go 1.22) → [02-goroutines-and-channels, Загадка 1](./02-goroutines-and-channels.md#разбор-примеров-загадок);
+- **`WaitGroup.Add` внутри горутины** (гонка с `Wait`) → [03-sync-primitives](./03-sync-primitives.md#syncwaitgroup).
 
 ## Interview-ready answer
 
-**"Что такое happens-before?"**
+**1. Что такое happens-before?**
+Частичный порядок событий: если A HB B, все записи до и в A гарантированно видны при B. В одной горутине операции упорядочены по коду. Между горутинами HB возникает **только** через synchronization edges: `go`-statement, channel send/receive, `Unlock`/`Lock`, `close`, `sync.Once`, `WaitGroup.Wait`, atomic. Нет edge → порядок и видимость не определены.
 
-Happens-before — частичный порядок событий в программе. Если A HB B, то все записи, сделанные до и в A, гарантированно видны при B. В одной горутине все операции HB по порядку кода. Между горутинами HB устанавливается только через явные synchronization edges: channel send/receive, mutex Lock/Unlock, sync.Once, WaitGroup, atomic операции.
+**2. Что такое data race и чем он опасен?**
+Два конкурентных доступа к одной переменной, хотя бы один — запись, и между ними нет HB. По спецификации Go это **undefined behavior**: можно прочитать старое, несогласованное или рваное (torn) значение, а не «просто иногда неверное». Поэтому гонку нельзя «оставить, если редко».
 
-**"Что такое data race?"**
+**3. Какие HB-гарантии у каналов?**
+Send HB соответствующий receive; `close` HB receive нулевого значения; у buffered-канала ёмкости C — `k`-й send HB `(k+C)`-й receive. У unbuffered дополнительно: receive HB завершение send. Завершение горутины само по себе HB **не** создаёт — нужен `WaitGroup`/канал.
 
-Data race — два concurrent доступа к одной переменной, хотя бы один из которых запись, и между ними нет HB. В Go это undefined behavior по спецификации: значение может быть старым, несогласованным или вообще garbage из-за torn reads. Race detector (`-race`) находит фактически произошедшие гонки с overhead ~10× по скорости.
+**4. Что гарантирует sync/atomic по памяти?**
+С Go 1.19 атомарные операции **sequentially consistent**: если `Load` увидел значение от `Store`, то `Store` HB этот `Load` (можно публиковать данные через atomic-флаг). Смешивать atomic и обычный доступ к одной переменной нельзя — это гонка.
 
-**"Когда использовать channel, а когда mutex?"**
+**5. Как работает race detector и каковы его пределы?**
+`-race` инструментирует каждый доступ к памяти и строит HB-граф через vector clocks; репортит доступ без HB. Overhead ~5–20× CPU, ~5–10× память. Нет false positives, но есть **false negatives** — находит лишь гонки, которые реально произошли на этом прогоне. Поэтому `-race` гоняют в CI на представительной нагрузке.
 
-Channel — для передачи владения данными между горутинами, pipeline координации, сигналов (done/cancel). Mutex — для защиты shared mutable state, особенно когда несколько полей должны меняться атомарно. На hot path с высоким RPS и simple shared state — `atomic.Value` или `sync/atomic` операции (zero allocation, no lock overhead). Сложная multi-field логика → mutex, потому что reasoning о корректности проще.
+**6. Channel или mutex?**
+Channel — передача владения, pipeline-координация, сигналы (done/cancel). Mutex — защита shared mutable state, особенно когда несколько полей меняются согласованно. Hot path с простым состоянием — `atomic`/`atomic.Pointer` (без локов). Сложная multi-field логика → mutex (проще рассуждать о корректности).

@@ -150,7 +150,7 @@ go doBackgroundWork(bgCtx)
 
 **Тонкий момент:** если goroutine продолжается после завершения request — пользоваться `r.Context()` нельзя, он отменится. Создавай отдельный context (Background или WithoutCancel).
 
-См. [01-go-core/concurrency-and-performance/04-context-patterns.md](../../../01-go-core/concurrency-and-performance/04-context-patterns.md) — детально про context patterns в concurrency.
+См. [01-go-core/concurrency-and-performance/05-context-patterns.md](../../../01-go-core/concurrency-and-performance/05-context-patterns.md) — детально про context patterns в concurrency.
 
 ---
 
@@ -508,8 +508,8 @@ return fmt.Errorf("OrderService.CreateOrder: validation: input.Items.Length: inv
 ## Что почитать
 
 - [Go blog: error wrapping](https://go.dev/blog/go1.13-errors) — оригинальный пост про %w
-- [01-go-core/concurrency-and-performance/04-context-patterns.md](../../../01-go-core/concurrency-and-performance/04-context-patterns.md) — context в concurrency контексте
-- [01-go-core/06-error-handling.md](../../../01-go-core/06-error-handling.md) — глубоко про error handling в Go
+- [01-go-core/concurrency-and-performance/05-context-patterns.md](../../../01-go-core/concurrency-and-performance/05-context-patterns.md) — context в concurrency контексте
+- [01-go-core/05-error-handling.md](../../../01-go-core/05-error-handling.md) — глубоко про error handling в Go
 - [10-devops-and-observability/logging-and-log-shipping/02-logging-in-go-and-why-wrap-logger.md](../../../10-devops-and-observability/logging-and-log-shipping/02-logging-in-go-and-why-wrap-logger.md) — про structured logging
 
 ---

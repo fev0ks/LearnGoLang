@@ -612,6 +612,6 @@ Counter: singleflight hits (shared=true). Показывает наскольк�
 ## Связки
 
 - [Redis caching](../../../06-databases/caching/01-redis-as-cache.md) — cache stampede и singleflight в кэше
-- [Concurrency и channels](../../../01-go-core/concurrency-and-performance/01-goroutines-and-channels.md)
+- [Concurrency и channels](../../../01-go-core/concurrency-and-performance/02-goroutines-and-channels.md)
 - [Reliability patterns: rate limiting](../../../05-system-design/reliability-patterns/04-rate-limiting.md) — другой способ защиты от наплыва
 - [DDoS protection](../../../11-security/perimeter-and-traffic-protection/01-ddos-protection.md)

@@ -4,10 +4,11 @@
 
 ## Материалы
 
-- [01. Goroutines And Channels](./01-goroutines-and-channels.md) — lifecycle, unbuffered/buffered, pipeline, fan-out/fan-in, done-channel, goroutine leak, select
-- [02. Sync Primitives](./02-sync-primitives.md) — Mutex/RWMutex, WaitGroup, Once, Cond, Pool, Map, atomic
-- [03. Worker Pool](./03-worker-pool.md) — разбор task_before.go (5 багов), правильная реализация, errCh паттерн, graceful shutdown, semaphore
-- [04. Context Patterns](./04-context-patterns.md) — Background/TODO, WithCancel/Timeout/Deadline, propagation, context.Value anti-patterns, defer cancel()
+- [01. Memory Model](./01-memory-model.md) — happens-before, synchronization edges, гарантии каналов/mutex/Once/atomic, data race, race detector
+- [02. Goroutines And Channels](./02-goroutines-and-channels.md) — lifecycle, unbuffered/buffered, pipeline, fan-out/fan-in, done-channel, goroutine leak, select
+- [03. Sync Primitives](./03-sync-primitives.md) — Mutex/RWMutex, WaitGroup, Once, Cond, Pool, Map, atomic, singleflight
+- [04. Worker Pool](./04-worker-pool.md) — разбор task_before.go (5 багов), правильная реализация, errCh паттерн, graceful shutdown, semaphore
+- [05. Context Patterns](./05-context-patterns.md) — Background/TODO, WithCancel/Timeout/Deadline, propagation, context.Value anti-patterns, defer cancel()
 
 > Профилирование (pprof, CPU/memory/goroutine профили, execution tracer, benchmarks) вынесено в отдельный подраздел go-core: [../profiling/](../profiling/) — оно общее для всего Go, не только для concurrency.
 

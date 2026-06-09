@@ -90,7 +90,7 @@ for _, v := range items {
 
 ## Связки
 
-- [Concurrency и channels](../../../01-go-core/concurrency-and-performance/01-goroutines-and-channels.md) — детальная теория
-- [Sync primitives](../../../01-go-core/concurrency-and-performance/02-sync-primitives.md) — mutex, atomic, sync.Map
-- [Worker pool patterns](../../../01-go-core/concurrency-and-performance/03-worker-pool.md) — расширенные варианты
-- [Context patterns](../../../01-go-core/concurrency-and-performance/04-context-patterns.md) — context propagation
+- [Concurrency и channels](../../../01-go-core/concurrency-and-performance/02-goroutines-and-channels.md) — детальная теория
+- [Sync primitives](../../../01-go-core/concurrency-and-performance/03-sync-primitives.md) — mutex, atomic, sync.Map
+- [Worker pool patterns](../../../01-go-core/concurrency-and-performance/04-worker-pool.md) — расширенные варианты
+- [Context patterns](../../../01-go-core/concurrency-and-performance/05-context-patterns.md) — context propagation

@@ -198,7 +198,7 @@ cfg := Config{Timeout: 5 * time.Second}
 ## Interview-ready answer
 
 **1. Чем `byte` отличается от `rune`?**
-`byte` = `uint8` (8 бит, один байт/ASCII), `rune` = `int32` (32 бита, один Unicode code point). Подробнее про строки — в [08-strings](./08-strings.md).
+`byte` = `uint8` (8 бит, один байт/ASCII), `rune` = `int32` (32 бита, один Unicode code point). Подробнее про строки — в [07-strings](./07-strings.md).
 
 **2. Почему `nil` map и `nil` slice ведут себя по-разному?**
 Чтение обоих безопасно. Но в nil slice можно `append` (runtime аллоцирует массив при первом append), а запись в nil map паникует (`assignment to entry in nil map`) — map требует `make`. `delete` на nil map — безопасный no-op.

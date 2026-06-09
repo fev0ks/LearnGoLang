@@ -398,7 +398,7 @@ var b atomic.Bool              // atomic boolean
 
 В отличие от C++/Rust, где atomic может быть с разными memory orders (relaxed, acquire, release, acq_rel, seq_cst), Go даёт только один — самый сильный.
 
-Подробнее: [01-go-core/05-memory-model.md](../../01-go-core/05-memory-model.md).
+Подробнее: [01-go-core/concurrency-and-performance/01-memory-model.md](../../01-go-core/concurrency-and-performance/01-memory-model.md).
 
 ---
 
@@ -437,7 +437,7 @@ func (m *Mutex) Unlock() {
 
 Поэтому в Go "Mutex дёшев когда не contention". В горячем цикле с агрессивной конкуренцией mutex становится bottleneck.
 
-Реальная реализация в Go — сложнее (`runtime/mutex.go`), включает spinning, fair queueing, и т.д. См. [01-go-core/concurrency-and-performance/02-sync-primitives.md](../../01-go-core/concurrency-and-performance/02-sync-primitives.md).
+Реальная реализация в Go — сложнее (`runtime/mutex.go`), включает spinning, fair queueing, и т.д. См. [01-go-core/concurrency-and-performance/03-sync-primitives.md](../../01-go-core/concurrency-and-performance/03-sync-primitives.md).
 
 ---
 
@@ -495,7 +495,7 @@ if done.Load() {        // (3) — atomic load
 
 Сейчас (1) happens-before (3) через atomic synchronisation.
 
-Подробнее — [Go Memory Model](https://go.dev/ref/mem) и [01-go-core/05-memory-model.md](../../01-go-core/05-memory-model.md).
+Подробнее — [Go Memory Model](https://go.dev/ref/mem) и [01-go-core/concurrency-and-performance/01-memory-model.md](../../01-go-core/concurrency-and-performance/01-memory-model.md).
 
 ---
 

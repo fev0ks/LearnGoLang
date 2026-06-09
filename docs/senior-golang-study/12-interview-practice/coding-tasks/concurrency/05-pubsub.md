@@ -766,7 +766,7 @@ Counter published / delivered / dropped per topic.
 
 ## Связки
 
-- [Channels и горутины](../../../01-go-core/concurrency-and-performance/01-goroutines-and-channels.md)
+- [Channels и горутины](../../../01-go-core/concurrency-and-performance/02-goroutines-and-channels.md)
 - [Redis Pub/Sub](../../../07-message-brokers-and-streaming/04-redis-pubsub.md) — distributed alternative
 - [Kafka](../../../07-message-brokers-and-streaming/01-kafka.md) — persistent event streaming
 - [WebSocket](../../../08-networking-and-api/protocols/05-websocket.md) — типичный потребитель in-memory pubsub

@@ -41,7 +41,7 @@
 - [Linux primitives](../linux/) — Linux-specific детали (virtual memory tuning, signals, sockets, namespaces)
 - [Go memory internals](../../01-go-core/memory-internals/) — Go runtime: stack/heap, escape analysis, GC
 - [Go scheduler](../../01-go-core/runtime-scheduler/01-scheduler-and-preemption.md) — M:N scheduler Go runtime
-- [Concurrency primitives](../../01-go-core/concurrency-and-performance/02-sync-primitives.md) — mutex, atomic в Go
+- [Concurrency primitives](../../01-go-core/concurrency-and-performance/03-sync-primitives.md) — mutex, atomic в Go
 - [Profiling](../../01-go-core/profiling/) — pprof, perf, измерение реальных эффектов
 
 ## Внешние ссылки
