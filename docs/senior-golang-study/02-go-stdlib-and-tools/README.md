@@ -5,14 +5,16 @@
 ## Материалы
 
 - [01. Sort And Slices](./01-sort-and-slices.md) — sort vs slices/cmp (Go 1.21+), компараторы, multi-key (cmp.Or), бинарный поиск (lower/upper bound), stable vs unstable, паттерны в алго-задачах
+- [02. encoding/json](./02-encoding-json.md) — теги и omitempty/omitzero, числа как float64 в interface{}, Marshaler/RawMessage, Encoder/Decoder, строгий разбор, загадки
+- [03. log/slog](./03-slog.md) — структурированное логирование, Handler/Logger, проброс trace_id/request_id/user_id из ctx через кастомный Handler, LogValuer, LevelVar, загадки
+
+> `context` подробно разобран в [01-go-core/concurrency-and-performance/05-context-patterns](../01-go-core/concurrency-and-performance/05-context-patterns.md).
 
 Что покрыть:
 - `net/http`, middleware, transports, connection reuse;
-- `context`, `database/sql`, `sync`, `sync/atomic`;
-- `encoding/json`, ограничения и типовые ошибки;
+- `database/sql`, `sync`, `sync/atomic`;
 - `expvar`, `pprof`, `runtime`, `runtime/trace`;
 - `testing`, `httptest`, benchmark и fuzzing;
-- `log/slog`, structured logging;
 - `go test`, `go vet`, `go tool pprof`, `go tool trace`, `go generate`.
 
 Полезные сравнения:

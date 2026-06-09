@@ -6,6 +6,7 @@
 
 - [Два пакета: sort и slices](#два-пакета-sort-и-slices)
 - [slices: сортировка и поиск (Go 1.21+)](#slices-сортировка-и-поиск-go-121)
+- [Пакет cmp](#пакет-cmp)
 - [sort: классический API](#sort-классический-api)
 - [Сортировка по нескольким ключам](#сортировка-по-нескольким-ключам)
 - [Бинарный поиск: lower/upper bound](#бинарный-поиск-lowerupper-bound)
@@ -67,6 +68,80 @@ slices.Index(s, v); slices.Contains(s, v)
 slices.Compact(s)                     // убрать ПОДРЯД идущие дубли (после Sort = полная дедупликация)
 slices.BinarySearch(s, target)        // (index, found) — s должен быть отсортирован
 ```
+
+---
+
+## Пакет cmp
+
+`cmp` (Go 1.21+) — крошечный пакет-компаньон для `slices`: **один constraint и три функции**. Появился вместе с дженериками сортировки.
+
+### `cmp.Ordered` — constraint для «<-сравнимых» типов
+
+Это интерфейс-ограничение для дженериков: все типы, поддерживающие `< <= >= >` — целые, float, string (и их `~`-производные):
+
+```go
+// примерно так он определён:
+type Ordered interface {
+    ~int | ~int8 | ~int16 | ~int32 | ~int64 |
+    ~uint | ~uint8 | ... | ~uintptr |
+    ~float32 | ~float64 | ~string
+}
+```
+
+Его используют `slices.Sort`, `slices.Min/Max`, `slices.BinarySearch` и т.п. — и ты сам, когда пишешь дженерик-функцию, которой нужно сравнивать значения:
+
+```go
+func clamp[T cmp.Ordered](v, lo, hi T) T {
+    if v < lo { return lo }
+    if v > hi { return hi }
+    return v
+}
+```
+
+> ⚠️ `cmp.Ordered` ≠ `comparable`. `comparable` — это про `==`/`!=` (есть и у структур, указателей, интерфейсов). `cmp.Ordered` — про порядок `<`, только числа и строки.
+
+### `cmp.Compare(x, y)` — трёхзначное сравнение
+
+Возвращает `-1` / `0` / `+1`. Это **готовый компаратор** для `slices.SortFunc` и multi-key:
+
+```go
+cmp.Compare(3, 5)     // -1  (3 < 5)
+cmp.Compare(5, 5)     //  0
+cmp.Compare("b", "a") // +1
+
+slices.SortFunc(s, func(a, b T) int { return cmp.Compare(a.Key, b.Key) })
+```
+
+**Бонус — корректный NaN:** для float `cmp.Compare` детерминирован (NaN считается меньше любого не-NaN, `NaN == NaN`, `-0.0 == 0.0`). Наивное `a < b` с NaN ломает сортировку — поэтому `slices.Sort([]float64)` внутри использует именно эту семантику.
+
+### `cmp.Less(x, y)` — булево `x < y`
+
+То же сравнение, но возвращает `bool` (с той же NaN-семантикой). Нужно, когда требуется булев предикат, а не `-1/0/+1`:
+
+```go
+if cmp.Less(a, b) { ... }
+// эквивалент a < b, но работает в дженериках и корректно с NaN
+```
+
+### `cmp.Or(vals...)` — первое ненулевое (Go 1.22)
+
+Возвращает **первый аргумент, не равный zero value**; если все нулевые — zero value. Два применения:
+
+```go
+// 1. Multi-key сортировка: первое НЕнулевое сравнение определяет порядок
+slices.SortFunc(people, func(a, b Person) int {
+    return cmp.Or(
+        cmp.Compare(a.Age, b.Age),   // 0 при равном возрасте → смотрим дальше
+        cmp.Compare(a.Name, b.Name),
+    )
+})
+
+// 2. Coalescing — «значение по умолчанию», как SQL COALESCE / оператор ?? в других языках
+port := cmp.Or(cfgPort, envPort, 8080)        // первый ненулевой int
+name := cmp.Or(req.Name, user.Name, "anonymous") // первая непустая строка
+```
+
+Важно: «нулевое» — это zero value типа (`0`, `""`, `false`, `nil`-указатель). `cmp.Or` принимает `comparable`-типы, не только `Ordered`.
 
 ---
 
@@ -200,6 +275,22 @@ slices.SortStableFunc(orders, func(a, b Order) int {
 5. **`slices.Compact` убирает только подряд идущие дубли.** Полная дедупликация = `slices.Sort` + `slices.Compact`.
 
 6. **Сортировка меняет слайс на месте.** Если нужен оригинал — копируй: `c := slices.Clone(s); slices.Sort(c)`.
+
+7. **`slices`/`sort` не принимают массив `[N]T` напрямую** — только слайс. Передавай `arr[:]` (слайс на весь массив, делит backing array → сортирует сам массив на месте):
+
+   ```go
+   arr := [3]int{3, 1, 2}
+   slices.Sort(arr)      // ❌ cannot use arr ([3]int) as []int
+   slices.Sort(arr[:])   // ✅ arr → [1 2 3]
+   ```
+
+   Нюанс — **адресуемость**: `arr[:]` требует адресуемый массив. На элементе map не сработает (он не адресуем, как и `&m["k"]`):
+
+   ```go
+   m := map[string][3]int{"a": {3, 1, 2}}
+   slices.Sort(m["a"][:])   // ❌ cannot slice unaddressable value
+   v := m["a"]; slices.Sort(v[:]); m["a"] = v   // достать → сортировать → положить
+   ```
 
 ---
 
