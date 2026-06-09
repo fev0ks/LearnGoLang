@@ -150,7 +150,7 @@ func (s *Stack[T]) Push(v T) { s.items = append(s.items, v) }
 func (s *Stack[T]) Pop() (T, bool) { ... }
 
 // 3. Алгоритмы, не зависящие от конкретного типа
-func BinarySearch[T constraints.Ordered](s []T, target T) int { ... }
+func BinarySearch[T cmp.Ordered](s []T, target T) int { ... }  // cmp.Ordered (Go 1.21+)
 ```
 
 ### Используй `interface{}` / `any` когда
@@ -347,11 +347,13 @@ cmp.Compare(3, 2)    // 1
 cmp.Or("", "fallback")  // "fallback" — первое ненулевое значение
 cmp.Or(0, 0, 42)        // 42
 
-// Constraint для ordered types
+// Constraint для ordered types (числа и строки — всё, что поддерживает < > <= >=)
 type Ordered interface {
     ~int | ~int8 | ... | ~float64 | ~string
 }
 ```
+
+> **`cmp.Ordered` (Go 1.21, stdlib) vs `constraints.Ordered`** (`golang.org/x/exp/constraints`, внешний). Раньше единственным был `constraints.Ordered` из экспериментального пакета; с Go 1.21 тот же constraint вошёл в stdlib как `cmp.Ordered` — теперь используют его, без внешней зависимости. `slices.Sort`/`slices.BinarySearch`/`slices.Min` опираются именно на `cmp.Ordered`. Не путать с `comparable` (про `==`/`!=`, есть у структур/указателей) — `Ordered` про **порядок** `<`, только числа и строки.
 
 ---
 
@@ -416,6 +418,16 @@ var s2 Stack[string]
 // s1 = s2 — ОШИБКА компиляции
 ```
 
+### Generic type aliases (Go 1.24+)
+
+До Go 1.24 алиас типа не мог иметь параметров. С 1.24 — может:
+
+```go
+type Set[T comparable] = map[T]struct{}   // параметризованный алиас (Go 1.24+)
+```
+
+Удобно для коротких имён над дженерик-типами. До 1.24 пришлось бы заводить полноценный `type Set[T comparable] map[T]struct{}` (новый тип, а не алиас).
+
 ---
 
 ## Производительность: когда generics медленнее interface
@@ -448,11 +460,14 @@ Stack[int64]  --- отдельный код (8-byte value)
 // generics — нет boxing
 ```
 
-Benchmark ориентир:
+Реальный бенчмарк (`Sum` по 1000 элементам, `go1.26`, arm64). Данные заранее в `[]int` и `[]any`:
+
 ```
-BenchmarkInterfaceMin    50ns/op   1 alloc/op   // interface{} — boxing
-BenchmarkGenericMin       5ns/op   0 allocs/op  // generics — без boxing
+BenchmarkGenericInt-16    265 ns/op    0 B/op   0 allocs/op   // generic Sum[int]([]int)
+BenchmarkIfaceInt-16      369 ns/op    0 B/op   0 allocs/op   // Sum([]any) с x.(int) на элемент
 ```
+
+Generic-версия ~**1.4×** быстрее — нет динамического `x.(int)` на каждый элемент (тип известен на этапе компиляции). Здесь оба показывают 0 allocs, потому что `[]any` собран заранее. Главная же экономия generics — в том, что **`[]any` вообще не нужно собирать**: чтобы передать `[]int` как `[]any`, каждый `int` пришлось бы боксировать (N аллокаций), а generic работает с `[]int` напрямую. Цена боксинга одного значения — отдельная аллокация (см. [03-interfaces, боксинг](./03-interfaces-method-sets-and-nil.md#когда-укладка-значения-в-интерфейс-аллоцирует-боксинг)).
 
 ### "Devirtualization" не всегда работает
 
@@ -510,14 +525,17 @@ fmt.Println(r.OrDefault(0)) // 5.0
 
 ## Interview-ready answer
 
-**Q: Зачем generics в Go, если есть interface{}?**
+**1. Зачем generics, если есть `interface{}`?**
+`interface{}` теряет тип в compile-time — ошибки ловятся в runtime через type assertion, а value-типы боксируются (аллокации). Generics сохраняют типы (`[]T` остаётся `[]T`), убирают боксинг и type-assertion boilerplate. В бенчмарке выше generic-сумма ~1.4× быстрее интерфейсной (нет `x.(int)` на элемент) и не требует боксировать данные в `[]any`.
 
-`interface{}` теряет типовую информацию в compile-time — ошибки обнаруживаются только в runtime через type assertion. Generics сохраняют типы: `[]T` остаётся `[]T`, не `[]any`. Это убирает boxing для value-типов (0 аллокаций), делает код типобезопасным и устраняет необходимость в type-assertion boilerplate.
+**2. Как Go компилирует generics?**
+GCShape stenciling: не отдельный код на каждый `T`, а общий на «форму» (размер + указатель/значение). Все pointer-типы делят одну реализацию; value-типы одного размера — тоже. Для pointer-типов через словарь (dictionary) может идти vtable-dispatch — как у интерфейсов, поэтому для них выигрыша по скорости нет; выигрыш — на value-типах (нет боксинга).
 
-**Q: Почему нельзя написать generic method?**
+**3. Почему нельзя generic-метод?**
+Type parameters привязаны к типу или функции, не к методу. Обход — сделать тип дженериком (`Container[T]`, тогда метод берёт `T` из типа) или вынести в функцию. Также нельзя type switch по `T` напрямую — только через `any(v)`.
 
-Ограничение языка: type parameters у Go привязаны к типу или функции, а не к методу. Обход — сделать тип generic (`Container[T]`) или перевести метод в функцию.
+**4. `comparable` vs `cmp.Ordered`?**
+`comparable` — про `==`/`!=` (числа, строки, указатели, структуры из comparable-полей). `cmp.Ordered` (Go 1.21, stdlib) — про порядок `<`/`>`, только числа и строки. До 1.21 порядковый constraint жил во внешнем `golang.org/x/exp/constraints`.
 
-**Q: Когда generics, когда кодогенерация?**
-
-Generics — когда алгоритм одинаков для всех типов (Map, Filter, Set). Кодогенерация — когда для каждого типа нужна особая оптимизация или поведение (protobuf serialization), или когда тип определяется во время сборки.
+**5. Когда generics, когда кодогенерация?**
+Generics — когда алгоритм одинаков для всех типов (Map/Filter/Set, контейнеры). Кодогенерация — когда для каждого типа нужна особая оптимизация/поведение (protobuf) или тип задаётся при сборке. `any` — когда тип реально неизвестен в компиляции (JSON в `map[string]any`, разнородные коллекции).

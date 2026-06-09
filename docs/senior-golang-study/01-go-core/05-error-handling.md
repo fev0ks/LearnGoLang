@@ -14,6 +14,7 @@
 - [Ошибки в конкурентном коде — errCh паттерн](#ошибки-в-конкурентном-коде--errch-паттерн)
 - [`errors.Join` (Go 1.20+)](#errorsjoin-go-120)
 - [Итоговые правила](#итоговые-правила)
+- [Разбор примеров-загадок](#разбор-примеров-загадок)
 - [Interview-ready answer](#interview-ready-answer)
 
 ---
@@ -445,7 +446,7 @@ func fetchAll(ctx context.Context, ids []int) ([]*User, error) {
     users := make([]*User, len(ids))
     
     for i, id := range ids {
-        i, id := i, id // захват переменных цикла
+        // i, id := i, id  // до Go 1.22 нужен был захват; с 1.22 переменные цикла per-iteration
         g.Go(func() error {
             u, err := fetchUser(ctx, id)
             if err != nil {
@@ -469,8 +470,7 @@ func fetchAll(ctx context.Context, ids []int) ([]*User, error) {
 g, ctx := errgroup.WithContext(ctx)
 g.SetLimit(10) // не более 10 горутин одновременно
 
-for _, id := range ids {
-    id := id
+for _, id := range ids {  // Go 1.22+: id уже per-iteration, отдельный захват не нужен
     g.Go(func() error {
         return processUser(ctx, id)
     })
@@ -502,9 +502,8 @@ func fetchAll(ctx context.Context, ids []int) ([]*User, error) {
     results := make(chan *User, len(ids))
     
     var wg sync.WaitGroup
-    for _, id := range ids {
+    for _, id := range ids {  // Go 1.22+: id per-iteration, отдельный захват не нужен
         wg.Add(1)
-        id := id
         go func() {
             defer wg.Done()
             u, err := fetchUser(ctx, id)
@@ -633,18 +632,152 @@ err := errors.Join(err1, err2)
 
 ---
 
+## Разбор примеров-загадок
+
+### Загадка 1: typed nil в error
+
+```go
+type MyErr struct{}
+func (*MyErr) Error() string { return "boom" }
+
+func do() error {
+    var e *MyErr        // nil-указатель
+    return e            // возвращаем конкретный тип
+}
+
+func main() {
+    if err := do(); err != nil {
+        fmt.Println("есть ошибка:", err)  // ?
+    } else {
+        fmt.Println("ошибок нет")
+    }
+}
+```
+
+<details>
+<summary>Ответ</summary>
+
+```
+есть ошибка: boom
+```
+
+`do()` возвращает `error` со «слотом типа» `*MyErr` (не nil) и данными nil → интерфейс ≠ nil, хотя указатель внутри nil. Ветка `err != nil` срабатывает ложно. Это та же typed-nil-ловушка, что в [03-interfaces](./03-interfaces-method-sets-and-nil.md#nil-interface-vs-typed-nil-как-это-работает). Фикс — возвращать `nil` явно, не типизированный указатель. (`fmt` тут не упал, т.к. `Error()` не разыменовывает receiver; если бы разыменовывал — была бы паника.)
+</details>
+
+---
+
+### Загадка 2: `%w` против `%v`
+
+```go
+var ErrNotFound = errors.New("not found")
+
+e1 := fmt.Errorf("load: %w", ErrNotFound)
+e2 := fmt.Errorf("load: %v", ErrNotFound)
+
+fmt.Println(errors.Is(e1, ErrNotFound))  // ?
+fmt.Println(errors.Is(e2, ErrNotFound))  // ?
+```
+
+<details>
+<summary>Ответ</summary>
+
+```
+true
+false
+```
+
+`%w` **оборачивает** — сохраняет ссылку на оригинал, `errors.Is` дойдёт по `Unwrap`. `%v` лишь форматирует текст: получается новая ошибка с тем же сообщением, но без связи → `Is` возвращает false. Сообщения у `e1` и `e2` идентичны (`load: not found`) — различие только в цепочке. Поэтому для пробрасывания ошибки всегда `%w`.
+</details>
+
+---
+
+### Загадка 3: `errors.As` требует указатель на нужный тип
+
+```go
+type AppErr struct{ Code int }
+func (e *AppErr) Error() string { return "app" }
+
+func main() {
+    err := fmt.Errorf("wrap: %w", &AppErr{Code: 42})
+
+    var ae *AppErr
+    fmt.Println(errors.As(err, ae))   // (1) ?
+    fmt.Println(errors.As(err, &ae))  // (2) ?
+}
+```
+
+<details>
+<summary>Ответ</summary>
+
+```
+(1) panic: errors: target must be a non-nil pointer
+(2) true   (ae.Code == 42)
+```
+
+`errors.As` записывает найденное значение в цель → ему нужен **указатель на переменную целевого типа**. `ae` имеет тип `*AppErr`, значит передавать надо `&ae` (тип `**AppErr`). Передача самого `ae` (1) — паника. Частая ошибка: забыть `&`. Мнемоника: «`As(err, &target)` — всегда адрес».
+</details>
+
+---
+
+### Загадка 4: `errors.Join` и nil-аргументы
+
+```go
+e := errors.Join(nil, nil)
+fmt.Println(e == nil)          // ?
+
+e2 := errors.Join(nil, errors.New("x"), nil)
+fmt.Println(e2)                // ?
+```
+
+<details>
+<summary>Ответ</summary>
+
+```
+true
+x
+```
+
+`errors.Join` **пропускает nil**-аргументы: если все nil — возвращает `nil` (а не «пустую не-nil ошибку»). Поэтому паттерн «накопить `[]error` и `Join(errs...)`» безопасен — при отсутствии ошибок выйдет чистый `nil`. С одной не-nil ошибкой результат печатается как её сообщение; с несколькими — через `\n`.
+</details>
+
+---
+
+### Загадка 5: сравнение обёрнутого sentinel через `==`
+
+```go
+var ErrClosed = errors.New("closed")
+err := fmt.Errorf("conn: %w", ErrClosed)
+
+fmt.Println(err == ErrClosed)            // ?
+fmt.Println(errors.Is(err, ErrClosed))   // ?
+```
+
+<details>
+<summary>Ответ</summary>
+
+```
+false
+true
+```
+
+`==` сравнивает **конкретные объекты**: `err` — это новая `*fmt.wrapError`, не `ErrClosed`, → false. `errors.Is` разматывает цепочку `Unwrap` и находит `ErrClosed` → true. Поэтому sentinel-ошибки проверяют **только** через `errors.Is`, а не `==` (иначе одна обёртка `%w` где-то в середине — и проверка молча перестаёт работать).
+</details>
+
+---
+
 ## Interview-ready answer
 
-**Q: Как в Go работает wrapping ошибок и зачем?**
+**1. Как работает wrapping и зачем `%w`?**
+`%w` добавляет контекст, сохраняя ссылку на оригинал. `errors.Is` рекурсивно идёт по `Unwrap()` и сравнивает с целевой ошибкой; `errors.As` — то же, но с type assertion для извлечения данных (нужен указатель на цель, `&target`). `%v` связь рвёт — `Is`/`As` перестают находить. Правило: каждый уровень добавляет `"операция контекст: %w"`.
 
-Оборачивание (`%w`) добавляет контекст к ошибке без потери оригинала. `errors.Is` рекурсивно разматывает цепочку Unwrap-вызовов и сравнивает с целевой ошибкой. `errors.As` делает то же самое, но с type assertion для извлечения данных.
+**2. Sentinel vs typed errors — когда что?**
+Sentinel (`errors.New` в переменную) — когда ошибка это «условие» без данных: `io.EOF`, `sql.ErrNoRows`; проверяют `errors.Is`. Typed (кастомный struct) — когда нужны поля для решений (HTTP-статус, валидация); извлекают `errors.As`. Sentinel сравнивают только через `Is`, не `==` (обёртка ломает `==`).
 
-Правило: каждый уровень стека добавляет `"операция контекст: %w"` — это позволяет прочитать полный путь выполнения из одного сообщения об ошибке.
+**3. Типичная typed-nil-ловушка с error?**
+Вернуть из функции конкретный nil-указатель (`var e *MyErr; return e`) → интерфейс `error` становится non-nil (слот типа заполнен), и `err != nil` ложно срабатывает. Возвращать `nil` явно.
 
-**Q: Sentinel errors vs typed errors — когда что?**
+**4. Как передавать ошибки из горутин?**
+`errgroup` (`golang.org/x/sync/errgroup`): группирует горутины, отменяет контекст при первой ошибке, `SetLimit` ограничивает параллелизм. Вручную — `chan error, 1` + `select { default }`, чтобы не блокироваться (буфер 1 = первая ошибка побеждает, остальные дропаются).
 
-Sentinel — когда ошибка это просто "условие" без дополнительных данных: `io.EOF`, `sql.ErrNoRows`. Typed — когда нужна структурированная информация для принятия решений: HTTP-маппинг на статус-коды, поля для валидации ответа.
-
-**Q: Как передавать ошибки из горутин?**
-
-Стандартный паттерн — `errgroup` из `golang.org/x/sync/errgroup`: группирует горутины, автоматически отменяет контекст при первой ошибке. Для ручного управления — `chan error, 1` с `select { default }` чтобы не блокироваться.
+**5. `errors.Join` vs несколько `%w`?**
+`errors.Join(errs...)` объединяет список (пропуская nil; все nil → nil), реализует `Unwrap() []error` — для агрегации (валидация многих полей). Несколько `%w` в одном `fmt.Errorf` — когда нужно одно сообщение с двумя причинами. Обе работают с `errors.Is`/`As`.
