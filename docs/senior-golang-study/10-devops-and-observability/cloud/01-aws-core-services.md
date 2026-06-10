@@ -350,7 +350,9 @@ data, _ := io.ReadAll(resp.Body)
 
 ### Presigned URLs
 
-Дают временный доступ к private object без AWS credentials у клиента:
+Дают временный доступ к private object без AWS credentials у клиента — и на скачивание, и на загрузку. Главный смысл для upload: байты файла **не идут через backend**, клиент кладёт их прямо в S3.
+
+**Download (presigned GET):**
 
 ```go
 presignClient := s3.NewPresignClient(client)
@@ -362,7 +364,38 @@ presigned, err := presignClient.PresignGetObject(ctx, &s3.GetObjectInput{
 // presigned.URL — можно отдать пользователю, файл доступен 15 минут
 ```
 
-Использования: download приватных файлов, upload directly от клиента (без proxy через сервер).
+**Upload напрямую, без proxy через сервер (presigned PUT):**
+
+```go
+presigned, err := presignClient.PresignPutObject(ctx, &s3.PutObjectInput{
+    Bucket:      aws.String("my-bucket"),
+    Key:         aws.String("uploads/alice/uuid.jpg"), // ключ генерит backend, не клиент
+    ContentType: aws.String("image/jpeg"),
+}, s3.WithPresignExpires(15*time.Minute))
+
+// presigned.URL отдаём клиенту → он сам делает PUT в S3
+```
+
+**Как работает подпись.** Presigned URL — это обычный URL объекта плюс query-параметры, в которых зашита **HMAC-SHA256 подпись** запроса твоим secret access key (схема SigV4, `AWS4-HMAC-SHA256`). При загрузке S3 пересчитывает подпись своим экземпляром секрета и сверяет. Сам secret клиенту не передаётся — только производная подпись, жёстко привязанная к bucket + key + method + сроку (`X-Amz-Expires`). Поэтому ссылку нельзя переиспользовать для другого файла или после истечения.
+
+**Поток для upload:** backend (1) проверяет права и генерит уникальный key, (2) выдаёт presigned PUT, (3) клиент грузит напрямую в S3; (4) о завершении backend узнаёт из **S3 Event Notification** (`s3:ObjectCreated:*` → SQS/SNS/Lambda), а не от клиента; (5) async-воркер валидирует/обрабатывает. Размер у presigned **PUT** не ограничить — если нужен лимит, берут **presigned POST** с policy `["content-length-range", 0, 10485760]`, и S3 сам отклонит превышение. Flow целиком: [File Upload Flow](../../05-system-design/external-request-flows/05-file-upload-and-background-processing-flow.md).
+
+### Подпись в других облаках (GCS, Azure)
+
+Идея — временный подписанный доступ + прямая загрузка клиент↔хранилище мимо backend — одинакова везде. Отличается **криптопримитив подписи**:
+
+| Облако | Чем подписывается | Алгоритм |
+|---|---|---|
+| **AWS S3** | секретный ключ (shared secret) | HMAC-SHA256, `AWS4-HMAC-SHA256` (SigV4) |
+| **GCP GCS** | приватный RSA-ключ сервис-аккаунта (асимметрично) | RSA-SHA256, `GOOG4-RSA-SHA256` (V4) |
+| **Azure Blob** | account key или user-delegation key | SAS-токен (HMAC) |
+
+Практическая разница с AWS:
+- **GCS** по умолчанию подписывает **приватным ключом сервис-аккаунта**, а не общим секретом. Плюс: можно подписывать через IAM API `signBlob`, **не держа приватный ключ в сервисе** (ключ не покидает Google). В Go — `bucket.SignedURL(obj, &storage.SignedURLOptions{Method, Expires, Scheme: storage.SigningSchemeV4, GoogleAccessID, PrivateKey|SignBytes})`. Для S3-совместимости GCS также умеет **HMAC-ключи** (`GOOG4-HMAC-SHA256`) — тогда механика как у AWS.
+- **Azure** использует **SAS** (Shared Access Signature) — токен с правами и сроком, подписанный account key либо user-delegation key (через Entra ID).
+- **Resumable/большие файлы:** S3 — multipart upload; GCS — resumable session URI (POST инициирует, возвращает session URI); цель та же.
+
+Итог: SDK и код разные, но архитектурный паттерн переносится один-в-один — выдать подписанную ссылку, клиент грузит напрямую, дальше async-обработка.
 
 ### Особенности
 

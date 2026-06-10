@@ -26,6 +26,7 @@
 - [10. Google Drive](./10-google-drive.md) — content-addressed chunking, Rabin fingerprint, deduplication, sync protocol, conflict resolution
 - [11. Payment System](./11-payment-system.md) — double-entry bookkeeping, idempotency, Saga + Outbox, reconciliation, strong consistency
 - [12. Marketplace Vendor Notifications](./12-marketplace-vendor-notifications.md) — webhook delivery (Stripe-style), outbox + Kafka, per-vendor circuit breaker, HMAC signing, dead letter
+- [13. Avito / Classifieds](./13-avito-classifieds.md) — фасетный поиск (Elasticsearch), category-specific атрибуты (JSONB + денорм), Outbox→ES, медиа-пайплайн, горячее чтение карточек, view counter, модерация/антифрод
 
 ## Структура каждого кейса
 
@@ -48,6 +49,19 @@
 Interview-ready ответ
   → 2-минутный summary для реального интервью
 ```
+
+## Принципы написания кейсов
+
+Поверх скелета выше — правила, которые держат кейс полезным и нераздутым (эталон — [13. Avito](./13-avito-classifieds.md)):
+
+1. **Числа первичны.** Сначала оценка нагрузки, затем каждое архитектурное решение обосновано цифрой («read-heavy 1000:1 → отдельный поисковый индекс», «150K rps на карточку → кеш», «write hotspot → INCR+flush»). Не «потому что популярно», а «потому что <конкретная цифра>».
+2. **Раздел «Роль каждого компонента».** Для каждого блока диаграммы — *Зачем* (что делает) и *Почему отдельно / почему именно он*. Сквозную идею называть явно (напр. CQRS-разделение по типу нагрузки).
+3. **«Сквозные потоки».** Пронумерованные end-to-end сценарии (запись / поиск / чтение / загрузка) с «Итогом» у каждого — показывают, как компоненты работают вместе.
+4. **Кейс лёгкий, глубина — в профильных доках.** Реализацию (Redis hot key, presigned-подпись, Indexer/Bulk API, GETDEL) выносить в catalog-доки и **кросс-линковать**, а не расписывать в кейсе.
+5. **Каждый компонент линкуется на профильный док** (Elasticsearch, Redis, S3/object storage, брокеры и т.д.).
+6. **Термины не всухую** — расшифровать или сослаться на расшифровку.
+7. **Контраст-таблицы** для альтернатив (выбор / альтернатива / причина) + явное «почему X, а не Y».
+8. **Кросс-ссылки без `#якоря`** (их не открывает Markdown-превью IntelliJ) — ссылаться на файл и называть нужный раздел текстом рядом; делать двунаправленно (кейс ↔ профиль).
 
 ## Перекрёстные ссылки
 

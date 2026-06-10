@@ -412,6 +412,36 @@ func (s *AnalyticsService) RecordViews(ctx context.Context, pageIDs []string) er
 }
 ```
 
+**Долговечность: INCR в Redis + async-flush в БД (против write hotspot).** Горячий счётчик (вирусная страница, популярное объявление) нельзя обновлять в реляционной БД на каждый просмотр: `UPDATE ... SET views = views + 1` на 150K rps — это write hotspot, блокировки строки и деградация БД. Считаем в Redis (INCR — атомарно, in-memory), а в долговечную БД сбрасываем периодически батчами.
+
+```go
+// На просмотр — дёшево, без БД:
+s.redis.Incr(ctx, "views:page:"+id)
+
+// Фоновый flush каждые 30-60 сек: атомарно забрать накопленную дельту и обнулить ключ.
+// GETDEL (Redis 6.2+) возвращает значение и удаляет ключ за одну атомарную операцию.
+delta, _ := s.redis.GetDel(ctx, "views:page:"+id).Int64()
+if delta > 0 {
+    // один UPDATE на дельту, а не на каждый просмотр
+    if err := s.db.Exec(ctx,
+        "UPDATE pages SET views = views + $1 WHERE id = $2", delta, id); err != nil {
+        s.redis.IncrBy(ctx, "views:page:"+id, delta) // вернуть дельту, не потерять
+    }
+}
+```
+
+Почему `GETDEL`, а не `GET` + `DEL` двумя командами: между ними может прийти `INCR`, и этот инкремент потеряется. `GETDEL` атомарно «забирает» накопленное; ключ пересоздастся при следующем `INCR`.
+
+Отображение пользователю — значение в БД плюс текущая незаслитая дельта в Redis:
+
+```text
+views = (SELECT views FROM pages WHERE id = ?) + GET views:page:{id}
+```
+
+Точность vs дешевизна:
+- счётчик не финансовый → потеря последней дельты при падении Redis между flush'ами допустима (eventual). Для просмотров/лайков это ок;
+- если нужна точная аналитика (биллинг по показам, антифрод) — не теряем события: пишем поток просмотров в Kafka → агрегируем во Flink/ClickHouse, а Redis-счётчик оставляем только для быстрого отображения.
+
 **Sliding window метрика с Sorted Set** (точная, но дороже HyperLogLog):
 
 ```go

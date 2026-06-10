@@ -35,6 +35,7 @@
 - [10. Google Drive](./interview-cases/10-google-drive.md) — content-addressed chunking, sync, conflict resolution
 - [11. Payment System](./interview-cases/11-payment-system.md) — double-entry, idempotency, Saga + Outbox
 - [12. Marketplace Vendor Notifications](./interview-cases/12-marketplace-vendor-notifications.md) — webhook delivery, outbox + Kafka, per-vendor circuit breaker, HMAC signing
+- [13. Avito / Classifieds](./interview-cases/13-avito-classifieds.md) — фасетный поиск (Elasticsearch), category-specific атрибуты, медиа-пайплайн, view counter, модерация
 
 ## Highload как отдельная тема
 
