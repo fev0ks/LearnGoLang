@@ -9,7 +9,7 @@
 - [03. log/slog](./03-slog.md) — структурированное логирование, Handler/Logger, проброс trace_id/request_id/user_id из ctx через кастомный Handler, LogValuer, LevelVar, загадки
 - [04. reflect](./04-reflect.md) — интроспекция типов, три закона рефлексии, Type vs Kind, settability, теги/поля/методы, DeepEqual, цена reflection (бенчмарк), когда заменять дженериками
 - [05. io и bufio](./05-io-and-bufio.md) — Reader/Writer как композиция, контракт Read (n/err/EOF), io.EOF, io.Copy и быстрые пути, ReadAll/LimitReader, Tee/Multi/Pipe, bufio.Writer Flush, Scanner и лимит токена
-- [06. Пакет strings](./06-strings-package.md) — справочник функций: поиск/Index (байты!), Split vs Fields, Cut, Trim-ловушка (cutset≠префикс), Replace/NewReplacer, EqualFold, итераторы Lines/SplitSeq (1.24)
+- [06. Строковые пакеты](./06-strings-package.md) — `strings` (Split vs Fields, Cut, Trim-ловушка cutset≠префикс, Replace/NewReplacer, EqualFold, итераторы 1.24), `unicode/utf8` (RuneCount/Decode/Valid, RuneError-ловушка), соседи `bytes`/`unicode`
 - [07. Форматирование (fmt)](./07-fmt-formatting.md) — глаголы %v/%+v/%#v/%T, по типам (%s/%q/%d/%x/%f/%c/%U), флаги ширины/точности, Stringer/Formatter, %w в ошибках, %!verb-диагностика
 
 ## Многие stdlib-темы разобраны в профильных секциях
@@ -23,7 +23,7 @@
 | Модель памяти, happens-before, race detector | [concurrency/01-memory-model](../01-go-core/concurrency-and-performance/01-memory-model.md) |
 | `errors` (Is/As/Join, wrapping `%w`) | [01-go-core/05-error-handling](../01-go-core/05-error-handling.md) |
 | `strings` — устройство типа (byte vs rune, header, Builder, unsafe) | [01-go-core/07-strings](../01-go-core/07-strings.md) |
-| `strings` — справочник функций (Split/Cut/Trim/Replace/EqualFold/итераторы) | [06-strings-package](./06-strings-package.md) |
+| `strings`/`unicode/utf8`/`bytes`/`unicode` — справочник функций | [06-strings-package](./06-strings-package.md) |
 | `time` (Timer/Ticker, утечки, `time.After` в select) | [runtime-scheduler/04-timers](../01-go-core/runtime-scheduler/04-timers.md) |
 | `net/http` — сервер | [networking/protocols/02-http-server](../08-networking-and-api/protocols/02-http-server.md), [http-servers/01-stdlib-net-http](../03-go-libraries-and-ecosystem/http-servers/01-stdlib-net-http.md) |
 | `net/http` — клиент, Transport, reuse | [networking/protocols/03-http-client](../08-networking-and-api/protocols/03-http-client.md) |

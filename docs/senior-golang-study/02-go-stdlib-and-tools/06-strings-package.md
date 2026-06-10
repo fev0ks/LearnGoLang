@@ -1,6 +1,6 @@
-# Пакет `strings`: основные функции
+# Строковые пакеты: `strings`, `unicode/utf8`, `bytes`, `unicode`
 
-Этот файл — практический справочник по пакету `strings`: что есть, когда брать, где ловушки. Про **устройство** самого типа `string` (header, immutability, byte vs rune, `Builder`, сравнение и `collate`, `unsafe`-конверсии) — в [01-go-core/07-strings](../01-go-core/07-strings.md); здесь не дублируем, а ссылаемся.
+Этот файл — практический справочник по стандартным пакетам для работы со строками: основной `strings`, плюс `unicode/utf8` (низкоуровневая работа с UTF-8), и короткие указатели на `bytes` (зеркало для `[]byte`) и `unicode` (рун-предикаты). Про **устройство** самого типа `string` (header, immutability, byte vs rune, `Builder`, сравнение и `collate`, `unsafe`-конверсии) — в [01-go-core/07-strings](../01-go-core/07-strings.md); здесь не дублируем, а ссылаемся.
 
 Ключевая вещь, из которой растут все «странности»: строка — это **UTF-8 байты**, поэтому функции с «индексами» возвращают **смещение в байтах**, а не номер символа.
 
@@ -14,6 +14,8 @@
 - [Обрезка (trim)](#обрезка-trim)
 - [Построение и повтор](#построение-и-повтор)
 - [Итераторы (Go 1.24+)](#итераторы-go-124)
+- [Пакет `unicode/utf8`](#пакет-unicodeutf8)
+- [Соседи: `bytes` и `unicode`](#соседи-bytes-и-unicode)
 - [Частые ошибки](#частые-ошибки)
 - [Interview-ready answer](#interview-ready-answer)
 
@@ -229,6 +231,65 @@ for word := range strings.FieldsSeq("  foo  bar ") {
 ```
 
 Берут на больших входах/горячем пути, где не нужен весь срез сразу: экономят аллокацию слайса и позволяют `break` раньше времени.
+
+---
+
+## Пакет `unicode/utf8`
+
+Низкоуровневая работа с UTF-8: посчитать символы, проверить валидность, вручную декодировать руны из байтов. Концепция byte vs rune — в [07-strings](../01-go-core/07-strings.md#byte-vs-rune-что-это-вообще); здесь только API.
+
+| Функция | Делает |
+|---|---|
+| `RuneCountInString(s)` / `RuneCount(b)` | число рун (символов), а не байтов |
+| `ValidString(s)` / `Valid(b)` | вся ли строка — корректный UTF-8 |
+| `ValidRune(r)` | допустимая ли руна (не суррогат, ≤ `MaxRune`) |
+| `RuneLen(r)` | сколько байт займёт руна в UTF-8 (1–4, или −1 для невалидной) |
+| `DecodeRuneInString(s)` / `DecodeRune(b)` | первая руна + её размер в байтах → `(r, size)` |
+| `DecodeLastRuneInString(s)` / `DecodeLastRune(b)` | последняя руна + размер (итерация с конца) |
+| `EncodeRune(buf, r)` / `AppendRune(buf, r)` | записать руну в `[]byte` |
+| `RuneStart(b byte)` | является ли байт началом руны (не continuation-байтом) |
+| `FullRune(b)` / `FullRuneInString(s)` | хватает ли байтов для полной руны (для стримов) |
+
+Константы: `RuneError` = `U+FFFD` (�, «replacement character»), `RuneSelf` = `0x80` (граница ASCII: байт `< RuneSelf` — это сразу руна), `MaxRune` = `U+10FFFF`, `UTFMax` = `4` (максимум байт на руну).
+
+```go
+utf8.RuneCountInString("привет") // 6   (len было бы 12)
+utf8.ValidString("a\xffb")        // false — 0xFF невалидный байт
+utf8.RuneLen('я')                 // 2
+utf8.RuneLen('🎉')                 // 4
+
+// Ручной декод (range делает то же сам, но иногда нужен явный контроль):
+s := "Gо"                          // 'G' (1 байт) + 'о' кириллическая (2 байта)
+r, size := utf8.DecodeRuneInString(s)
+fmt.Printf("%c %d\n", r, size)     // G 1
+r, size = utf8.DecodeRuneInString(s[size:])
+fmt.Printf("%c %d\n", r, size)     // о 2
+```
+
+⚠️ **Ловушка `RuneError`.** На битых байтах `DecodeRune*` возвращает `(RuneError, 1)` — но `RuneError` (�) и сам по себе **легальный** символ (1 байт его кодировки = 3 байта). Отличить реальную ошибку декода можно по `size`:
+
+```go
+r, size := utf8.DecodeRuneInString(s)
+if r == utf8.RuneError && size <= 1 {
+    // именно ошибка декодирования (size==1 на битом байте, size==0 на пустой строке),
+    // а не настоящий символ '�' (у него size == 3)
+}
+```
+
+Когда нужен `utf8`, а когда `range`: для простого прохода по символам хватает `for i, r := range s` — он сам декодирует руны и на битых байтах подставляет `RuneError`. `utf8.*` берут, когда нужен **явный** контроль: посчитать руны без цикла, идти с конца, проверить валидность входа, докодировать стрим по кускам.
+
+---
+
+## Соседи: `bytes` и `unicode`
+
+**`bytes`** — почти полное **зеркало `strings`**, но для `[]byte`: `bytes.Contains`, `bytes.Split`, `bytes.TrimSpace`, `bytes.Buffer` и т.д. с той же семантикой. Берут, когда данные уже в `[]byte` (пришли из `io.Reader`, сети, файла) — тогда не нужна аллокация на конверсию `[]byte ↔ string`. Если данные изначально строка — `strings`; если байты — `bytes`. Логика и ловушки те же (тот же `Trim`-cutset, тот же `Split` vs `Fields`).
+
+**`unicode`** — предикаты и преобразования на уровне **одной руны**: `IsLetter(r)`, `IsDigit(r)`, `IsSpace(r)`, `IsUpper(r)`, `IsPunct(r)`, `ToUpper(r)`/`ToLower(r)`. На них опираются `strings.Fields` (через `IsSpace`) и `strings.Map`. Пригождаются как предикат для `strings.IndexFunc`/`TrimFunc`/`FieldsFunc`:
+
+```go
+// первый не-буквенный символ
+i := strings.IndexFunc("abc123", func(r rune) bool { return !unicode.IsLetter(r) }) // 3
+```
 
 ---
 
