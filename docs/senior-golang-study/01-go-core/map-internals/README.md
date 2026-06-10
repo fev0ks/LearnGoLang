@@ -7,6 +7,7 @@
 - [01. hmap + bmap (до Go 1.24)](./01-hmap-before-1.24.md) — hmap struct, bmap bucket layout, tophash, lookup, overflow chains, инкрементальная эвакуация
 - [02. Swiss Tables (с Go 1.24)](./02-swiss-tables-since-1.24.md) — open addressing, ctrl bytes, matchH2 bitset, tombstones, batch copy рост, directory
 - [03. Задачки и подводные камни](./03-puzzles-and-gotchas.md) — version-agnostic гочи: порядок итерации, NaN-ключ, nil map, concurrent fatal, неадресуемость, map не сжимаются
+- [04. sync.Map](./04-sync-map.md) — две реализации (read/dirty ≤1.23 vs hash-trie 1.24+), почему lock-free чтение масштабируется по ядрам (кэш-линии), бенчмарки vs map+RWMutex/Mutex, когда брать, ловушки (боксинг any, Range, нет Len)
 
 ## Порядок чтения
 
