@@ -8,6 +8,7 @@
 - [02. encoding/json](./02-encoding-json.md) — теги и omitempty/omitzero, числа как float64 в interface{}, Marshaler/RawMessage, Encoder/Decoder, строгий разбор, загадки
 - [03. log/slog](./03-slog.md) — структурированное логирование, Handler/Logger, проброс trace_id/request_id/user_id из ctx через кастомный Handler, LogValuer, LevelVar, загадки
 - [04. reflect](./04-reflect.md) — интроспекция типов, три закона рефлексии, Type vs Kind, settability, теги/поля/методы, DeepEqual, цена reflection (бенчмарк), когда заменять дженериками
+- [05. io и bufio](./05-io-and-bufio.md) — Reader/Writer как композиция, контракт Read (n/err/EOF), io.EOF, io.Copy и быстрые пути, ReadAll/LimitReader, Tee/Multi/Pipe, bufio.Writer Flush, Scanner и лимит токена
 
 ## Многие stdlib-темы разобраны в профильных секциях
 
@@ -30,7 +31,6 @@
 | `runtime/pprof`, `runtime/trace`, benchmarks, `go tool pprof/trace` | [01-go-core/profiling](../01-go-core/profiling/README.md), [06-benchmarks](../01-go-core/profiling/06-benchmarks.md) |
 
 Ещё не покрыто (кандидаты на отдельные файлы здесь):
-- `io` / `bufio` — `Reader`/`Writer`/`Closer` как композиция, `io.Copy`/`ReaderFrom`/`WriterTo`, `bufio.Scanner` (лимит токена), семантика `io.EOF`, `io.Pipe`/`MultiReader`/`TeeReader`;
 - `regexp` — RE2 (без backtracking), `MustCompile`, флаги, типичные ошибки производительности;
 - `encoding/binary`, `flag`, `embed` — нишевые, по необходимости.
 
