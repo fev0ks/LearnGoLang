@@ -22,6 +22,13 @@ func main() {
 
 }
 
+func appendSlices() {
+	//s1 := []int{1,2,3,4}
+	//s2 := []int{1,2,3,4}
+	//s3 := []int{1,2,3,4}
+	//s0 := append([]int{}, s1..., s2..., s3...) //,', ';', <-, <assign op>, <inc dec statement>, new line or '}' expected, got '...'
+}
+
 func refSlice() {
 	type vector2 [2]float32
 	v1 := vector2{1, 2} // array копируется по значению целиком
@@ -108,11 +115,11 @@ func add(s *[]interface{}) {
 
 func Tupanul() {
 	s := []int{1, 2, 3, 4, 5}
-	fmt.Println(s) // [1 2 3 4 5]
+	fmt.Println(s)     // [1 2 3 4 5]
 	s1 := append(s, 6) // здесь cap у s не хватает, поэтому создается новый backing array
 	s1[0] = 11
-	fmt.Println(s)  // [1 2 3 4 5]
-	fmt.Println(s1) // [11 2 3 4 5 6]
+	fmt.Println(s)      // [1 2 3 4 5]
+	fmt.Println(s1)     // [11 2 3 4 5 6]
 	s2 := append(s1, 7) // здесь append уже может переиспользовать backing array s1
 	s2[0] = 12
 	fmt.Println(s1) // [12 2 3 4 5 6]

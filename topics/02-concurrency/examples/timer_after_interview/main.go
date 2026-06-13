@@ -29,7 +29,7 @@ func doRequest(ctx context.Context) {
 
 func doRequestValid(ctx context.Context) {
 	delay := time.NewTimer(time.Second * 2)
-	delay.Reset()
+	delay.Reset(time.Second * 2)
 	select {
 	case <-delay.C:
 		// do something after one second.
