@@ -4,6 +4,24 @@ Singleflight — паттерн дедупликации **одновремен�
 
 Это решение против **cache stampede** и **thundering herd** — когда кэш истёк и сотни клиентов одновременно ломятся в БД за одним ключом.
 
+## Содержание
+
+- [Формулировка](#формулировка)
+- [Уточняющие вопросы](#уточняющие-вопросы)
+- [Базовое решение](#базовое-решение)
+- [Production-grade: `x/sync/singleflight`](#production-grade-используй-golangorgxsyncsingleflight)
+  - [`DoChan` для async API](#dochan-для-async-api)
+- [Singleflight для cache stampede](#singleflight-для-cache-stampede)
+- [Подводный камень: shared result mutation](#подводный-камень-shared-result-mutation)
+- [Singleflight + context](#singleflight--context)
+- [Singleflight и errors](#singleflight-и-errors)
+- [Тесты](#тесты)
+- [Подводные камни](#подводные-камни)
+- [Возможные расширения](#возможные-расширения)
+- [Реальные применения](#реальные-применения)
+- [Что важно показать на собеседовании](#что-важно-показать-на-собеседовании)
+- [Связки](#связки)
+
 ## Формулировка
 
 > "Реализуй паттерн, который дедуплицирует одновременные одинаковые вызовы. Например, если 100 запросов параллельно вызывают `GetUser(42)`, в БД должен пойти только один."
@@ -164,6 +182,8 @@ case <-ctx.Done():
 ```
 
 Полезно когда хочешь иметь возможность отменить через `ctx` — но **сам fn не отменяется**, просто ты перестаёшь ждать. Другие waiter'ы продолжают ждать.
+
+> Разбор устройства `x/sync/singleflight` (структуры `Group`/`call`, `Do` vs `DoChan`, почему канал `cap 1`, `Forget`, обработка паники) — в теории: [03-sync-primitives](../../../01-go-core/concurrency-and-performance/03-sync-primitives.md), раздел про `singleflight`.
 
 ---
 
@@ -608,6 +628,7 @@ Counter: singleflight hits (shared=true). Показывает наскольк�
 5. **Distributed случай требует другого подхода** — Redis lock или брокер
 6. **Forget()** для retry — знать про него
 7. **DoChan + select** для ctx integration
+8. **Внутренности** (если копнут): `cap 1` у `DoChan`-канала, рассылка под мьютексом, обработка паники — разобрано в [03-sync-primitives](../../../01-go-core/concurrency-and-performance/03-sync-primitives.md)
 
 ## Связки
 
