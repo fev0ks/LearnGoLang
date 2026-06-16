@@ -7,8 +7,9 @@
 - [01. Memory Model](./01-memory-model.md) — happens-before, synchronization edges, гарантии каналов/mutex/Once/atomic, data race, race detector
 - [02. Goroutines And Channels](./02-goroutines-and-channels.md) — lifecycle, unbuffered/buffered, pipeline, fan-out/fan-in, done-channel, goroutine leak, select
 - [03. Sync Primitives](./03-sync-primitives.md) — Mutex/RWMutex, WaitGroup, Once, Cond, Pool, Map, atomic, singleflight
-- [04. Worker Pool](./04-worker-pool.md) — разбор task_before.go (5 багов), правильная реализация, errCh паттерн, graceful shutdown, semaphore
-- [05. Context Patterns](./05-context-patterns.md) — Background/TODO, WithCancel/Timeout/Deadline, propagation, context.Value anti-patterns, defer cancel()
+- [04. Context Patterns](./04-context-patterns.md) — Background/TODO, WithCancel/Timeout/Deadline, propagation, context.Value anti-patterns, defer cancel()
+
+> **Worker pool** разобран в практике (это задача-разбор, а не теория): [coding-tasks/concurrency/07-worker-pool-debug](../../12-interview-practice/coding-tasks/concurrency/07-worker-pool-debug.md) — баговая реализация (5 багов) → правильная, errCh, graceful shutdown, semaphore. Чистая задача worker pool — [01-worker-pool](../../12-interview-practice/coding-tasks/concurrency/01-worker-pool.md); рабочий код по уровням — [topics/02-concurrency/workerpool](../../../../topics/02-concurrency/workerpool/README.md). Базовый fan-out/fan-in — в [02-goroutines-and-channels](./02-goroutines-and-channels.md).
 
 > Профилирование (pprof, CPU/memory/goroutine профили, execution tracer, benchmarks) вынесено в отдельный подраздел go-core: [../profiling/](../profiling/) — оно общее для всего Go, не только для concurrency.
 

@@ -51,8 +51,8 @@
 - [01. Memory Model](./concurrency-and-performance/01-memory-model.md) — happens-before, channel/mutex/Once/atomic гарантии, data race, race detector
 - [02. Goroutines And Channels](./concurrency-and-performance/02-goroutines-and-channels.md) — lifecycle, buffered/unbuffered, pipeline, fan-out/fan-in, goroutine leak, select
 - [03. Sync Primitives](./concurrency-and-performance/03-sync-primitives.md) — Mutex/RWMutex, WaitGroup, Once, Cond, Pool, Map, atomic, singleflight
-- [04. Worker Pool](./concurrency-and-performance/04-worker-pool.md) — баги типовой реализации, errCh, graceful shutdown, semaphore
-- [05. Context Patterns](./concurrency-and-performance/05-context-patterns.md) — WithCancel/Timeout/Deadline, propagation, context.Value анти-паттерны
+- [04. Context Patterns](./concurrency-and-performance/04-context-patterns.md) — WithCancel/Timeout/Deadline, propagation, context.Value анти-паттерны
+- Worker pool — в практике: [coding-tasks/concurrency/07-worker-pool-debug](../12-interview-practice/coding-tasks/concurrency/07-worker-pool-debug.md) — баги типовой реализации, errCh, graceful shutdown, semaphore
 
 ## Profiling (подраздел)
 

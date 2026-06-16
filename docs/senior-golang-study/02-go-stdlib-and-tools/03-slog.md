@@ -152,7 +152,7 @@ slog.LogAttrs(ctx, slog.LevelInfo, "msg", slog.Int("x", 1))
 
 ### Шаг 1. Ключи и хелперы для ctx
 
-Используется неэкспортируемый тип ключа (как и в [context-паттернах](../01-go-core/concurrency-and-performance/05-context-patterns.md#contextvalue--когда-допустимо-когда-анти-паттерн), чтобы избежать коллизий между пакетами):
+Используется неэкспортируемый тип ключа (как и в [context-паттернах](../01-go-core/concurrency-and-performance/04-context-patterns.md), раздел «context.Value», чтобы избежать коллизий между пакетами):
 
 ```go
 package reqctx

@@ -626,6 +626,6 @@ Counter в обработанных задач, histogram latency, gauge in-flig
 ## Связки
 
 - [Background workers](../../../04-architecture-and-patterns/patterns/04-background-workers.md) — паттерны production worker'ов
-- [Worker pool patterns](../../../01-go-core/concurrency-and-performance/04-worker-pool.md) — больше вариантов
-- [Context patterns](../../../01-go-core/concurrency-and-performance/05-context-patterns.md) — детально про context
+- [Worker pool patterns](07-worker-pool-debug.md) — больше вариантов
+- [Context patterns](../../../01-go-core/concurrency-and-performance/04-context-patterns.md) — детально про context
 - [Graceful shutdown](../../../04-architecture-and-patterns/patterns/08-graceful-shutdown.md) — как останавливать pool в k8s

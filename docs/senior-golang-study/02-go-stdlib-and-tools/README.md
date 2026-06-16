@@ -18,7 +18,7 @@
 
 | Пакет / тема | Где разобрано |
 |---|---|
-| `context` | [concurrency/05-context-patterns](../01-go-core/concurrency-and-performance/05-context-patterns.md) |
+| `context` | [concurrency/04-context-patterns](../01-go-core/concurrency-and-performance/04-context-patterns.md) |
 | `sync`, `sync/atomic` (Mutex/RWMutex, Once, Pool, Map, atomic, singleflight) | [concurrency/03-sync-primitives](../01-go-core/concurrency-and-performance/03-sync-primitives.md) |
 | Модель памяти, happens-before, race detector | [concurrency/01-memory-model](../01-go-core/concurrency-and-performance/01-memory-model.md) |
 | `errors` (Is/As/Join, wrapping `%w`) | [01-go-core/05-error-handling](../01-go-core/05-error-handling.md) |

@@ -10,6 +10,7 @@
 4. [Pipeline](./04-pipeline.md) — цепочка обработки через каналы
 5. [Pub/Sub In-Memory](./05-pubsub.md) — один publisher, много subscriber'ов
 6. [Singleflight](./06-singleflight.md) — дедупликация одинаковых concurrent запросов
+7. [Worker Pool (debug)](./07-worker-pool-debug.md) — найти 5 багов в типовой реализации, errCh, graceful shutdown, semaphore + паттерны
 
 ## Что важно знать
 
@@ -92,5 +93,5 @@ for _, v := range items {
 
 - [Concurrency и channels](../../../01-go-core/concurrency-and-performance/02-goroutines-and-channels.md) — детальная теория
 - [Sync primitives](../../../01-go-core/concurrency-and-performance/03-sync-primitives.md) — mutex, atomic, sync.Map
-- [Worker pool patterns](../../../01-go-core/concurrency-and-performance/04-worker-pool.md) — расширенные варианты
-- [Context patterns](../../../01-go-core/concurrency-and-performance/05-context-patterns.md) — context propagation
+- [Worker pool patterns](07-worker-pool-debug.md) — расширенные варианты
+- [Context patterns](../../../01-go-core/concurrency-and-performance/04-context-patterns.md) — context propagation

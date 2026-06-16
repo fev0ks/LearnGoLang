@@ -82,7 +82,7 @@
 
 - [Concurrency и channels](../../01-go-core/concurrency-and-performance/02-goroutines-and-channels.md) — теория
 - [Sync primitives](../../01-go-core/concurrency-and-performance/03-sync-primitives.md) — mutex, atomic, RWMutex
-- [Worker pool patterns](../../01-go-core/concurrency-and-performance/04-worker-pool.md) — отдельный файл с разными вариантами
-- [Context patterns](../../01-go-core/concurrency-and-performance/05-context-patterns.md) — context cancellation
+- [Worker pool patterns](concurrency/07-worker-pool-debug.md) — отдельный файл с разными вариантами
+- [Context patterns](../../01-go-core/concurrency-and-performance/04-context-patterns.md) — context cancellation
 - [Background workers](../../04-architecture-and-patterns/patterns/04-background-workers.md) — практические patterns
 - [Reliability patterns](../../05-system-design/reliability-patterns/) — rate limit, circuit breaker, retry

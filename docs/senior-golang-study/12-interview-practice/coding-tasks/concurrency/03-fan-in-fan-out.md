@@ -650,4 +650,4 @@ func tee[T any](in <-chan T) (<-chan T, <-chan T) {
 - [Worker pool](./01-worker-pool.md) — частный случай fan-out + fan-in
 - [Pipeline](./04-pipeline.md) — fan-out + fan-in в виде stage'ей
 - [Concurrency patterns Go blog](https://go.dev/blog/pipelines) — официальный гайд от Sameer Ajmani
-- [Worker pool patterns](../../../01-go-core/concurrency-and-performance/04-worker-pool.md)
+- [Worker pool patterns](07-worker-pool-debug.md)

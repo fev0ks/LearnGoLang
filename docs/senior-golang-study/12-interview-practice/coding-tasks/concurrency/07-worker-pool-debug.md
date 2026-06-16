@@ -2,6 +2,8 @@
 
 Worker pool — один из самых частых паттернов в Go-коде: bounded concurrency для CPU-bound или I/O-bound задач. Здесь — разбор реального баг-репорта с собеседования и правильная реализация.
 
+> **Рабочий код в репозитории:** [topics/02-concurrency/workerpool](../../../../../topics/02-concurrency/workerpool/README.md) — одна задача в трёх уровнях (junior / middle / senior), каждый отдельный модуль с тестами. junior — базовый пул с типичными багами; middle — production-ready (context, recover, single-producer); senior — backpressure, observability, dynamic resize. По мотивам [видео-разбора](https://www.youtube.com/watch?v=OHCqbREDx8U). (Ссылка ведёт за пределы этого гайда — открывается в IDE/репозитории, не во встроенном viewer.)
+
 ## Содержание
 
 - [Разбор задачи с собеседования: task_before.go](#разбор-задачи-с-собеседования-task_beforego)

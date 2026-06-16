@@ -1009,4 +1009,4 @@ func TestFetcher_RaceDetector(t *testing.T) {
 - [Singleflight](../concurrency/06-singleflight.md) — против stampede
 - [LRU Cache](../data-structures/01-lru-cache.md) — bounded cache
 - [Retry с Backoff](../system-primitives/02-retry-with-backoff.md) — расширение
-- [Context patterns](../../../01-go-core/concurrency-and-performance/05-context-patterns.md)
+- [Context patterns](../../../01-go-core/concurrency-and-performance/04-context-patterns.md)

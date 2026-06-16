@@ -372,7 +372,7 @@ func fanOut(in <-chan int, workers int) []<-chan int {
 }
 ```
 
-Все workers читают из **одного** входного канала — Go гарантирует, что каждое значение получит только одна горутина. Производственный вариант (фиксированный пул, сбор результатов, отмена) разобран в [04-worker-pool](./04-worker-pool.md).
+Все workers читают из **одного** входного канала — Go гарантирует, что каждое значение получит только одна горутина. Производственный вариант (фиксированный пул, сбор результатов, отмена) разобран в [04-worker-pool](../../12-interview-practice/coding-tasks/concurrency/07-worker-pool-debug.md).
 
 ### Fan-in: несколько producers → один consumer
 
@@ -490,7 +490,7 @@ func fetchAll(ctx context.Context, urls []string) ([]Result, error) {
   ```
   Это развязывает **ожидание**, но не сам `fetch`: его горутина «протекает» до завершения вызова (убить её снаружи нельзя). Поэтому буфер `1` обязателен — иначе после нашего ухода `done <- …` заблокируется навсегда → уже настоящий leak.
 
-Подробнее про сам `errgroup`, `WaitGroup` и семафоры — в [03-sync-primitives](./03-sync-primitives.md); очередь задач с воркерами — в [04-worker-pool](./04-worker-pool.md).
+Подробнее про сам `errgroup`, `WaitGroup` и семафоры — в [03-sync-primitives](./03-sync-primitives.md); очередь задач с воркерами — в [04-worker-pool](../../12-interview-practice/coding-tasks/concurrency/07-worker-pool-debug.md).
 
 ---
 
