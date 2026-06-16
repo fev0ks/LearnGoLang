@@ -28,6 +28,12 @@
   - gRPC vs REST, grpc-go vs connect-go
 
 ## Категории (материалы готовятся)
+- **Concurrency, worker pools & resilience:**
+  - bounded fan-out / батч: `golang.org/x/sync/errgroup` (`SetLimit`), `golang.org/x/sync/semaphore`
+  - worker pools: `sourcegraph/conc`, `panjf2000/ants` (высоконагруженный, реюз горутин), `alitto/pond`
+  - rate limiting: `golang.org/x/time/rate` (per-process), распределённый — через Redis
+  - resilience: `sony/gobreaker` (circuit breaker), adaptive concurrency (Netflix `concurrency-limits`)
+  - живой пример junior/middle/senior + разбор собес-вопросов → [topics/02-concurrency/workerpool](../../../topics/02-concurrency/workerpool/README.md)
 - **Config:** `envconfig`, `viper`, manual parsing
 - **Logging:** `slog`, `zap`, `zerolog`
 - **Database access:** `sqlx`, `pgx`, `gorm`, `bun`, `ent` → см. [06-databases/go-database-libraries](../06-databases/go-database-libraries/)
@@ -74,3 +80,11 @@
 - [google/uuid](https://github.com/google/uuid)
 - [samber/lo](https://github.com/samber/lo)
 - [pkg/errors](https://github.com/pkg/errors)
+- [x/sync/errgroup](https://pkg.go.dev/golang.org/x/sync/errgroup)
+- [x/sync/semaphore](https://pkg.go.dev/golang.org/x/sync/semaphore)
+- [sourcegraph/conc](https://github.com/sourcegraph/conc)
+- [panjf2000/ants](https://github.com/panjf2000/ants)
+- [alitto/pond](https://github.com/alitto/pond)
+- [x/time/rate](https://pkg.go.dev/golang.org/x/time/rate)
+- [sony/gobreaker](https://github.com/sony/gobreaker)
+- [Netflix concurrency-limits](https://github.com/Netflix/concurrency-limits)

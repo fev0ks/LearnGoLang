@@ -1,0 +1,184 @@
+version: "2"  # Версия формата конфигурационного файла (v2 - для golangci-lint 2.x)
+
+run: # Параметры запуска линтера
+  timeout: 5m  # Максимальное время выполнения анализа
+  relative-path-mode: gomod  # Пути к файлам интерпретируются относительно корня go-модуля
+  issues-exit-code: 1  # Код выхода = 1, если найдены ошибки (полезно для CI)
+  tests: true  # Анализировать также _test.go файлы
+  modules-download-mode: readonly  # Не разрешать загрузку зависимостей во время анализа (безопасно и быстрее на CI)
+
+output: # Настройки вывода результатов линтинга
+  formats:
+    text: # Формат вывода в терминал
+      print-linter-name: true  # Показывать имя линтера рядом с каждым сообщением
+      print-issued-lines: true  # Показывать строку кода, где найдена проблема
+      colors: true  # Использовать цветной вывод (для лучшей читаемости)
+
+issues: # Общие настройки для обработки проблем
+  max-issues-per-linter: 0  # Без лимита на количество ошибок от одного линтера
+  max-same-issues: 0  # Без лимита на количество одинаковых ошибок
+  uniq-by-line: true  # Отображать максимум одну ошибку на строку (избегает спама от разных линтеров по одной строке)
+
+linters: # Список активных и отключённых линтеров
+  default: standard  # Использовать стандартный набор линтеров golangci-lint (включает errcheck, govet, staticcheck, unused, ineffassign)
+  enable: # Явно включенные дополнительные линтеры
+    # Качество кода
+    - gocritic        # Набор продвинутых правил для улучшения качества кода
+    - revive          # Проверяет стиль кода, оформление, названия
+    - gosec           # Проверка на уязвимости и небезопасные практики
+    - depguard        # Запрещает импорт указанных пакетов (контроль зависимостей)
+    - bodyclose       # Проверяет, что закрывается `resp.Body` у HTTP-запросов
+    - noctx           # Проверяет, что HTTP-запросы используют context.Context
+    - containedctx    # Предупреждает, если `context.Context` сохраняется в структуре
+
+    # Сложность и размер
+    - cyclop          # Контролирует цикломатическую сложность функций
+    - gocognit        # Контролирует когнитивную сложность функций
+    - funlen          # Контролирует длину функций
+    - nakedret        # Запрещает "голые" return в длинных функциях
+
+    # Ошибки
+    - errorlint       # Рекомендует использовать `errors.Is` / `errors.As` вместо прямых сравнений
+    - errname         # Проверяет имена переменных/типов ошибок (должны содержать "Err")
+
+    # Производительность
+    - perfsprint      # Заменяет медленные fmt.Sprintf на быстрые альтернативы
+    - prealloc        # Находит слайсы, которые можно pre-allocate
+
+    # Современный Go (1.22+)
+    - copyloopvar     # Обнаруживает ненужное копирование переменных цикла
+    - intrange        # Предлагает использовать for i := range n
+    - exptostd        # Заменяет golang.org/x/exp на stdlib
+
+    # Стиль и форматирование
+    - asciicheck      # Предупреждает о не-ASCII символах в коде
+    - dupl            # Находит дублированные фрагменты кода
+    - unparam         # Находит неиспользуемые параметры функций
+    - forbidigo       # Запрещает определённые вызовы или конструкции по regex-паттернам
+    - usestdlibvars   # Предлагает использовать стандартные константы (http.MethodGet и т.д.)
+    - mirror          # Находит неправильное использование bytes/strings функций
+    - nolintlint      # Проверяет корректность //nolint директив
+    - godox           # Находит TODO, FIXME, BUG, HACK комментарии в коде
+
+    # Тесты
+    - testifylint     # Улучшенные проверки для testify
+
+    # Логирование
+    - sloglint        # Проверки для slog (структурированное логирование)
+
+  disable: # Линтеры, которые намеренно отключены
+    - gocyclo       # Старый линтер сложности (заменён на cyclop)
+    - lll           # Проверка длины строк (заменён на golines formatter)
+    - contextcheck  # Много false positives
+    - err113        # Слишком строгий
+    - varnamelen    # Много false positives
+    - nlreturn      # Спорное форматирование
+    - wsl           # Deprecated (заменён на wsl_v5)
+    - wrapcheck     # Излишне строгий для образовательного кода
+
+  exclusions: # Исключения из анализа
+    generated: strict  # Игнорировать сгенерированные файлы (по "// Code generated ... DO NOT EDIT.")
+    presets: # Стандартные исключения для типичных случаев
+      - std-error-handling      # Исключает ошибки типа os.Close, которые часто игнорируются
+      - common-false-positives  # Исключает известные false positives (например, gosec G304)
+    rules: # Локальные исключения по пути/файлу/линтерам
+      - path: _test\.go  # Для всех тестов:
+        linters:
+          - cyclop      # Не проверять цикломатическую сложность тестов
+          - gocognit    # Не проверять когнитивную сложность тестов
+          - dupl        # Не проверять дублирование в тестах
+          - gosec       # Не искать уязвимости в тестах
+          - funlen      # Не проверять длину тестовых функций
+          - wrapcheck   # Не требовать оборачивания ошибок в тестах
+          - noctx       # Не требовать context в тестовых HTTP-запросах
+          - containedctx  # Разрешить context.Context в test suite структурах
+          - testifylint   # Не применять строгие правила testify в тестах
+          - unparam       # Не проверять неиспользуемые параметры в тестах
+
+  settings: # Индивидуальные настройки для конкретных линтеров
+
+    gosec:
+      # Включаем все правила, включая экспериментальные
+      config:
+        global:
+          audit: true        # Активировать все правила безопасности
+          show-ignored: true # Показывать проигнорированные проблемы в комментариях
+        severity: "medium"   # Минимальная важность проблем, high/medium/low
+        confidence: "medium" # Минимальный уровень уверенности, high/medium/low
+      excludes:
+        - G102  # Binds to all network interfaces
+
+    cyclop:
+      max-complexity: 20  # Допустимая цикломатическая сложность функции
+
+    gocognit:
+      min-complexity: 20  # Допустимая когнитивная сложность функции (10-20 рекомендуется)
+
+    funlen:
+      lines: 100       # Максимум строк в функции
+      statements: 50   # Максимум statements в функции
+
+    nakedret:
+      max-func-lines: 30  # Запретить naked return в функциях > 30 строк
+
+    depguard:
+      rules:
+        main:
+          deny:
+            - pkg: io/ioutil
+              desc: "Устаревший пакет - используйте os/io"
+            - pkg: github.com/golang/protobuf
+              desc: "Используйте google.golang.org/protobuf"
+            - pkg: github.com/satori/go.uuid
+              desc: "Используйте github.com/google/uuid"
+            - pkg: math/rand$
+              desc: "Используйте math/rand/v2"
+            - pkg: log$
+              desc: "Используйте log/slog для структурированного логирования"
+            - pkg: github.com/pkg/errors
+              desc: "Используйте стандартный errors и fmt.Errorf с %w"
+
+    revive:
+      severity: warning  # Нарушения revive будут как предупреждения, а не ошибки
+
+    perfsprint:
+      int-conversion: true   # Проверять конвертацию int
+      err-error: true        # Проверять err.Error()
+      errorf: true           # Проверять fmt.Errorf
+      sprintf1: true         # Проверять fmt.Sprintf с одним аргументом
+
+    nolintlint:
+      require-explanation: true  # Требовать объяснение для //nolint
+      require-specific: true     # Требовать указание конкретного линтера
+
+    forbidigo:
+      exclude-godoc-examples: true  # Не применять запреты к Godoc-примерам
+      analyze-types: true  # Искать запреты и в типах/константах, а не только в функциях
+      forbid: # Список запрещённых паттернов
+        - pattern: '^fmt\.Print.*$'  # Запрет использования fmt.Print*, fmt.Println и т.д.
+          msg: "Запрещено напрямую использовать fmt.Print* для логирования (вместо этого используйте структурированный логгер)"
+        - pattern: '^time\.Sleep$'  # Запрет использования time.Sleep
+          msg: "Запрещено использовать time.Sleep в продакшен-коде (используй таймеры/контекст)"
+        - pattern: '^http\.DefaultClient$'  # Запрет использования небезопасного http.DefaultClient
+          msg: "Не используй http.DefaultClient (нет таймаутов); создай *http.Client с таймаутами"
+
+    godox:
+      keywords:  # Какие ключевые слова искать в комментариях
+        - TODO   # Задачи, которые нужно сделать
+        - FIXME  # Баги, которые нужно исправить
+        - BUG    # Известные баги
+        - HACK   # Костыли, которые нужно переделать
+
+formatters: # Форматтеры кода (проверка стиля)
+  enable:
+    - gofumpt  # Строгая версия gofmt с дополнительными правилами
+    - gci      # Форматтер импортов (гибкая альтернатива goimports)
+  settings:
+    gofumpt:
+      extra-rules: true  # Включить дополнительные строгие правила (например, удаление лишних пустых строк)
+    gci:
+      sections: # Порядок группировки импортов
+        - Standard  # Стандартная библиотека
+        - Default   # Сторонние зависимости
+        - Prefix(workerpool)  # Локальные импорты проекта
+      no-inline-comments: false  # Разрешить комментарии после импортов (true - запретит)
