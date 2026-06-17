@@ -4,7 +4,7 @@
 
 ## Содержание
 
-- [`context.Background()` vs `context.TODO()`](#contextbackground-vs-contexttodo)
+- [Под капотом: типы, иерархия и отмена](#под-капотом-типы-иерархия-и-отмена)
 - [WithCancel, WithTimeout, WithDeadline](#withcancel-withtimeout-withdeadline)
 - [Отмена с причиной: `WithCancelCause` и `Cause` (Go 1.20+)](#отмена-с-причиной-withcancelcause-и-cause-go-120)
 - [Propagation: почему ctx первый аргумент, не поле struct](#propagation-почему-ctx-первый-аргумент-не-поле-struct)
@@ -15,31 +15,137 @@
 - [Производные контексты — дерево](#производные-контексты--дерево)
 - [`context.WithoutCancel` (Go 1.21+)](#contextwithoutcancel-go-121)
 - [`context.AfterFunc` (Go 1.21+)](#contextafterfunc-go-121)
-- [Под капотом: как устроена отмена](#под-капотом-как-устроена-отмена)
 - [Разбор примеров-загадок](#разбор-примеров-загадок)
 - [Interview-ready answer](#interview-ready-answer)
 
 ---
 
-## `context.Background()` vs `context.TODO()`
+## Под капотом: типы, иерархия и отмена
 
-Оба возвращают пустой non-nil context без cancel / timeout / values. Разница — **семантическая**:
+### Интерфейс и семейство типов
+
+`Context` — это **интерфейс из 4 методов**, не структура. У него нет «полей» — есть несколько неэкспортируемых реализаций в пакете `context`, каждая отвечает за свой `With…`.
 
 ```go
-// Background — корневой контекст. Используй:
-// - в main/init
-// - в тестах как основу для дочерних
-// - в долгоживущих горутинах верхнего уровня
-ctx := context.Background()
-
-// TODO — заглушка. Используй:
-// - когда контекст нужен, но откуда его взять — ещё непонятно
-// - при рефакторинге: пометить место, которое нужно исправить
-// - в тестах, которые ещё не написаны
-ctx := context.TODO()
+// $GOROOT/src/context/context.go
+type Context interface {
+    Deadline() (deadline time.Time, ok bool) // когда истечёт (ok=false — без дедлайна)
+    Done() <-chan struct{}                    // канал, закрываемый при отмене (может быть nil)
+    Err() error                               // nil / Canceled / DeadlineExceeded
+    Value(key any) any                        // значение по ключу (поиск вверх по цепочке)
+}
 ```
 
-`go vet` и `staticcheck` предупреждают если `context.TODO()` остаётся в production-коде.
+Конкретные типы (все неэкспортируемые), и какой `With…` какой возвращает:
+
+```go
+// База: никогда не отменяется, нет значений, нет дедлайна.
+type emptyCtx struct{}                         // Done()==nil, Err()==nil, Value==nil
+type backgroundCtx struct{ emptyCtx }          // ← context.Background(): корневой контекст
+type todoCtx struct{ emptyCtx }                // ← context.TODO(): заглушка «контекст пока неоткуда взять»
+
+// Отмена: WithCancel / WithCancelCause.
+type cancelCtx struct {
+    Context                          // встроенный родитель (любой Context)
+    mu       sync.Mutex              // защищает поля ниже
+    done     atomic.Value            // of chan struct{}, СОЗДАЁТСЯ ЛЕНИВО при первом Done()
+    children map[canceler]struct{}   // потомки, которых надо отменить вслед за собой
+    err      atomic.Value            // Canceled / DeadlineExceeded (atomic → Err() без лока)
+    cause    error                   // причина (WithCancelCause), под mu
+}
+
+// Таймаут/дедлайн: WithTimeout / WithDeadline — встраивает cancelCtx + таймер.
+type timerCtx struct {
+    cancelCtx
+    timer    *time.Timer             // под cancelCtx.mu
+    deadline time.Time
+}
+
+// Значение: WithValue — встраивает родителя + одну пару key/val (без отмены).
+type valueCtx struct {
+    Context
+    key, val any
+}
+
+// Обрезка отмены: WithoutCancel — оборачивает родителя, но Done()==nil.
+type withoutCancelCtx struct {
+    c Context
+}
+```
+
+Ключевое из этой картины:
+
+- **Это связный список, а не дерево с указателями вниз.** Каждый производный контекст **встраивает родителя** (`Context` полем). Поэтому `Value` идёт **вверх** по цепочке (`valueCtx.Value` → родитель → …), а отмена идёт **вниз** через отдельный `children` map в `cancelCtx` (см. ниже).
+- **Только `cancelCtx`/`timerCtx` умеют отменяться.** `emptyCtx`/`valueCtx`/`withoutCancelCtx` возвращают `Done()==nil` — на таком `select { case <-ctx.Done(): }` блокируется вечно (Загадка 1).
+- **`timerCtx` — это `cancelCtx` + таймер.** Вся логика отмены переиспользуется через встраивание; таймер лишь дёргает тот же `cancel` по дедлайну.
+
+**`Background()` vs `TODO()`.** Оба — `emptyCtx` под капотом, возвращают **одинаковый** пустой non-nil контекст без cancel / timeout / values. Различие чисто **семантическое** (разные типы-обёртки нужны только для понятного `String()` в дебаге):
+
+- `context.Background()` — **корневой** контекст: в `main`/`init`, в долгоживущих горутинах верхнего уровня, как основа для дочерних в тестах.
+- `context.TODO()` — **заглушка**: контекст по-хорошему нужен, но откуда его взять — ещё непонятно (рефакторинг, недописанный код). `go vet`/`staticcheck` подсвечивают `TODO()`, оставшийся в production.
+
+### Где образуется иерархия
+
+Цепочка строится **в конструкторах** `With…`: каждый кладёт родителя во встроенное поле `Context`. Никакого глобального дерева нет — это просто связанный список, где ребёнок держит ссылку на родителя.
+
+```go
+// WithValue — родитель кладётся прямо в первое поле valueCtx.
+func WithValue(parent Context, key, val any) Context {
+    // ...проверки...
+    return &valueCtx{parent, key, val}   // valueCtx.Context = parent
+}
+
+// WithCancel → withCancel → propagateCancel, где и происходит проводка:
+func (c *cancelCtx) propagateCancel(parent Context, child canceler) {
+    c.Context = parent          // (1) UP-связь: ребёнок запомнил родителя
+    done := parent.Done()
+    if done == nil {
+        return                  // родитель неотменяем (Background) — вниз связывать незачем
+    }
+    // ...если parent уже отменён — отменить child сразу...
+    if p, ok := parentCancelCtx(parent); ok {
+        p.mu.Lock()
+        // (2) DOWN-связь: ребёнок зарегистрирован в ближайшем предке-cancelCtx
+        p.children[child] = struct{}{}
+        p.mu.Unlock()
+    }
+    // ...иначе (родитель не из stdlib) — сторожевая горутина...
+}
+```
+
+Получаются **две разные связи** между узлами, и они ходят в разные стороны:
+
+```
+            ┌─────────────┐
+            │  cancelCtx  │  (родитель)
+            │  children ──┼──── DOWN: набор потомков для отмены
+            └──────▲──────┘            (только в cancelCtx)
+                   │ UP: встроенное поле Context
+            ┌──────┴──────┐
+            │  valueCtx   │  (потомок)
+            │  Context ───┘  ← ссылка на родителя
+            └─────────────┘
+```
+
+- **UP — встроенный `Context`** (есть у *каждого* производного: `valueCtx`, `cancelCtx`, `timerCtx`). По нему идёт `Value(key)`: не нашёл у себя — спросил родителя, и так до `emptyCtx`. По нему же `Deadline()` «всплывает», если у самого узла дедлайна нет.
+- **DOWN — `children` map** (есть *только* у `cancelCtx`/`timerCtx`). По ней `cancel()` рекурсивно отменяет потомков. `valueCtx` в отмене не участвует — он не `canceler`, поэтому `propagateCancel` ищет **ближайший предок-`cancelCtx`** (`parentCancelCtx`), перепрыгивая через `valueCtx`-узлы.
+
+Поэтому `ctx := context.WithValue(context.WithTimeout(parent, t), k, v)` — это три узла: `valueCtx → timerCtx → parent`. `Value(k)` найдётся в верхнем, а `Done()`/отмена живут в среднем `timerCtx`; `valueCtx` лишь прозрачно проксирует `Done()` родителя через встроенный `Context`.
+
+### Как работает отмена в `cancelCtx`
+
+Три механики, которые объясняют всё поведение (детали с примерами — в разделах ниже и в «Разбор примеров-загадок»):
+
+1. **`Done()` создаёт канал лениво.** Пока никто не звал `Done()`, канала нет — поэтому контексты, которые не ждут, не аллоцируют его. (И почему у `Background()` `Done()` возвращает `nil` — у него нет `cancelCtx`.)
+
+2. **`propagateCancel` при создании потомка** идёт **вверх** по цепочке родителей до ближайшего `*cancelCtx` и регистрирует себя в его `children`. Для stdlib-родителя это просто запись в map — **без отдельной горутины**. (Своя горутина-сторож заводится только для «чужого» отменяемого родителя не из stdlib.) Если родитель уже отменён — потомок рождается отменённым сразу (Загадка 3).
+
+3. **`cancel(err, cause)`** под `mu`: ставит `err`+`cause`, **закрывает** `done`-канал, затем рекурсивно вызывает `cancel` у всех `children` и **удаляет себя** из `children` родителя. Вот почему отмена идёт строго **вниз** по дереву (Загадка 5), а у `timerCtx` `cancel` ещё и останавливает таймер.
+
+Отсюда два практических следствия:
+
+- **Почему `defer cancel()` обязателен.** Потомок остаётся в `children` родителя, пока не вызван его `cancel` (или пока не отменится родитель). Забыл `cancel` — узел висит в map родителя, не собирается GC, а для `WithTimeout` ещё и таймер тикает до срока. На высоком RPS — утечка памяти/горутин/таймеров.
+- **Почему «дедлайн = минимум».** `timerCtx` потомка зарегистрирован в `children` родителя. Чей таймер/cancel сработает первым — тот и закроет `done` по цепочке. Потомок с бóльшим таймаутом не может «пережить» родителя: родительский `cancel` придёт по `children` раньше (Загадка 2).
 
 ---
 
@@ -49,13 +155,20 @@ ctx := context.TODO()
 
 ```go
 ctx, cancel := context.WithCancel(parent)
-defer cancel() // ВСЕГДА defer cancel() — иначе goroutine leak
+defer cancel() // ВСЕГДА defer cancel() — иначе leak (см. ниже)
 
 go longRunning(ctx)
 
 // Отмена: когда нужно
 cancel() // ctx.Done() закроется, ctx.Err() = context.Canceled
 ```
+
+Что именно утекает, если забыть `cancel()` (две независимые причины):
+
+1. **Заблокированная горутина.** `longRunning(ctx)` обычно ждёт `<-ctx.Done()`. Этот канал закрывается **только** при вызове `cancel()` или при отмене `parent`. Если `cancel()` не позвали, а `parent` — долгоживущий (или вовсе `Background()`), `Done()` не закроется никогда → горутина висит вечно. Это и есть goroutine leak.
+2. **Узел в дереве отмены.** При создании потомок регистрируется в `children` родителя (`*cancelCtx`). `cancel()` — единственное, что удаляет его оттуда. Без `cancel()` узел висит в map родителя и не собирается GC, пока жив родитель → memory leak. У `WithTimeout`/`WithDeadline` к этому добавляется ещё и таймер, который тикает до срока.
+
+`WithCancel` не заводит таймер-горутину (это про `WithTimeout`) — поэтому здесь «утечка» = либо застрявшая горутина-потребитель, либо неубранный узел в `children`. Механика регистрации/удаления — в разделе «Под капотом: типы, иерархия и отмена».
 
 ### `WithTimeout` — относительный таймаут
 
@@ -192,24 +305,34 @@ func (r *UserRepo) FindByID(ctx context.Context, id int) (*User, error) {
 ### Синтаксис
 
 ```go
-// Всегда используй неэкспортируемый тип ключа!
+// Ключ — неэкспортируемого типа И неэкспортируемое значение.
 type contextKey string
 
-const (
-    requestIDKey contextKey = "request_id"
-    userIDKey    contextKey = "user_id"
-)
+const requestIDKey contextKey = "request_id"
 
-// Store
-ctx = context.WithValue(ctx, requestIDKey, "req-123")
+// Экспортируемые обёртки — единственный способ положить/достать значение
+// снаружи пакета (сам ключ извне не назвать).
+func WithRequestID(ctx context.Context, id string) context.Context {
+    return context.WithValue(ctx, requestIDKey, id)
+}
 
-// Load
-if reqID, ok := ctx.Value(requestIDKey).(string); ok {
-    log.Printf("request_id=%s", reqID)
+func RequestIDFrom(ctx context.Context) (string, bool) {
+    id, ok := ctx.Value(requestIDKey).(string)
+    return id, ok
+}
+
+// Использование
+ctx = WithRequestID(ctx, "req-123")
+if id, ok := RequestIDFrom(ctx); ok {
+    log.Printf("request_id=%s", id)
 }
 ```
 
-**Почему неэкспортируемый тип ключа?** Предотвращает коллизии: два пакета не могут случайно использовать одинаковый ключ, так как типы из разных пакетов разные даже при одинаковом underlying value.
+**Почему неэкспортируемый тип ключа?** Предотвращает коллизии: два пакета не могут случайно использовать одинаковый ключ, так как типы из разных пакетов разные даже при одинаковом underlying value. На голый `string`-ключ `go vet` ещё и ругается («should not use built-in type string as key»).
+
+**Почему рядом с ключом — пара экспортируемых функций.** Ключ и значение неэкспортируемые → код вне пакета физически не может их назвать, чтобы вызвать `context.WithValue` / `ctx.Value`. Поэтому пакет обязан отдать обёртки-аксессоры; они же инкапсулируют type-assertion и поведение при отсутствии ключа. Если ключ нужен **только внутри своего пакета** — обёртки не обязательны, можно звать `WithValue`/`Value` напрямую.
+
+**Именование — `With…`/`…From`, не `Set…`/`Get…`.** Контекст иммутабелен: `WithValue` ничего не мутирует, а возвращает **новый** `ctx` (имя `Set` врал бы про мутацию на месте). `…From(ctx)` (или `…FromContext`) — устоявшаяся идиома экосистемы (ср. `trace.SpanFromContext`). Геттер обычно возвращает `(value, ok)`, чтобы отличить «ключа нет» от «лежит zero value».
 
 ### Когда `context.Value` допустимо
 
@@ -521,36 +644,6 @@ if stop() {
 - если `ctx` **уже** отменён на момент `AfterFunc` — `f` запускается сразу (в новой горутине);
 - `f` выполняется **вне** держателя локов контекста — внутри `f` можно безопасно вызывать методы контекста;
 - удобно для «привязать освобождение ресурса к жизни контекста» без своей горутины-сторожа и риска её утечки.
-
----
-
-## Под капотом: как устроена отмена
-
-Отменяемый контекст — это `*cancelCtx` (для `WithCancel`/`WithCancelCause`); `WithTimeout`/`WithDeadline` дают `*timerCtx`, который **встраивает** `cancelCtx` + таймер; `WithValue` — `*valueCtx` (без отмены).
-
-```go
-type cancelCtx struct {
-    Context                          // родитель
-    mu       sync.Mutex
-    done     atomic.Value            // chan struct{}, СОЗДАЁТСЯ ЛЕНИВО при первом Done()
-    children map[canceler]struct{}   // потомки, которых надо отменить вслед за собой
-    err      error                   // context.Canceled / DeadlineExceeded
-    cause    error                   // причина (WithCancelCause)
-}
-```
-
-Три механики, которые объясняют всё поведение:
-
-1. **`Done()` создаёт канал лениво.** Пока никто не звал `Done()`, канала нет — поэтому контексты, которые не ждут, не аллоцируют его. (И почему у `Background()` `Done()` возвращает `nil` — у него нет `cancelCtx`.)
-
-2. **`propagateCancel` при создании потомка** идёт **вверх** по цепочке родителей до ближайшего `*cancelCtx` и регистрирует себя в его `children`. Для stdlib-родителя это просто запись в map — **без отдельной горутины**. (Своя горутина-сторож заводится только для «чужого» отменяемого родителя не из stdlib.) Если родитель уже отменён — потомок рождается отменённым сразу (Загадка 3).
-
-3. **`cancel(err, cause)`** под `mu`: ставит `err`+`cause`, **закрывает** `done`-канал, затем рекурсивно вызывает `cancel` у всех `children` и **удаляет себя** из `children` родителя. Вот почему отмена идёт строго **вниз** по дереву (Загадка 5), а у `timerCtx` `cancel` ещё и останавливает таймер.
-
-Отсюда два практических следствия, которые мы уже видели:
-
-- **Почему `defer cancel()` обязателен.** Потомок остаётся в `children` родителя, пока не вызван его `cancel` (или пока не отменится родитель). Забыл `cancel` — узел висит в map родителя, не собирается GC, а для `WithTimeout` ещё и таймер тикает до срока. На высоком RPS — утечка памяти/горутин/таймеров.
-- **Почему «дедлайн = минимум».** `timerCtx` потомка зарегистрирован в `children` родителя. Чей таймер/cancel сработает первым — тот и закроет `done` по цепочке. Потомок с бóльшим таймаутом не может «пережить» родителя: родительский `cancel` придёт по `children` раньше (Загадка 2).
 
 ---
 
