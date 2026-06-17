@@ -352,6 +352,6 @@ ch.Consume("tasks", "worker-1", false, false, false, false, nil)
 
 Producer публикует в exchange — routing component. Exchange не хранит сообщения сам. Binding связывает exchange и queue с правилом: "если routing key совпадает — форвардить сюда". Queue хранит сообщения для consumer. Тип exchange определяет routing логику: fanout (broadcast всем), direct (точное совпадение ключа), topic (glob-паттерн по ключу).
 
-**Q: Зачем exclusive queue в fanout-архитектуре?**
+**1. Зачем exclusive queue в fanout-архитектуре?**
 
-При broadcast каждый consumer должен получить копию сообщения. Для этого каждый consumer создаёт **свою** queue (exclusive, auto-delete) и привязывает к fanout exchange. Тогда fanout exchange копирует сообщение в каждую queue. Если бы все consumers читали из одной queue — это был бы competing consumers (load balancing), а не broadcast.
+- При broadcast каждый consumer должен получить копию сообщения. Для этого каждый consumer создаёт **свою** queue (exclusive, auto-delete) и привязывает к fanout exchange. Тогда fanout exchange копирует сообщение в каждую queue. Если бы все consumers читали из одной queue — это был бы competing consumers (load balancing), а не broadcast.

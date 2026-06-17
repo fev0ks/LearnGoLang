@@ -408,10 +408,10 @@ grpcurl -plaintext -d '{"user_id":"123"}' localhost:50051 user.v1.UserService/Ge
 
 ## Interview-ready answer
 
-**Q: Чем gRPC лучше REST?**
+**1. Чем gRPC лучше REST?**
 
-gRPC использует HTTP/2 (multiplexing, header compression, binary framing) и Protobuf (binary serialization — в 3–10 раз компактнее JSON). Это даёт меньшую latency и выше throughput. Protobuf schema — строгий контракт с кодогенерацией: клиент и сервер компилируются с одним .proto файлом → типобезопасность на уровне компиляции. gRPC поддерживает streaming из коробки (4 типа). Минус — нет browser поддержки без grpc-web, сложнее дебажить чем JSON.
+- gRPC использует HTTP/2 (multiplexing, header compression, binary framing) и Protobuf (binary serialization — в 3–10 раз компактнее JSON). Это даёт меньшую latency и выше throughput. Protobuf schema — строгий контракт с кодогенерацией: клиент и сервер компилируются с одним .proto файлом → типобезопасность на уровне компиляции. gRPC поддерживает streaming из коробки (4 типа). Минус — нет browser поддержки без grpc-web, сложнее дебажить чем JSON.
 
-**Q: Что такое interceptor и зачем он нужен?**
+**2. Что такое interceptor и зачем он нужен?**
 
-Interceptor — middleware для gRPC, аналог HTTP middleware. Обернует каждый вызов: логирование, авторизация, recovery от паники, метрики. Unary interceptor работает с request/response, Stream interceptor — с установкой потока. Через `grpc.ChainUnaryInterceptor` можно составить цепочку.
+- Interceptor — middleware для gRPC, аналог HTTP middleware. Обернует каждый вызов: логирование, авторизация, recovery от паники, метрики. Unary interceptor работает с request/response, Stream interceptor — с установкой потока. Через `grpc.ChainUnaryInterceptor` можно составить цепочку.

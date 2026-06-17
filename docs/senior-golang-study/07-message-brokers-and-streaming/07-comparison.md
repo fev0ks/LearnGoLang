@@ -148,9 +148,9 @@ Kafka (audit log, event sourcing)
 
 ## Interview-ready answer
 
-**Q: Какой брокер выбрать для задачи X?**
+**1. Какой брокер выбрать для задачи X?**
 
-Структура ответа:
+- Структура ответа:
 1. Уточнить: нужен replay? какой throughput? нужны consumer groups? какая latency?
 2. Ответить через trade-offs: "Kafka даёт replay и высокий throughput, но операционно дороже. RabbitMQ проще и гибче в routing, но нет replay. Redis Streams — разумный компромисс если Redis уже есть."
 3. Не давать абстрактный ответ "Kafka лучше" — всегда через конкретные требования.

@@ -235,13 +235,34 @@ fmt.Println(v, ok)      // ?
 
 ## Interview-ready answer
 
-Короткий чек-лист по map — это спрашивают почти всегда:
+**1. Почему порядок итерации случаен?**
 
-1. **Почему порядок итерации случаен?** Намеренная рандомизация старта (random seed `hash0`) с Go 1.0, чтобы не закладывались на порядок.
-2. **Почему нельзя `&m["key"]`?** Элемент не адресуем — при росте map переаллоцирует buckets, указатель стал бы dangling. Отсюда же запрет `m["k"].field = x` для структур.
-3. **Что с nil map?** Чтение/len/range/delete безопасны, запись — паника. Zero value map — это nil.
-4. **Thread-safe ли map?** Нет. Concurrent read+write → `fatal error` (throw, не ловится recover). Защита: `RWMutex` или `sync.Map`.
-5. **Как отличить «нет ключа» от «значение 0»?** Comma-ok: `v, ok := m[k]`.
-6. **Когда `sync.Map` вместо `map+Mutex`?** Только append-only или непересекающиеся наборы ключей у горутин; иначе `map + RWMutex` быстрее (см. [03-sync-primitives](../concurrency-and-performance/03-sync-primitives.md)).
-7. **Освобождается ли память после delete всех ключей?** Нет, map не сжимается — пересоздавай для возврата памяти.
-8. **Что изменилось в Go 1.24?** Реализация: hmap+chaining → Swiss Tables (open addressing, ctrl-байты, matchH2). Семантика и API — без изменений (см. [02-swiss-tables](./02-swiss-tables-since-1.24.md)).
+- Намеренная рандомизация старта (random seed `hash0`) с Go 1.0, чтобы не закладывались на порядок.
+
+**2. Почему нельзя `&m["key"]`?**
+
+- Элемент не адресуем — при росте map переаллоцирует buckets, указатель стал бы dangling. Отсюда же запрет `m["k"].field = x` для структур.
+
+**3. Что с nil map?**
+
+- Чтение/len/range/delete безопасны, запись — паника. Zero value map — это nil.
+
+**4. Thread-safe ли map?**
+
+- Нет. Concurrent read+write → `fatal error` (throw, не ловится recover). Защита: `RWMutex` или `sync.Map`.
+
+**5. Как отличить «нет ключа» от «значение 0»?**
+
+- Comma-ok: `v, ok := m[k]`.
+
+**6. Когда `sync.Map` вместо `map+Mutex`?**
+
+- Только append-only или непересекающиеся наборы ключей у горутин; иначе `map + RWMutex` быстрее (см. [03-sync-primitives](../concurrency-and-performance/03-sync-primitives.md)).
+
+**7. Освобождается ли память после delete всех ключей?**
+
+- Нет, map не сжимается — пересоздавай для возврата памяти.
+
+**8. Что изменилось в Go 1.24?**
+
+- Реализация: hmap+chaining → Swiss Tables (open addressing, ctrl-байты, matchH2). Семантика и API — без изменений (см. [02-swiss-tables](./02-swiss-tables-since-1.24.md)).

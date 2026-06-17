@@ -329,10 +329,10 @@ srv.Use(extension.FixedQueryCache(lru.New(100)))
 
 ## Interview-ready answer
 
-**Q: Что такое N+1 проблема и как DataLoader её решает?**
+**1. Что такое N+1 проблема и как DataLoader её решает?**
 
-Если resolver для каждого Order запрашивает его User в БД отдельно — N orders = N+1 запросов (1 для списка + N для user). DataLoader буферизует запросы в рамках одного tick event loop и делает один батч-запрос: `SELECT * FROM users WHERE id IN (...)`. Ключ — resolve цикл GraphQL: DataLoader собирает все ключи за один такт, затем батчит.
+- Если resolver для каждого Order запрашивает его User в БД отдельно — N orders = N+1 запросов (1 для списка + N для user). DataLoader буферизует запросы в рамках одного tick event loop и делает один батч-запрос: `SELECT * FROM users WHERE id IN (...)`. Ключ — resolve цикл GraphQL: DataLoader собирает все ключи за один такт, затем батчит.
 
-**Q: Когда REST, когда GraphQL?**
+**2. Когда REST, когда GraphQL?**
 
-REST — для простых CRUD API, где важен HTTP caching и простота. GraphQL — когда несколько типов клиентов (mobile/web) нуждаются в разных полях, когда данные — сложный граф. Главный минус GraphQL — нет HTTP GET caching, N+1 без DataLoader, более сложная операционная картина (introspection security, persisted queries для production).
+- REST — для простых CRUD API, где важен HTTP caching и простота. GraphQL — когда несколько типов клиентов (mobile/web) нуждаются в разных полях, когда данные — сложный граф. Главный минус GraphQL — нет HTTP GET caching, N+1 без DataLoader, более сложная операционная картина (introspection security, persisted queries для production).

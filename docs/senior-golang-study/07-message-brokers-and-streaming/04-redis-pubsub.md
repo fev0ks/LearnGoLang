@@ -261,10 +261,10 @@ pub.Publish(ctx, "presence", fmt.Sprintf(`{"user":"%s","status":"online"}`, user
 
 ## Interview-ready answer
 
-**Q: Когда Redis Pub/Sub, когда Redis Streams?**
+**1. Когда Redis Pub/Sub, когда Redis Streams?**
 
-Pub/Sub — когда нужен простой broadcast без гарантий доставки: real-time уведомления, cache invalidation между инстансами, presence. Если subscriber оффлайн — потеря допустима. Streams — когда нужна at-least-once гарантия, offline consumers, consumer groups для распределённой обработки, replay.
+- Pub/Sub — когда нужен простой broadcast без гарантий доставки: real-time уведомления, cache invalidation между инстансами, presence. Если subscriber оффлайн — потеря допустима. Streams — когда нужна at-least-once гарантия, offline consumers, consumer groups для распределённой обработки, replay.
 
-**Q: Как масштабировать WebSocket сервер горизонтально?**
+**2. Как масштабировать WebSocket сервер горизонтально?**
 
-Каждый WebSocket инстанс подписывается на Redis Pub/Sub канал. При получении сообщения от клиента — публикуем в Redis. Redis доставляет всем инстансам → каждый инстанс форвардит своим local WebSocket клиентам. Это "pub/sub backplane" паттерн. Для надёжности (если инстанс недоступен при публикации) — Redis Streams с consumer group.
+- Каждый WebSocket инстанс подписывается на Redis Pub/Sub канал. При получении сообщения от клиента — публикуем в Redis. Redis доставляет всем инстансам → каждый инстанс форвардит своим local WebSocket клиентам. Это "pub/sub backplane" паттерн. Для надёжности (если инстанс недоступен при публикации) — Redis Streams с consumer group.

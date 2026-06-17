@@ -334,9 +334,9 @@ signal.NotifyContext ловит второй SIGTERM/SIGINT:
 
 ## Interview-ready answer
 
-**Q: Как реализовать graceful shutdown Go-сервиса в K8s?**
+**1. Как реализовать graceful shutdown Go-сервиса в K8s?**
 
-`signal.NotifyContext` ловит SIGTERM (K8s посылает при rollout). Контекст передаётся в HTTP-сервер, воркеры и все фоновые горутины. При отмене:
+- `signal.NotifyContext` ловит SIGTERM (K8s посылает при rollout). Контекст передаётся в HTTP-сервер, воркеры и все фоновые горутины. При отмене:
 - `srv.Shutdown(ctx)` — listener закрыт, активные HTTP-запросы дожидаются ответа
 - `grpcSrv.GracefulStop()` — ждёт in-flight RPC
 - Воркеры читают `ctx.Done()` и выходят после текущей задачи, `sync.WaitGroup` фиксирует полное завершение

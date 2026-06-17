@@ -198,22 +198,29 @@ cfg := Config{Timeout: 5 * time.Second}
 ## Interview-ready answer
 
 **1. Чем `byte` отличается от `rune`?**
-`byte` = `uint8` (8 бит, один байт/ASCII), `rune` = `int32` (32 бита, один Unicode code point). Подробнее про строки — в [07-strings](./07-strings.md).
+
+- `byte` = `uint8` (8 бит, один байт/ASCII), `rune` = `int32` (32 бита, один Unicode code point). Подробнее про строки — в [07-strings](./07-strings.md).
 
 **2. Почему `nil` map и `nil` slice ведут себя по-разному?**
-Чтение обоих безопасно. Но в nil slice можно `append` (runtime аллоцирует массив при первом append), а запись в nil map паникует (`assignment to entry in nil map`) — map требует `make`. `delete` на nil map — безопасный no-op.
+
+- Чтение обоих безопасно. Но в nil slice можно `append` (runtime аллоцирует массив при первом append), а запись в nil map паникует (`assignment to entry in nil map`) — map требует `make`. `delete` на nil map — безопасный no-op.
 
 **3. Что такое `nil` interface trap?**
-Interface == nil только когда **оба** поля (type и data) nil. Typed nil pointer (`*MyError(nil)`), завёрнутый в interface, делает его non-nil. Детали — в [04-interfaces](./03-interfaces-method-sets-and-nil.md).
+
+- Interface == nil только когда **оба** поля (type и data) nil. Typed nil pointer (`*MyError(nil)`), завёрнутый в interface, делает его non-nil. Детали — в [04-interfaces](./03-interfaces-method-sets-and-nil.md).
 
 **4. Чем `string` отличается от `[]byte`?**
-`string` immutable, `[]byte` mutable; конверсия между ними копирует. Размер заголовка: `string` = 16 байт (`{ptr, len}`), `[]T` = 24 байта (`{ptr, len, cap}`).
+
+- `string` immutable, `[]byte` mutable; конверсия между ними копирует. Размер заголовка: `string` = 16 байт (`{ptr, len}`), `[]T` = 24 байта (`{ptr, len, cap}`).
 
 **5. Чем `int` отличается от `int64`?**
-`int` зависит от платформы (32/64 бита, native word size), `int64` — всегда 64 бита. На 64-bit сервере размер одинаков, но типы **не** взаимозаменяемы без явной конверсии. `int` — для индексов/длин/счётчиков, `int64` — для внешних контрактов (DB, API, protobuf, timestamps).
+
+- `int` зависит от платформы (32/64 бита, native word size), `int64` — всегда 64 бита. На 64-bit сервере размер одинаков, но типы **не** взаимозаменяемы без явной конверсии. `int` — для индексов/длин/счётчиков, `int64` — для внешних контрактов (DB, API, protobuf, timestamps).
 
 **6. Как ведёт себя overflow?**
-Defined behavior — оборачивание по модулю 2ⁿ (не UB как в C). Compile-time константы компилятор проверяет (`const big = int8(200)` — ошибка). Runtime overflow не ловится — проверяй вручную через `math.MaxIntN`. Конверсия в меньший тип молча усекает.
+
+- Defined behavior — оборачивание по модулю 2ⁿ (не UB как в C). Compile-time константы компилятор проверяет (`const big = int8(200)` — ошибка). Runtime overflow не ловится — проверяй вручную через `math.MaxIntN`. Конверсия в меньший тип молча усекает.
 
 **7. make vs new?**
-`make` — только для slice/map/chan, возвращает готовый к работе тип. `new(T)` — для любого типа, возвращает `*T` со zero value (`new([]int)` даёт `*[]int` на nil slice — не готов к индексации без инициализации).
+
+- `make` — только для slice/map/chan, возвращает готовый к работе тип. `new(T)` — для любого типа, возвращает `*T` со zero value (`new([]int)` даёт `*[]int` на nil slice — не готов к индексации без инициализации).

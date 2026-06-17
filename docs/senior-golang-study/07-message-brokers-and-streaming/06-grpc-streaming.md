@@ -324,10 +324,10 @@ func (s *Server) broadcastExcept(sender stream, msg *pb.ChatMessage) {
 
 ## Interview-ready answer
 
-**Q: Когда gRPC streaming вместо Kafka?**
+**1. Когда gRPC streaming вместо Kafka?**
 
-gRPC streaming — для real-time двусторонней связи где persistence не нужна: чат, collaborative editing, live dashboard. Нет дополнительной инфраструктуры, очень низкая latency. Kafka — когда нужна надёжная доставка, replay, независимые consumer groups, долгосрочное хранение событий.
+- gRPC streaming — для real-time двусторонней связи где persistence не нужна: чат, collaborative editing, live dashboard. Нет дополнительной инфраструктуры, очень низкая latency. Kafka — когда нужна надёжная доставка, replay, независимые consumer groups, долгосрочное хранение событий.
 
-**Q: Как масштабировать gRPC streaming сервер горизонтально?**
+**2. Как масштабировать gRPC streaming сервер горизонтально?**
 
-Та же проблема что и WebSocket: клиенты на разных инстансах не видят друг друга. Решение — pub/sub backplane через Redis: каждый инстанс публикует сообщения в Redis и подписан на него. При получении из Redis — relay локальным clients. Broker ID в сообщении предотвращает echo-loop.
+- Та же проблема что и WebSocket: клиенты на разных инстансах не видят друг друга. Решение — pub/sub backplane через Redis: каждый инстанс публикует сообщения в Redis и подписан на него. При получении из Redis — relay локальным clients. Broker ID в сообщении предотвращает echo-loop.

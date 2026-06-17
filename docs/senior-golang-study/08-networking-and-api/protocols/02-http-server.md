@@ -396,14 +396,14 @@ func (s *Server) Shutdown(ctx context.Context) error {
 
 ## Interview-ready answer
 
-**Q: Что нужно обязательно настроить для production HTTP сервера в Go?**
+**1. Что нужно обязательно настроить для production HTTP сервера в Go?**
 
-Четыре обязательных вещи:
+- Четыре обязательных вещи:
 1. **Таймауты**: `ReadTimeout`, `WriteTimeout`, `IdleTimeout` — без них goroutine leak под нагрузкой.
 2. **Graceful shutdown**: `signal.Notify` + `srv.Shutdown(ctx)` — чтобы in-flight запросы завершились.
 3. **Recovery middleware**: recover от паники в handlers — иначе один panic крашит goroutine запроса.
 4. **MaxBytesReader**: ограничить размер request body — защита от DoS с огромным body.
 
-**Q: Как работает middleware в `net/http`?**
+**2. Как работает middleware в `net/http`?**
 
-Middleware — функция `func(http.Handler) http.Handler`. Оборачивает handler: делает что-то до и/или после вызова `next.ServeHTTP`. Все middleware — обычные функции без магии, composable через Chain helper. Порядок важен: Recovery должен быть первым (внешним), иначе паника выше него не поймается.
+- Middleware — функция `func(http.Handler) http.Handler`. Оборачивает handler: делает что-то до и/или после вызова `next.ServeHTTP`. Все middleware — обычные функции без магии, composable через Chain helper. Порядок важен: Recovery должен быть первым (внешним), иначе паника выше него не поймается.

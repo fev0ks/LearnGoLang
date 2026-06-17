@@ -356,16 +356,21 @@ fmt.Println(lines, sc.Err())  // ?
 ## Interview-ready answer
 
 **1. Что такое `io.Reader`/`io.Writer` и почему они везде?**
-Одно-методные интерфейсы (`Read(p)`/`Write(p)`), универсальный контракт потока байт. Их реализуют файлы, сеть, строки, HTTP-тела, сжатие — поэтому функция, принимающая `io.Reader`, работает с любым источником. Композируются (`ReadCloser`, `ReadWriter`) и декорируются (gzip/bufio/cipher оборачивают другой Reader).
+
+- Одно-методные интерфейсы (`Read(p)`/`Write(p)`), универсальный контракт потока байт. Их реализуют файлы, сеть, строки, HTTP-тела, сжатие — поэтому функция, принимающая `io.Reader`, работает с любым источником. Композируются (`ReadCloser`, `ReadWriter`) и декорируются (gzip/bufio/cipher оборачивают другой Reader).
 
 **2. Контракт `Read` — в чём подвох?**
-`Read` не обязан заполнить весь буфер; может вернуть `n>0` вместе с `io.EOF`; может вернуть `0, nil`. Обрабатывать `p[:n]` **до** проверки ошибки, иначе теряются последние байты. `io.EOF` — штатный конец (sentinel), не ошибка; `io.ErrUnexpectedEOF` — обрыв посреди данных.
+
+- `Read` не обязан заполнить весь буфер; может вернуть `n>0` вместе с `io.EOF`; может вернуть `0, nil`. Обрабатывать `p[:n]` **до** проверки ошибки, иначе теряются последние байты. `io.EOF` — штатный конец (sentinel), не ошибка; `io.ErrUnexpectedEOF` — обрыв посреди данных.
 
 **3. Чем опасен `io.ReadAll`?**
-Читает всё в память — на недоверенном входе это OOM/DoS. Ограничивать `io.LimitReader(r, max)` или `http.MaxBytesReader`. Для копирования без полного буфера — `io.Copy` (потоково, 32 KB, плюс быстрые пути через `WriterTo`/`ReaderFrom`).
+
+- Читает всё в память — на недоверенном входе это OOM/DoS. Ограничивать `io.LimitReader(r, max)` или `http.MaxBytesReader`. Для копирования без полного буфера — `io.Copy` (потоково, 32 KB, плюс быстрые пути через `WriterTo`/`ReaderFrom`).
 
 **4. Зачем `bufio` и где грабли?**
-Буфер в памяти убирает syscall на каждый Read/Write. `bufio.Writer` **требует `Flush()`** — иначе данные не доедут. `bufio.Scanner` имеет лимит токена **64 KB** — длинные строки дают `token too long` (молча, проверять `sc.Err()`); лечится `Buffer(...)` или переходом на `bufio.Reader.ReadString`.
+
+- Буфер в памяти убирает syscall на каждый Read/Write. `bufio.Writer` **требует `Flush()`** — иначе данные не доедут. `bufio.Scanner` имеет лимит токена **64 KB** — длинные строки дают `token too long` (молча, проверять `sc.Err()`); лечится `Buffer(...)` или переходом на `bufio.Reader.ReadString`.
 
 **5. Полезные обёртки `io`?**
-`LimitReader` (ограничить объём), `MultiReader` (склейка), `TeeReader` (читать + копировать в сторону, напр. для хеша), `io.Pipe` (соединить Writer-producer с Reader-consumer стримом), `io.Discard` (/dev/null), `io.NopCloser` (добавить no-op Close).
+
+- `LimitReader` (ограничить объём), `MultiReader` (склейка), `TeeReader` (читать + копировать в сторону, напр. для хеша), `io.Pipe` (соединить Writer-producer с Reader-consumer стримом), `io.Discard` (/dev/null), `io.NopCloser` (добавить no-op Close).

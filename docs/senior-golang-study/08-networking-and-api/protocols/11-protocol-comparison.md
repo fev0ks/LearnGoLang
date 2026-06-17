@@ -180,14 +180,14 @@ Legacy:
 
 ## Interview-ready answer
 
-**Q: REST vs gRPC — когда что?**
+**1. REST vs gRPC — когда что?**
 
-REST — для публичных API, когда важен browser support, HTTP caching, простота отладки (curl). gRPC — для service-to-service внутри системы: строгий контракт (Protobuf), binary serialization (быстрее JSON), HTTP/2 multiplexing, встроенный streaming. Часто используют оба: REST-gateway для клиентов, gRPC внутри.
+- REST — для публичных API, когда важен browser support, HTTP caching, простота отладки (curl). gRPC — для service-to-service внутри системы: строгий контракт (Protobuf), binary serialization (быстрее JSON), HTTP/2 multiplexing, встроенный streaming. Часто используют оба: REST-gateway для клиентов, gRPC внутри.
 
-**Q: Зачем нужен GraphQL если есть REST?**
+**2. Зачем нужен GraphQL если есть REST?**
 
-GraphQL решает конкретную проблему: несколько типов клиентов с разными потребностями в данных. Мобильный нужен 3 поля, десктоп — 20, TV — другие 5. С REST — либо separate endpoints, либо over-fetching. GraphQL позволяет одному endpoint обслуживать всех клиентов, которые сами определяют форму ответа. Цена: N+1, нет HTTP caching, сложность.
+- GraphQL решает конкретную проблему: несколько типов клиентов с разными потребностями в данных. Мобильный нужен 3 поля, десктоп — 20, TV — другие 5. С REST — либо separate endpoints, либо over-fetching. GraphQL позволяет одному endpoint обслуживать всех клиентов, которые сами определяют форму ответа. Цена: N+1, нет HTTP caching, сложность.
 
-**Q: WebSocket vs REST с polling?**
+**3. WebSocket vs REST с polling?**
 
-Polling создаёт unnecessary requests (большинство — пустые), высокую latency (ждёшь следующий interval), нагрузку на server. WebSocket — постоянное соединение, сервер пушит когда есть данные, ~zero latency. Минус WebSocket — stateful (сложнее масштабировать, нужен backplane для multi-instance).
+- Polling создаёт unnecessary requests (большинство — пустые), высокую latency (ждёшь следующий interval), нагрузку на server. WebSocket — постоянное соединение, сервер пушит когда есть данные, ~zero latency. Минус WebSocket — stateful (сложнее масштабировать, нужен backplane для multi-instance).

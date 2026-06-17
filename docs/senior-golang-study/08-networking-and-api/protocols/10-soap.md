@@ -207,6 +207,6 @@ gowsdl -o gen/users.go http://api.example.com/users?wsdl
 
 ## Interview-ready answer
 
-**Q: Встречал ли ты SOAP и как с ним работать из Go?**
+**1. Встречал ли ты SOAP и как с ним работать из Go?**
 
-SOAP встречается в legacy enterprise интеграциях: банки, государственные системы, SAP. Из Go — два подхода: ручное формирование XML конверта (strings.NewReader + правильные заголовки Content-Type и SOAPAction) с парсингом ответа через encoding/xml; или генерация из WSDL через gowsdl. Для сложных сервисов ручной подход надёжнее — генераторы часто плохо справляются с exotic WSDL. Главное — правильно обрабатывать SOAP Fault в Body ответа.
+- SOAP встречается в legacy enterprise интеграциях: банки, государственные системы, SAP. Из Go — два подхода: ручное формирование XML конверта (strings.NewReader + правильные заголовки Content-Type и SOAPAction) с парсингом ответа через encoding/xml; или генерация из WSDL через gowsdl. Для сложных сервисов ручной подход надёжнее — генераторы часто плохо справляются с exotic WSDL. Главное — правильно обрабатывать SOAP Fault в Body ответа.

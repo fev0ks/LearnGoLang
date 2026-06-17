@@ -293,10 +293,10 @@ func (c *Consumer) claimStuck(ctx context.Context) {
 
 ## Interview-ready answer
 
-**Q: Чем Redis Streams отличается от Redis Pub/Sub?**
+**1. Чем Redis Streams отличается от Redis Pub/Sub?**
 
-Pub/Sub — fire-and-forget, нет persistence. Если subscriber не подключён в момент PUBLISH — сообщение потеряно. Streams — append-only лог с persistence, consumer groups, подтверждениями (XACK) и возможностью replay. Streams дают at-least-once гарантию, Pub/Sub — at-most-once.
+- Pub/Sub — fire-and-forget, нет persistence. Если subscriber не подключён в момент PUBLISH — сообщение потеряно. Streams — append-only лог с persistence, consumer groups, подтверждениями (XACK) и возможностью replay. Streams дают at-least-once гарантию, Pub/Sub — at-most-once.
 
-**Q: Что такое PEL и зачем нужен XCLAIM?**
+**2. Что такое PEL и зачем нужен XCLAIM?**
 
-Pending Entries List — список сообщений, которые consumer получил но не XACK'нул. Если consumer упал — его pending сообщения висят в PEL. XCLAIM (или XAUTOCLAIM) позволяет другому consumer забрать эти сообщения и переобработать. Так реализуется failover без потери данных.
+- Pending Entries List — список сообщений, которые consumer получил но не XACK'нул. Если consumer упал — его pending сообщения висят в PEL. XCLAIM (или XAUTOCLAIM) позволяет другому consumer забрать эти сообщения и переобработать. Так реализуется failover без потери данных.

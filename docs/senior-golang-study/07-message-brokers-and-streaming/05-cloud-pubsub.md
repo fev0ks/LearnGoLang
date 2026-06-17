@@ -209,6 +209,6 @@ resource "aws_sqs_queue" "fulfillment" {
 
 ## Interview-ready answer
 
-**Q: Чем SNS+SQS отличается от Kafka?**
+**1. Чем SNS+SQS отличается от Kafka?**
 
-SNS+SQS — managed сервисы с fan-out (SNS) и очередями (SQS), нет replay, retention до 4 дней. Kafka — distributed log с retention неделями/месяцами, consumer groups, replay с любого offset. SNS+SQS проще операционно, дороже при масштабе; Kafka сложнее, но гибче и дешевле при больших объёмах.
+- SNS+SQS — managed сервисы с fan-out (SNS) и очередями (SQS), нет replay, retention до 4 дней. Kafka — distributed log с retention неделями/месяцами, consumer groups, replay с любого offset. SNS+SQS проще операционно, дороже при масштабе; Kafka сложнее, но гибче и дешевле при больших объёмах.

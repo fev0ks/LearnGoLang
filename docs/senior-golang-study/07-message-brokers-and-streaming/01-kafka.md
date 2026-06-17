@@ -427,14 +427,14 @@ record := &kgo.Record{
 
 ## Interview-ready answer
 
-**Q: Чем Kafka отличается от RabbitMQ?**
+**1. Чем Kafka отличается от RabbitMQ?**
 
-Kafka — distributed log (append-only), RabbitMQ — message broker (queue semantics). Kafka хранит сообщения на диске по retention policy (дни/недели), RabbitMQ удаляет после consume. Kafka поддерживает replay — re-read с любого offset. RabbitMQ гибче в routing (exchange types). Kafka лучше для high-throughput event streaming (100k+ msg/s), RabbitMQ — для task queues и complex routing.
+- Kafka — distributed log (append-only), RabbitMQ — message broker (queue semantics). Kafka хранит сообщения на диске по retention policy (дни/недели), RabbitMQ удаляет после consume. Kafka поддерживает replay — re-read с любого offset. RabbitMQ гибче в routing (exchange types). Kafka лучше для high-throughput event streaming (100k+ msg/s), RabbitMQ — для task queues и complex routing.
 
-**Q: Что такое exactly-once и почему это дорого?**
+**2. Что такое exactly-once и почему это дорого?**
 
-Exactly-once в Kafka = idempotent producer (дедупликация по sequence number) + transactional API (атомарная запись + offset commit). Это добавляет round-trips для транзакционного coordinator, снижает throughput в 3–10 раз. В большинстве случаев достаточно at-least-once + идемпотентный consumer (проверяй по unique ID что уже обработал).
+- Exactly-once в Kafka = idempotent producer (дедупликация по sequence number) + transactional API (атомарная запись + offset commit). Это добавляет round-trips для транзакционного coordinator, снижает throughput в 3–10 раз. В большинстве случаев достаточно at-least-once + идемпотентный consumer (проверяй по unique ID что уже обработал).
 
-**Q: Как гарантировать ordering?**
+**3. Как гарантировать ordering?**
 
-Kafka гарантирует ordering только **внутри партиции**. Для ordering по сущности (все события user X по порядку) — используй user ID как partition key. Тогда все события одного пользователя попадают в одну партицию и читаются в порядке записи.
+- Kafka гарантирует ordering только **внутри партиции**. Для ordering по сущности (все события user X по порядку) — используй user ID как partition key. Тогда все события одного пользователя попадают в одну партицию и читаются в порядке записи.
