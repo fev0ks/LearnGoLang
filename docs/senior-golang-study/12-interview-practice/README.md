@@ -11,6 +11,8 @@
   - **code-review/** — задачи формата "найди баги": broken-looking code, найти все проблемы, переписать
   - **streams/** — обработка потоков: deduplication, batching writer, streaming aggregation, backpressure
 
+- **[questions-olezhek28go.md](questions-olezhek28go.md)** — разбор 20 задач с Go-собесов (Олег Козырев): concurrency, runtime, channels, interfaces, http — с ответами и ссылками на теорию
+
 - _Behavioral_ _(planned)_ — STAR-кейсы, рассказ о себе, leadership примеры
 - _Design drills_ _(planned)_ — system design на 30-45 минут
 
