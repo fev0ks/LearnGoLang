@@ -23,13 +23,5 @@ func isPolindrome(s string) bool {
 			return false
 		}
 	}
-	for i, r := range s {
-		fmt.Println(i, string(r))
-	}
-	for i := 0; i < len(runes)/2; i++ {
-		if runes[i] != runes[len(runes)-i-1] {
-			return false
-		}
-	}
 	return true
 }
