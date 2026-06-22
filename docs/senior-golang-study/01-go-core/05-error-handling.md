@@ -10,6 +10,7 @@
 - [Оборачивание с контекстом: правила `%w`](#оборачивание-с-контекстом-правила-w)
 - [Кастомные типы ошибок](#кастомные-типы-ошибок)
 - [Типичные анти-паттерны](#типичные-анти-паттерны)
+- [Три уровня отказа: `error` → `panic` → `throw`](#три-уровня-отказа-error--panic--throw)
 - [`errgroup` — параллельные задачи с первой ошибкой](#errgroup--параллельные-задачи-с-первой-ошибкой)
 - [Ошибки в конкурентном коде — errCh паттерн](#ошибки-в-конкурентном-коде--errch-паттерн)
 - [`errors.Join` (Go 1.20+)](#errorsjoin-go-120)
@@ -535,6 +536,111 @@ func getError() error {
     return nil // это настоящий nil error
 }
 ```
+
+---
+
+## Три уровня отказа: `error` → `panic` → `throw`
+
+У Go три разных механизма «что-то пошло не так», и их часто путают. По возрастанию серьёзности:
+
+1. **`error`** — штатная, ожидаемая ошибка. Возвращается значением, обрабатывается вызывающим. 99% случаев.
+2. **`panic`** — нарушение инварианта в коде. Разматывает стек, выполняя `defer`; **ловится** через `recover()`. Падает одна горутина (а без `recover` — вся программа).
+3. **`throw`** (`fatal error: …`) — фатальная ошибка **рантайма**. Не ловится, `defer` не выполняются, процесс убивается немедленно.
+
+### `panic` vs `throw`
+
+`runtime.throw` — это не паника. Разница принципиальная:
+
+| | `panic` | `throw` (fatal error) |
+|---|---|---|
+| Кто бросает | пользовательский код / рантайм | **только** рантайм Go |
+| `recover()` ловит? | да | **нет** — recover игнорируется |
+| `defer` выполняются? | да, разматывают стек | **нет** — стек не разматывается |
+| Что в выводе | `panic: …` + стек одной горутины | `fatal error: …` + стеки **всех** горутин |
+| Итог | можно перехватить и продолжить | процесс немедленно убит (`exit 2`) |
+
+Идея: `throw` бросают там, где состояние программы уже **повреждено или неспасаемо** — продолжать опасно, и давать коду «проглотить» это через `recover()` нельзя. Поэтому рантайм валит процесс жёстко.
+
+### Когда бывает `throw` (примеры)
+
+```go
+// 1. Конкурентный доступ к map без синхронизации (самое частое на практике)
+m := map[int]int{}
+go func() { for { m[1] = 1 } }()
+go func() { for { _ = m[1] } }()
+// fatal error: concurrent map read and map write
+// (а также: concurrent map writes / concurrent map iteration and map write)
+```
+
+```go
+// 2. Дедлок: все горутины уснули, разбудить некому
+ch := make(chan int)
+<-ch  // никто не пишет
+// fatal error: all goroutines are asleep - deadlock!
+```
+
+```go
+// 3. Unlock незалоченного мьютекса
+var mu sync.Mutex
+mu.Unlock()
+// fatal error: sync: unlock of unlocked mutex
+
+// 3.1 Unlock/RUnlock незалоченного RWMutex
+var rw sync.RWMutex
+rw.Unlock()
+// fatal error: sync: Unlock of unlocked RWMutex
+```
+
+```go
+// 4. Переполнение стека (бесконечная рекурсия)
+func rec() { rec() }
+rec()
+// fatal error: stack overflow
+```
+
+```go
+// 5. Нехватка памяти
+_ = make([]byte, 1<<62)
+// fatal error: runtime: out of memory
+```
+
+```go
+// 6. Обращение по «битому» адресу через unsafe/cgo
+p := (*int)(unsafe.Pointer(uintptr(0xdeadbeef)))
+_ = *p
+// fatal error: unexpected fault address 0xdeadbeef
+// [signal SIGSEGV: segmentation violation ...]
+```
+
+Тонкость для #6: разыменование **обычного `nil`** (`var p *int; _ = *p`) — это **`panic`** (recoverable, см. ниже). А вот доступ по произвольному «мусорному» адресу (из `unsafe`, cgo, порчи памяти) рантайм считает невосстановимым и валит через `throw` с `unexpected fault address`. Граница — флаг `paniconfault`: для штатного `nil`-доступа рантайм превращает SIGSEGV в панику, для прочих фолтов — нет.
+
+Общий признак любого `throw`: в выводе `fatal error:` и дамп **всех** горутин, а не `panic:` со стеком одной.
+
+### А это, наоборот, обычные `panic` (ловятся `recover`)
+
+Частая путаница — многое «страшное» на самом деле паника, которую можно перехватить:
+
+```go
+var s []int;        _ = s[3]          // panic: runtime error: index out of range
+var p *int;         _ = *p            // panic: runtime error: invalid memory address (nil deref)
+var m map[int]int;  m[1] = 1          // panic: assignment to entry in nil map
+ch := make(chan int); close(ch); close(ch)  // panic: close of closed channel
+close(ch); ch <- 1                    // panic: send on closed channel
+_ = x.(string)                        // panic: interface conversion (если тип не тот)
+var wg sync.WaitGroup; wg.Done()      // panic: sync: negative WaitGroup counter
+n := 0; _ = 1 / n                     // panic: runtime error: integer divide by zero
+```
+
+Все они — `runtime.Error` (реализуют `error`), разматывают стек и **ловятся** `recover()`. Это и есть граница: `panic` — про *одну операцию*, которую теоретически можно изолировать (middleware с `recover` в HTTP-хендлере); `throw` — про *повреждённый рантайм*, изолировать нечего.
+
+### Практический вывод
+
+`throw` нельзя обработать — его можно только **не допустить**:
+
+- map под конкуренцией → `sync.RWMutex` / `sync.Map` (детали детектора — в [01-hmap-before-1.24](./map-internals/01-hmap-before-1.24.md), раздел «Concurrent access»);
+- гонки искать через `go test -race` (детектор гонок надёжнее встроенной проверки map);
+- дедлоки — следить за тем, чтобы у каждого `<-ch`/`ch<-` был партнёр, и за порядком взятия локов;
+- `recover()` в этом не помощник: он для `panic`, а не для `fatal error`.
 
 ---
 
