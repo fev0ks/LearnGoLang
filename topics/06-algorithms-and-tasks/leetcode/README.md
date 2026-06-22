@@ -40,6 +40,7 @@ leetcode/
 | 242 | Valid Anagram | Хеш-таблица | [0242-valid-anagram](easy/0242-valid-anagram) |
 | 643 | Maximum Average Subarray I | Sliding window | [0643-maximum-average-subarray](easy/0643-maximum-average-subarray) |
 | 844 | Backspace String Compare | Два указателя / стек | [0844-backspace-string-compare](easy/0844-backspace-string-compare) |
+| 1365 | How Many Numbers Are Smaller Than the Current Number | Counting sort | [1365-how-many-numbers-smaller-than-current](easy/1365-how-many-numbers-smaller-than-current) |
 
 ### Medium
 
