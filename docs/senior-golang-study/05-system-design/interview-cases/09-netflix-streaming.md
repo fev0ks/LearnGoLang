@@ -101,6 +101,30 @@ flowchart TB
     Playback -.->|manifest with<br/>OC URLs| Client
 ```
 
+### Роль каждого компонента
+
+Сквозная идея — **video plane отделён от control plane**: тяжёлый трафик (75 Tbps) идёт напрямую из Open Connect в обход API, а сервисы лишь возвращают манифест с URL нужного appliance. Каталог read-heavy → агрессивно кешируется; устойчивость — через fallback и chaos.
+
+**Catalog Service.**
+*Зачем:* browse/search по 15K тайтлов, метаданные карточек.
+*Почему 3-уровневый кеш:* миллионы browse/сек против единиц write/день; 150 MB каталога влезают в in-process cache (L1), Redis (L2) — backup на рестарт, Postgres (L3) — source of truth. Кеш-слой — [caching / Redis as cache](../../06-databases/caching/01-redis-as-cache.md).
+
+**Playback Service.**
+*Зачем:* при Play проверяет entitlement, подбирает ближайший appliance и codec/quality, отдаёт manifest URL.
+*Почему отдельно:* это control-plane решение на старте сессии; сам контент через него не идёт.
+
+**User Service.**
+*Зачем:* resume-watching (позиция просмотра), «Continue Watching».
+*Почему Redis+async-persist:* позиция пишется каждые 10 сек и не критична — горячее в Redis, асинхронно в Postgres через Kafka; откат на 10 сек допустим.
+
+**Open Connect CDN (ISP-embedded).**
+*Зачем:* раздаёт видеосегменты из приборов внутри сети ISP (< 1 мс), 95%+ трафика не выходит наружу; популярный контент пушится ночью.
+*Почему собственный CDN, а не CloudFront/Akamai:* на масштабе Netflix свой CDN дешевле и контролируемее. Общая механика edge-доставки — [CDN / reverse proxy](../../08-networking-and-api/request-lifecycle/04-cdn-load-balancer-reverse-proxy.md), сквозной read-heavy поток — [external flows / read-heavy with CDN](../external-request-flows/02-read-heavy-request-with-cdn-and-cache.md).
+
+**Manifest DB / Catalog DB / UserDB.**
+*Зачем:* HLS/DASH-манифесты с OC-URL, метаданные, профили и прогресс.
+*Почему разделены:* у каталога (read-mostly) и user-state (write-heavy позиции) разные паттерны; events об изменениях каталога идут через [Kafka](../../07-message-brokers-and-streaming/01-kafka.md) для инвалидации кешей.
+
 ---
 
 ## Фаза 4: Deep Dive
@@ -309,6 +333,8 @@ Serving:
 
 ### Availability: что если сервис падает?
 
+Профильные доки: [reliability / circuit breaker](../reliability-patterns/03-circuit-breaker.md), [chaos engineering](../reliability-patterns/10-chaos-engineering.md), бюджет 99.99% — [SLO/SLI](../reliability-patterns/08-slo-sli-error-budgets.md).
+
 ```
 Circuit Breaker (Hystrix/Resilience4j — Netflix это и придумал):
   
@@ -359,6 +385,26 @@ Dashboard:
   → Automated alert → проблема на немецком Open Connect appliance
   → Трафик переключается на backup appliance
 ```
+
+---
+
+## Сквозные потоки
+
+**1. Browse каталога.**
+Client → Catalog Service → L1 in-process cache (hit ~µs) → при miss L2 Redis → при miss L3 Postgres.
+*Итог:* миллионы browse/сек обслуживаются из памяти; БД видит почти ноль трафика.
+
+**2. Старт воспроизведения.**
+Play → Playback Service: entitlement + выбор ближайшего Open Connect appliance + codec/quality → manifest URL → клиент тянет сегменты напрямую из appliance (< 1 мс), ABR поднимает качество.
+*Итог:* 75 Tbps идут мимо API; control-plane участвует только на старте сессии.
+
+**3. Resume watching.**
+Каждые 10 сек `HSET watch_progress` в Redis → async через Kafka в Postgres; при следующем запуске позиция/следующий эпизод из Redis.
+*Итог:* частые апдейты не нагружают БД; потеря ≤ 10 сек прогресса при сбое Redis допустима.
+
+**4. Деградация сервиса.**
+Recommendations недоступен → circuit open → fallback на trending; Chaos Monkey регулярно убивает инстансы в prod, проверяя устойчивость; отказ региона → DNS failover < 60 сек.
+*Итог:* пользователь всегда видит рабочий экран, а не ошибку; устойчивость проверена заранее, а не в инциденте.
 
 ---
 

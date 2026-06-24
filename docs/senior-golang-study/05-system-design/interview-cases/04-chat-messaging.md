@@ -105,6 +105,34 @@ flowchart TB
     style Cluster fill:#dbeafe,stroke:#1e40af
 ```
 
+### Роль каждого компонента
+
+Сквозная идея — **stateless connection layer над durable message bus**: ноды держат только TCP-соединения, всё состояние (маршрутизация, история, presence) — во внешних хранилищах. Падение ноды теряет соединения, но не данные.
+
+**Chat Server (WebSocket-ноды).**
+*Зачем:* терминируют persistent WebSocket-соединения (~50K на ноду), валидируют, принимают/доставляют сообщения.
+*Почему отдельно / stateless:* 10M соединений физически не помещаются на одну ноду; маршрутизация `user→node` вынесена в Redis, поэтому ноды взаимозаменяемы. Протокол — [networking / WebSocket](../../08-networking-and-api/protocols/05-websocket.md).
+
+**Kafka (message bus).**
+*Зачем:* развязывает приём сообщения и его fan-out/персист; `key=chat_id` сохраняет порядок в рамках чата.
+*Почему отдельно:* при пике 90K msg/сек синхронная доставка всем участникам заблокировала бы отправителя; брокер даёт буфер и durability. См. [message brokers / Kafka](../../07-message-brokers-and-streaming/01-kafka.md).
+
+**ScyllaDB (message store).**
+*Зачем:* durable-история, партиционирование по `chat_id`, чтение страницами по time-ordered `message_id`.
+*Почему не PostgreSQL:* 2.7 PB и write-heavy 29K msg/сек — это про Cassandra-совместимые БД. Профиль: [Cassandra](../../06-databases/database-systems-catalog/05-cassandra.md).
+
+**Redis (presence + routing).**
+*Зачем:* `user→chat_server` для адресной доставки и online-presence с TTL.
+*Почему именно Redis:* нужен sub-ms доступ и естественная волатильность (TTL-протухание = «ушёл в офлайн»). Сценарии — [Redis real scenarios](../../06-databases/database-systems-catalog/08a-redis-real-scenarios.md).
+
+**Fan-out Worker.**
+*Зачем:* по `chat_id` достаёт участников, online → доставляет через их Chat Server, offline → ставит в очередь push.
+*Почему отдельно:* fan-out для групп до 500 — самая тяжёлая часть; держим её асинхронной и независимо масштабируемой.
+
+**Push Notification Service.**
+*Зачем:* доставляет offline-пользователям через FCM/APNs.
+*Почему переиспользуем:* это тот же сервис, что в кейсе [02. Notification Service](./02-notification-service.md) — отдельный домен со своими retry/DLQ.
+
 ---
 
 ## Фаза 4: Deep Dive
@@ -284,7 +312,7 @@ SELECT * FROM messages WHERE chat_id = ? AND message_id < ? ORDER BY message_id 
 Fan-out Worker:
   Если recipient offline (нет в Redis presence):
     → отправить событие в Kafka: topic=notifications.push
-    → Push Notification Service (из нашего notification design!)
+    → Push Notification Service (см. кейс ./02-notification-service.md — fan-out, retry, DLQ)
        → FCM/APNs с payload:
           { "type": "new_message", "chat_id": X, "sender": "Alice", "preview": "Hello..." }
 ```
@@ -324,6 +352,26 @@ Server:
     SELECT * FROM messages WHERE chat_id = ? AND message_id > 'XYZ' LIMIT 100
   → Вернуть пропущенные сообщения
 ```
+
+---
+
+## Сквозные потоки
+
+**1. Доставка при обоих online.**
+A шлёт по WebSocket → Chat-Server-1 валидирует, присваивает Snowflake `message_id`, пишет в ScyllaDB → publish в Kafka (`key=chat_id`) → Fan-out Worker находит Chat-Server B через Redis → доставляет → B шлёт ACK → A получает `delivered`.
+*Итог:* сообщение durable до доставки; порядок в чате гарантирован монотонным `message_id`.
+
+**2. Получатель offline.**
+Fan-out Worker не находит B в Redis presence → событие в `notifications.push` → Push Service шлёт FCM/APNs.
+*Итог:* сообщение уже в ScyllaDB; пользователь догрузит его при следующем подключении, push лишь будит клиент.
+
+**3. Reconnect и пропущенные сообщения.**
+Нода упала / клиент потерял сеть → reconnect с exponential backoff на любую ноду → `sync { last_seen_message_id }` → `SELECT ... WHERE message_id > X` по чатам → отдать пропущенное.
+*Итог:* in-memory соединения потеряны, данные — нет; клиент детерминированно доезжает до актуального состояния.
+
+**4. Read receipt.**
+Клиент `mark_read { last_read_message_id }` → апдейт `read_receipts` → уведомить отправителя через WebSocket.
+*Итог:* статусы eventual-consistent (по требованиям допустимо), отдельная таблица не нагружает горячий путь записи сообщений.
 
 ---
 

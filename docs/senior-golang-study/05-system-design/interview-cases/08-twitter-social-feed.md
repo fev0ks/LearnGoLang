@@ -177,6 +177,34 @@ flowchart TB
     FanOut --> Follow
 ```
 
+### Роль каждого компонента
+
+Сквозная идея — **гибридный fan-out из-за асимметрии графа**: обычные авторы расталкиваются on-write, celebrity читаются on-read; precomputed feed и celebrity-твиты мержатся при чтении.
+
+**Tweet Service.**
+*Зачем:* пишет твит в Cassandra, публикует `tweet.published` в Kafka.
+*Почему отдельно:* запись твита и его доставка подписчикам — разные нагрузки; брокер развязывает их. Профиль — [Kafka](../../07-message-brokers-and-streaming/01-kafka.md).
+
+**Fan-out Workers.**
+*Зачем:* по событию расталкивают tweet_id в feed подписчиков (`LPUSH`+`LTRIM`), пропуская celebrity.
+*Почему отдельно + асинхронно:* fan-out — самая тяжёлая операция (300–1M вставок на твит); батчи + Redis pipeline, горизонтальный скейл по партициям Kafka. At-least-once и идемпотентность — [reliability / idempotency](../reliability-patterns/06-idempotency.md).
+
+**Timeline Service.**
+*Зачем:* собирает ленту — precomputed feed + recent celebrity-твиты, merge по Snowflake.
+*Почему отдельно:* read-path с бюджетом 200 мс p99; держим его тонким (3–5 round-trips в Redis).
+
+**Cassandra (tweets).**
+*Зачем:* durable-хранилище твитов, партиция по `user_id`, clustering по Snowflake.
+*Почему не Postgres:* 1B твитов/день и 550 TB — write-heavy, горизонтальный масштаб. Профиль — [Cassandra](../../06-databases/database-systems-catalog/05-cassandra.md).
+
+**Redis (feed cache + counters).**
+*Зачем:* precomputed-ленты (List), отдельно кешированные celebrity-твиты, like-счётчики `INCR`+flush, `liked_by` Set.
+*Почему Redis:* `LRANGE`/`MGET` за sub-ms; счётчик вирусного твита иначе стал бы write-hotspot (тот же приём, что в [Avito](./13-avito-classifieds.md)). Профиль — [Redis](../../06-databases/database-systems-catalog/08-redis.md), сценарии — [Redis real scenarios](../../06-databases/database-systems-catalog/08a-redis-real-scenarios.md).
+
+**PostgreSQL (follow graph).**
+*Зачем:* рёбра follow, выборка подписчиков для fan-out.
+*Почему реляционка:* граф нужен консистентно при follow/unfollow; индекс по `followee_id` даёт быстрый список подписчиков — [postgresql / indexes](../../06-databases/database-systems-catalog/postgresql/02-indexes.md).
+
 ---
 
 ### Tweet Service и хранилище
@@ -351,6 +379,8 @@ celebrity_follows:{user_id} → Redis Set (только celebrity подписк
 
 ### Search по хэштегам
 
+Полнотекстовый/фасетный поиск по 1T+ твитам — отдельный индекс [Elasticsearch / OpenSearch](../../06-databases/database-systems-catalog/09-elasticsearch-and-opensearch.md), наполняемый из потока публикаций (как Outbox→ES в [Avito-кейсе](./13-avito-classifieds.md)).
+
 ```
 Elasticsearch индекс:
   {
@@ -376,6 +406,26 @@ Trending hashtags:
   Flink: топ-10 за последний час → Redis
   GET /trending → читать из Redis (обновляется раз в 5 мин)
 ```
+
+---
+
+## Сквозные потоки
+
+**1. Публикация твита обычного автора.**
+`POST /tweets` → Cassandra (INSERT, Snowflake id) → `tweet.published` в Kafka → Fan-out Worker берёт подписчиков → батчами `LPUSH feed:{follower}` + `LTRIM 0 999`.
+*Итог:* лента подписчика уже готова к чтению; запись развязана от доставки через брокер.
+
+**2. Публикация твита celebrity.**
+INSERT в Cassandra → Fan-out Worker видит флаг `>1M followers` → **не** расталкивает; твит лишь кешируется в `user_tweets:{celebrity}`.
+*Итог:* один твит Маска не порождает 100M вставок; стоимость переносится на чтение, где её можно разделить.
+
+**3. Чтение home feed.**
+`LRANGE feed:{user}` (precomputed) + `LRANGE user_tweets:{celebrity}` по celebrity-подпискам → merge по Snowflake → `MGET` контента.
+*Итог:* 3–5 round-trips в Redis ≈ 5 мс, укладываемся в 200 мс p99; гибрид закрывает обе проблемы.
+
+**4. Лайк вирусного твита.**
+`INCR like_count:{tweet}` + `SADD liked_by:{tweet} {user}` → batch-flush в Cassandra раз в 30 сек; «лайкнул ли ты» — `SISMEMBER` O(1).
+*Итог:* 100K лайков/мин не создают write-hotspot в БД; точность счётчика eventual.
 
 ---
 

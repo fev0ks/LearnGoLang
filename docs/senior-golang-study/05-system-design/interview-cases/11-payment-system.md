@@ -145,6 +145,38 @@ flowchart TB
     style PS fill:#dbeafe,stroke:#1e40af
 ```
 
+### Роль каждого компонента
+
+Сквозная идея — **strong-consistency ядро (ledger/accounts в Postgres) + изоляция ненадёжного внешнего PSP** через Saga/Outbox: всё, что должно быть верным, живёт в ACID-транзакции, всё ненадёжное вынесено за её границу.
+
+**Idempotency Check.**
+*Зачем:* по `Idempotency-Key` отсекает дубли (network retry → не второе списание).
+*Почему отдельно / в БД, не в Redis:* нужна durability ключа; Redis может потерять данные. Паттерн — [reliability-patterns / idempotency](../reliability-patterns/06-idempotency.md).
+
+**Payment Processor.**
+*Зачем:* оркестрирует шаги (fraud → reserve → PSP → complete), управляет статусами PENDING/COMPLETED/FAILED.
+*Почему отдельно:* единое место для Saga-логики и компенсаций; бизнес-поток не размазан по слоям.
+
+**Ledger Service.**
+*Зачем:* double-entry записи (SUM = 0), материализованный баланс, `SELECT FOR UPDATE` против двойного списания.
+*Почему отдельно:* это инвариант корректности денег; изолируем от внешних вызовов. Блокировки — [postgresql / transactions & locking](../../06-databases/database-systems-catalog/postgresql/04-transactions-and-locking.md).
+
+**PSP Gateway (Stripe/PayPal).**
+*Зачем:* единая обёртка над внешними платёжными провайдерами.
+*Почему отдельно:* PSP медленный и нестабильный (200–1500 мс, таймауты) — его надо изолировать timeout/retry/circuit-breaker'ом: [retries & backoff](../reliability-patterns/02-retries-and-backoff.md), [circuit breaker](../reliability-patterns/03-circuit-breaker.md).
+
+**PostgreSQL (ledger, accounts).**
+*Зачем:* source of truth балансов и платежей, ACID.
+*Почему реляционка + sync-репликация:* потеря платежа недопустима, нужен `SUM(entries)=0` и durability при отказе узла — [replication](../../06-databases/database-systems-catalog/postgresql/06-replication.md). Бюджет 99.99% — [SLO/SLI](../reliability-patterns/08-slo-sli-error-budgets.md).
+
+**Audit Log (append-only).**
+*Зачем:* неизменяемый журнал каждой операции для compliance (PCI DSS, 7 лет).
+*Почему отдельно:* регуляторное требование; данные нельзя UPDATE/DELETE, только INSERT.
+
+**Kafka (outbox events).**
+*Зачем:* `payment.completed` и события для reconcile, публикуются в одной транзакции с платежом (Outbox).
+*Почему через outbox:* событие не теряется при сбое; тот же паттерн, что в [12. Marketplace Notifications](./12-marketplace-vendor-notifications.md) и [14. Stock Service](./14-stock-inventory-service.md). Брокер — [Kafka](../../07-message-brokers-and-streaming/01-kafka.md).
+
 ---
 
 ## Фаза 5: Deep Dive
@@ -174,6 +206,8 @@ POST /payments
        WHERE id = user_id
      INSERT INTO payments (id, user_id, amount, status = PENDING, idempotency_key)
    COMMIT
+   -- Тот же двухфазный hold→capture/void, что и резерв остатков:
+   -- см. Stock / Inventory Service (./14-stock-inventory-service.md)
 
 4. Call external PSP (Stripe):
    POST https://api.stripe.com/v1/charges
@@ -356,6 +390,7 @@ Velocity checks (до обращения к PSP):
 
 Реализация:
   Redis: rate limit per user_id, per card_token
+    (sliding window / token bucket — см. ../../06-databases/database-systems-catalog/08b-redis-rate-limiters.md)
   Rules Engine: конфигурируемые правила (без хардкода)
   
   if fraud_score(transaction) > threshold:
@@ -387,6 +422,26 @@ Velocity checks (до обращения к PSP):
   Если маркетплейс держит баланс в разных валютах → forex risk
   Hedging: out of scope для интервью, но упомянуть
 ```
+
+---
+
+## Сквозные потоки
+
+**1. Успешный платёж.**
+`POST /payments` + Idempotency-Key → idempotency check → fraud (velocity) → reserve баланса (`FOR UPDATE`) PENDING → вызов PSP с idempotency key → complete: ledger entries (−100/+95/+5, SUM=0), статус COMPLETED → `payment.completed` в Kafka.
+*Итог:* деньги движутся ровно один раз; повтор запроса возвращает кешированный результат, а не списывает снова.
+
+**2. PSP-таймаут (распределённая транзакция).**
+PSP не ответил за 5 сек → платёж остаётся PENDING, событие в Outbox → Outbox Worker ретраит вызов PSP с тем же idempotency key → при успехе обновляет статус.
+*Итог:* at-least-once вызов + idempotency на стороне PSP = exactly-once эффект; ни двойного списания, ни потери.
+
+**3. Crash между PSP и БД.**
+Saga/Outbox: PENDING + outbox-запись закоммичены атомарно. Если сервис упал после списания у PSP, но до апдейта статуса — Worker перезапустится и доведёт, либо компенсирующая транзакция вернёт средства.
+*Итог:* нет состояния «PSP списал, у нас нет» без механизма восстановления.
+
+**4. Reconciliation.**
+Ежедневная сверка отчёта PSP с нашей БД → расхождение (COMPLETED у нас / FAILED у PSP) → alert финансам; PENDING > 24 ч → пометить FAILED, вернуть средства.
+*Итог:* любое расхождение источников истины обнаруживается и эскалируется, а не теряется молча.
 
 ---
 

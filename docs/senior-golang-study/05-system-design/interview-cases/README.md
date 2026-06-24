@@ -27,6 +27,7 @@
 - [11. Payment System](./11-payment-system.md) — double-entry bookkeeping, idempotency, Saga + Outbox, reconciliation, strong consistency
 - [12. Marketplace Vendor Notifications](./12-marketplace-vendor-notifications.md) — webhook delivery (Stripe-style), outbox + Kafka, per-vendor circuit breaker, HMAC signing, dead letter
 - [13. Avito / Classifieds](./13-avito-classifieds.md) — фасетный поиск (Elasticsearch), category-specific атрибуты (JSONB + денорм), Outbox→ES, медиа-пайплайн, горячее чтение карточек, view counter, модерация/антифрод
+- [14. Stock / Inventory Service](./14-stock-inventory-service.md) — двухфазный резерв (hold→commit/cancel) + TTL, защита от overselling (atomic условный декремент), горячий SKU при flash sale (бакетирование / Redis fast-path), шардинг по product_id, sync-репликация, чтение из кеша vs решение на записи
 
 ## Структура каждого кейса
 

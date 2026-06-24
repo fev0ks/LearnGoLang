@@ -101,6 +101,30 @@ flowchart LR
     style TQ fill:#dbeafe,stroke:#1e40af
 ```
 
+### Роль каждого компонента
+
+Сквозная идея — **durable source of truth (PostgreSQL) + быстрый dispatch (Redis Streams)**: задача сначала фиксируется надёжно, потом раздаётся быстро; at-least-once обеспечивает PEL/XACK, а корректность повторов — идемпотентные воркеры.
+
+**Queue API (REST / gRPC).**
+*Зачем:* приём enqueue, запрос статуса; двойная запись — INSERT в PostgreSQL, затем XADD в Redis.
+*Почему отдельно:* единая точка с валидацией и идемпотентностью enqueue; источники не работают с брокером напрямую.
+
+**Broker (Redis Streams + Sorted Sets).**
+*Зачем:* очереди по приоритетам (XREADGROUP/XACK), delayed-задачи в ZSET по timestamp.
+*Почему Redis, а не Kafka:* при 10K/сек нужны нативные delayed-задачи, приоритеты и атомарный claim — у Redis это из коробки. Сравнение — [brokers / comparison](../../07-message-brokers-and-streaming/07-comparison.md); профиль — [Redis Streams](../../07-message-brokers-and-streaming/03-redis-streams.md), [Redis сценарии](../../06-databases/database-systems-catalog/08a-redis-real-scenarios.md).
+
+**Worker Pool.**
+*Зачем:* claim задачи, выполнение с timeout, retry/DLQ, ACK.
+*Почему stateless + изоляция:* медленный/падающий воркер не должен влиять на остальных; масштабируются горизонтально (KEDA по глубине очереди). At-least-once требует идемпотентности — [reliability / idempotency](../reliability-patterns/06-idempotency.md), стратегия повторов — [retries & backoff](../reliability-patterns/02-retries-and-backoff.md).
+
+**TaskStore (PostgreSQL).**
+*Зачем:* durable-история и статусы, unique `idempotency_key`, recovery при падении Redis.
+*Почему реляционка:* нужны произвольные выборки для мониторинга и восстановление `status='queued'`; индексы — [postgresql / indexes](../../06-databases/database-systems-catalog/postgresql/02-indexes.md).
+
+**Scheduler Service.**
+*Зачем:* раз в 500 мс перекладывает готовые delayed/cron-задачи в очередь.
+*Почему отдельно + leader election:* нужен ровно один активный планировщик (иначе дубли) — distributed lock в Redis выбирает лидера.
+
 ---
 
 ## Фаза 4: Deep Dive
@@ -401,6 +425,26 @@ KEDA (Kubernetes Event-Driven Autoscaling):
   → При росте очереди → добавить Pod'ы
   → При пустой очереди → scale to zero (для экономии)
 ```
+
+---
+
+## Сквозные потоки
+
+**1. Enqueue и выполнение (happy path).**
+Producer → Queue API: INSERT в PostgreSQL (durability) → XADD в `queue:{priority}` → воркер XREADGROUP (high → normal → low) → статус running → Handle с timeout → XACK + статус done.
+*Итог:* задача durable до диспетчеризации; приоритетные не ждут за низкоприоритетными.
+
+**2. Delayed / recurring задача.**
+Запланированная задача в ZSET `delayed_tasks` (score = execute_at) → Scheduler (лидер) раз в 500 мс `ZRANGEBYSCORE 0 now` → переносит в очередь → дальше как обычная.
+*Итог:* один планировщик через leader-lock исключает дубликаты; cron-правила переводятся в следующий запуск.
+
+**3. Падение воркера в процессе.**
+Воркер взял задачу (она в PEL), но упал до XACK → Redelivery job по XPENDING + idle-timeout → XCLAIM возвращает задачу другому воркеру.
+*Итог:* at-least-once — задача не теряется; идемпотентный Handle гасит возможный повтор (например, `email_sent:{key}`).
+
+**4. Ошибка выполнения → retry → DLQ.**
+Handle вернул ошибку → attempt++ → если < max: reschedule с exponential backoff + jitter; если исчерпан: MoveToDLQ + статус failed + alert.
+*Итог:* transient-ошибки сами рассасываются, постоянные не крутятся бесконечно и видны операторам.
 
 ---
 

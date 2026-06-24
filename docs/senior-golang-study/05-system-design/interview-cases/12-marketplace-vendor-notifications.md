@@ -294,6 +294,34 @@ flowchart TB
     style NS fill:#fef3c7,stroke:#a16207
 ```
 
+### Роль каждого компонента
+
+Сквозная идея — **гарантированная доставка ненадёжному внешнему получателю**: Outbox даёт «не потерять событие» при публикации, а per-vendor circuit breaker изолирует один лежащий vendor-эндпоинт от остальных.
+
+**Order API + PostgreSQL (orders + outbox).**
+*Зачем:* в одной транзакции пишет заказ и событие в outbox.
+*Почему так:* событие и заказ должны появиться атомарно — иначе «заказ есть, уведомления нет» или наоборот. Транзакционность — [postgresql / transactions & locking](../../06-databases/database-systems-catalog/postgresql/04-transactions-and-locking.md).
+
+**Outbox Relay.**
+*Зачем:* читает неотправленные события и публикует в Kafka, помечая `sent_at`.
+*Почему отдельно:* развязывает запись заказа и публикацию; at-least-once-публикация переживает падения. Профиль брокера — [Kafka](../../07-message-brokers-and-streaming/01-kafka.md).
+
+**Kafka (partitioned by vendor_id).**
+*Зачем:* буфер и порядок событий в рамках vendor'а.
+*Почему ключ = vendor_id:* сохраняет порядок уведомлений конкретного vendor'а и даёт параллелизм между vendor'ами.
+
+**Vendor Registry (+ Redis cache).**
+*Зачем:* хранит webhook-URL и секрет vendor'а, кешируя в Redis.
+*Почему кеш:* lookup происходит на каждом событии — sub-ms из Redis вместо обращения к БД. Профиль — [Redis](../../06-databases/database-systems-catalog/08-redis.md).
+
+**Webhook Dispatcher (+ per-vendor circuit breaker).**
+*Зачем:* подписывает payload HMAC, шлёт POST, при сбое — в retry-очередь, после max attempts — в DLQ.
+*Почему per-vendor CB:* лежащий эндпоинт одного vendor'а не должен исчерпывать воркеры и тормозить остальных. Паттерн — [reliability / circuit breaker](../reliability-patterns/03-circuit-breaker.md); приём доставки и подпись — [protocols / webhooks](../../08-networking-and-api/protocols/06-webhooks.md).
+
+**Retry Queue (Redis Sorted Set) + DLQ (S3).**
+*Зачем:* отложенные повторы с exponential backoff; необработанное после ~24 ч → dead letter + alert.
+*Почему ZSet:* score = время следующей попытки — естественная delayed-очередь. Стратегия — [reliability / retries & backoff](../reliability-patterns/02-retries-and-backoff.md).
+
 ### Поток — happy path
 
 ```mermaid
@@ -333,6 +361,8 @@ sequenceDiagram
     Note over N: success: ack Kafka offset
 ```
 
+*Итог:* заказ и событие зафиксированы атомарно; публикация и доставка асинхронны, поэтому ответ покупателю не зависит от доступности vendor'а.
+
 ### Поток — vendor unavailable
 
 ```mermaid
@@ -360,6 +390,8 @@ sequenceDiagram
     V--xN: still fails
     N->>DLQ: save event + error<br/>alert ops
 ```
+
+*Итог:* сбой одного vendor'а не теряет событие и (через per-vendor CB) не задевает остальных; после исчерпания повторов — dead letter с алертом, а не молчаливая потеря.
 
 ---
 

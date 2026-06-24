@@ -101,6 +101,34 @@ flowchart LR
     style NS fill:#dbeafe,stroke:#1e40af
 ```
 
+### Роль каждого компонента
+
+Сквозная идея — **fan-out по каналам, а не по пользователям**: у каждого провайдера свой rate limit и своя надёжность, поэтому каналы развязаны и троттлятся независимо.
+
+**API Gateway.**
+*Зачем:* валидация, рендеринг шаблона, проверка preferences и idempotency, затем fan-out в очереди.
+*Почему отдельно:* единая точка входа для всех сервисов-источников; вся «дорогая» подготовка делается до постановки в очередь, воркеры получают уже готовое сообщение.
+
+**Kafka (per-channel topics).**
+*Зачем:* буфер между приёмом и доставкой; отдельный топик на канал + priority-топик для транзакционных + DLQ.
+*Почему именно брокер с retention:* при недоступности провайдера сообщения копятся (retention 7 дней), а не теряются; replay и consumer groups из коробки. Выбор брокера — [brokers / comparison](../../07-message-brokers-and-streaming/07-comparison.md), профиль — [Kafka](../../07-message-brokers-and-streaming/01-kafka.md).
+
+**Dispatcher Workers (push / email / sms).**
+*Зачем:* читают свой топик, вызывают провайдера, троттлят под его лимит, ретраят, пишут статус.
+*Почему по одному на канал:* лимиты разные (FCM 1000/сек, Twilio 100/сек) — общий воркер пришлось бы троттлить по худшему. Backpressure под лимиты — [reliability / backpressure & shedding](../reliability-patterns/05-backpressure-and-shedding.md), троттлинг — [rate-limiting](../reliability-patterns/04-rate-limiting.md).
+
+**External providers (FCM / SendGrid / Twilio).**
+*Зачем:* фактическая доставка в каналы; delivery receipts приходят вебхуками.
+*Почему обёртка на воркере:* провайдеры нестабильны и имеют лимиты — изолируем retry/DLQ. Приём подтверждений — [protocols / webhooks](../../08-networking-and-api/protocols/06-webhooks.md).
+
+**Redis (idempotency + preferences cache).**
+*Зачем:* быстрый чек `idempotency_key` на горячем пути и кеш user-preferences (TTL 5 мин).
+*Почему Redis:* проверка идемпотентности на каждом запросе должна быть sub-ms; механика — [reliability / idempotency](../reliability-patterns/06-idempotency.md), [Redis](../../06-databases/database-systems-catalog/08-redis.md).
+
+**PostgreSQL (notification_log).**
+*Зачем:* durable-статусы (QUEUED/SENT/DELIVERED/FAILED), unique `idempotency_key`, аналитика.
+*Почему реляционка:* объёмы умеренные (~220 GB за 3 года), OLAP не нужен; unique-индекс — вторая линия идемпотентности после Redis.
+
 ---
 
 ## Фаза 4: Deep Dive
@@ -291,6 +319,26 @@ FCM недоступен 30 минут:
   - При восстановлении FCM → воркеры продолжат автоматически
   - Transactional OTP: уведомить через SMS как fallback (если настроено)
 ```
+
+---
+
+## Сквозные потоки
+
+**1. Транзакционное уведомление (OTP / подтверждение).**
+`POST /notifications` → валидация + рендер шаблона → idempotency-чек в Redis → fan-out в priority-топик → priority-воркер (минимальный батчинг) → провайдер → статус SENT.
+*Итог:* OTP не застревает за маркетинговым батчем; end-to-end < 5 сек.
+
+**2. Маркетинговая кампания по расписанию.**
+Admin создаёт кампанию (SCHEDULED в PostgreSQL) → Scheduler (cron) в `schedule_time` загружает аудиторию → пушит в Kafka батчами по 1000 → воркеры троттлят под лимит провайдера (token bucket).
+*Итог:* миллионная рассылка не превышает лимиты провайдера и не вытесняет транзакционные.
+
+**3. Сбой провайдера и retry.**
+Воркер получает 5xx/timeout → exponential backoff (30 сек → 5 мин → 30 мин) → после N попыток в DLQ + alert. Permanent 4xx (битый токен) → сразу DLQ, токен помечается inactive.
+*Итог:* сообщения копятся в Kafka, а не теряются; при восстановлении провайдера воркеры досылают автоматически.
+
+**4. Подтверждение доставки.**
+Провайдер шлёт вебхук `delivered` → обновляем `notification_log` (SENT → DELIVERED).
+*Итог:* статус eventual-consistent через вебхуки, горячий путь отправки им не нагружается.
 
 ---
 

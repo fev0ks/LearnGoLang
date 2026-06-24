@@ -168,6 +168,26 @@ flowchart TB
     style GW fill:#dbeafe,stroke:#1e40af
 ```
 
+### Роль каждого компонента
+
+Сквозная идея — **централизованное атомарное состояние при < 1 мс на каждом запросе**: решение принимает один Lua-скрипт в Redis, поэтому все ноды Gateway согласованы без межнодовой синхронизации.
+
+**Rate Limit Middleware (в Gateway).**
+*Зачем:* извлекает ключ (user_id/IP), зовёт Redis, выставляет заголовки `X-RateLimit-*`, пропускает или режет 429.
+*Почему в Gateway, а не в каждом сервисе:* лимит должен считаться один раз на входе; дублировать его в N сервисах — рассинхрон и лишний overhead. Готовые реализации — [networking / rate-limiting](../../08-networking-and-api/protocols/04-rate-limiting.md), паттерн — [reliability / rate-limiting](../reliability-patterns/04-rate-limiting.md).
+
+**Redis Cluster (atomic check + increment).**
+*Зачем:* хранит счётчики окон; Lua-скрипт делает «проверить и инкрементировать» атомарно.
+*Почему именно Redis + Lua:* нужно общее состояние для всех нод и атомарность без race между операциями; sub-ms латентность. Готовые скрипты sliding-window/token-bucket — [Redis rate limiters](../../06-databases/database-systems-catalog/08b-redis-rate-limiters.md), профиль — [Redis](../../06-databases/database-systems-catalog/08-redis.md).
+
+**Config Service.**
+*Зачем:* лимиты по endpoint-группам и tier пользователя (free/pro/enterprise).
+*Почему отдельно:* лимиты меняются без передеплоя Gateway; кешируются в памяти ноды с TTL 30 сек, чтобы не ходить за ними на каждом запросе.
+
+**Upstream Services.**
+*Зачем:* получают только прошедшие лимит запросы.
+*Почему за middleware:* rate limiter — это shed-нагрузки на входе, защищающий upstream от перегруза ещё до бизнес-логики.
+
 ---
 
 ### Redis Lua Script (атомарность)
@@ -357,7 +377,27 @@ API:
   }
 ```
 
-Overhead: один gRPC call + Redis = ~1-2ms. Нужно кешировать в сервисе-клиенте при строгих latency требованиях.
+Overhead: один gRPC call + Redis = ~1-2ms. Нужно кешировать в сервисе-клиенте при строгих latency требованиях. Протокол — [networking / gRPC](../../08-networking-and-api/protocols/01-grpc.md).
+
+---
+
+## Сквозные потоки
+
+**1. Запрос в пределах лимита.**
+Client → middleware извлекает ключ → `EVAL` Lua в Redis: `estimated < limit` → `INCR` текущего окна → `allowed` + заголовки `X-RateLimit-Remaining` → upstream.
+*Итог:* одно обращение в Redis (~1 мс), решение атомарно и одинаково для всех нод.
+
+**2. Превышение лимита.**
+`EVAL` → `estimated >= limit` → `denied` + `retry_after` → `429` с `X-RateLimit-Retry-After`, upstream не вызывается.
+*Итог:* перегруз отсекается на входе; клиент знает, через сколько повторить.
+
+**3. Гонка между нодами Gateway.**
+Node 1 и Node 2 одновременно на 99/100 → оба шлют `EVAL` в один Redis → Lua сериализует вызовы: первый инкрементит до 100 и проходит, второй видит лимит → 429.
+*Итог:* общее состояние + атомарный скрипт исключают «101-й запрос» без межнодовой координации.
+
+**4. Redis недоступен (fail-open).**
+`EVAL` падает → middleware ловит ошибку → метрика `rate_limiter.bypass` + alert → запрос пропускается.
+*Итог:* сбой инфраструктуры лимитера не роняет API; временно лимиты мягче — осознанный trade-off в пользу доступности.
 
 ---
 

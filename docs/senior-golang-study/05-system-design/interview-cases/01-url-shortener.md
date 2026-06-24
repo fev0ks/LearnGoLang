@@ -100,6 +100,30 @@ GET /{code}
 Response: 301 Redirect → original URL
 ```
 
+### Роль каждого компонента
+
+Сквозная идея — **read/write skew 100:1**: путь чтения (redirect) и путь записи (create) разнесены, потому что у них разные требования и нагрузка (CQRS-мотив).
+
+**API Gateway.**
+*Зачем:* TLS-терминация, rate limiting (вместо авторизации для публичного create), маршрутизация.
+*Почему отдельно:* create — публичный, его надо защищать от абуза, не нагружая бизнес-логику. Алгоритмы лимитирования — в кейсе [03. Rate Limiter](./03-rate-limiter.md) и [reliability-patterns / rate-limiting](../reliability-patterns/04-rate-limiting.md).
+
+**Write API (`POST /shorten`).**
+*Зачем:* генерирует short_code, пишет в PostgreSQL.
+*Почему отдельно от Read:* запись редкая (~350/сек пик) и идёт прямо в БД; смешивать её с 35K RPS чтения незачем — масштабируются независимо.
+
+**Read API (`GET /:code`).**
+*Зачем:* критический путь — resolve short_code → long_url → редирект, цель p99 < 10 мс.
+*Почему отдельно / stateless:* это 99% трафика; держим его тонким и горизонтально масштабируемым, всё состояние — в Redis/БД.
+
+**Redis (hot URLs cache).**
+*Зачем:* отдаёт горячие short_code за < 1 мс, снимая 80% трафика с БД (Zipf).
+*Почему именно кеш:* без него 35K RPS бьют в PostgreSQL. Паттерн cache-aside и инвалидация — [caching / Redis as cache](../../06-databases/caching/01-redis-as-cache.md), [Redis](../../06-databases/database-systems-catalog/08-redis.md).
+
+**PostgreSQL (source of truth).**
+*Зачем:* durable-хранилище `code → url`, уникальность кода через unique-индекс.
+*Почему реляционка:* схема стабильна, нужен ACID на уникальность; шардинг по `short_code` при росте — [postgresql / sharding](../../06-databases/database-systems-catalog/postgresql/12-sharding.md), индексы — [postgresql / indexes](../../06-databases/database-systems-catalog/postgresql/02-indexes.md).
+
 ---
 
 ## Фаза 4: Deep Dive
@@ -232,7 +256,7 @@ Analytics worker:
   - Или писать в отдельную таблицу clicks для детальной аналитики
 ```
 
-Это decouples critical path (redirect) от аналитики.
+Это decouples critical path (redirect) от аналитики. Очередь и батчинг — [message brokers / Kafka](../../07-message-brokers-and-streaming/01-kafka.md); тот же приём «INCR в буфере → периодический flush», что и view counter в [Avito-кейсе](./13-avito-classifieds.md).
 
 ---
 
@@ -245,6 +269,26 @@ Background job (cron, ежедневно):
   -- Батчевое удаление, чтобы не лочить таблицу
   -- Индекс idx_expires_at делает поиск дешёвым
 ```
+
+---
+
+## Сквозные потоки
+
+**1. Создание ссылки.**
+`POST /shorten` → Gateway (rate limit) → Write API генерирует Random Base62 → `INSERT` в PostgreSQL с unique-индексом (коллизия → retry) → возврат `short_url`.
+*Итог:* запись редкая и идёт прямо в source of truth; кеш не трогаем — он наполнится лениво при первом чтении.
+
+**2. Редирект, попадание в кеш (горячий путь, ~80%).**
+`GET /{code}` → Read API → Redis hit → `302 Redirect` за < 1 мс.
+*Итог:* основной трафик вообще не доходит до БД — за счёт этого держим p99 < 10 мс при 35K RPS.
+
+**3. Редирект, промах кеша.**
+Redis miss → PostgreSQL (covering-индекс по `short_code`) → `SET` в Redis с TTL → `302 Redirect`.
+*Итог:* первый запрос холодного кода чуть дороже, дальше он становится горячим; БД видит только «длинный хвост» Zipf.
+
+**4. Учёт кликов (вне критического пути).**
+Каждый редирект асинхронно шлёт событие в Kafka → Analytics Worker батчами обновляет `click_count`.
+*Итог:* аналитика не добавляет латентности редиректу; точность eventual, что для счётчика кликов приемлемо.
 
 ---
 
@@ -272,21 +316,6 @@ Background job (cron, ежедневно):
   - PostgreSQL: read replicas для redirect miss path
   - При 10x writes (3500 creates/sec): рассмотреть sharding по short_code
   - CDN: кешировать redirects на edge (если глобальный трафик)
-```
-
----
-
-## Финальная архитектура
-
-```
-Client
-  │
-  ├── POST /shorten → Write API → PostgreSQL (INSERT + уникальный индекс)
-  │                                     └── генерация Random Base62
-  │
-  └── GET /{code}  → Read API → Redis → hit: 302 Redirect
-                                      → miss: PostgreSQL → Redis SET → 302 Redirect
-                                                    └── async event → Kafka → Analytics Worker
 ```
 
 ---

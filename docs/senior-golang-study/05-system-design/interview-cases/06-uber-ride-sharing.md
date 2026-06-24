@@ -88,6 +88,34 @@ flowchart TB
     TripSvc --> TripStore
 ```
 
+### Роль каждого компонента
+
+Сквозная идея — **разделение по типу нагрузки**: write-heavy волатильные координаты (Redis, 120K/сек) полностью отделены от strong-consistent booking (PostgreSQL); геопоиск сведён к O(1) lookup по H3-ячейкам, а не сканированию.
+
+**Location Service.**
+*Зачем:* принимает обновления координат каждые 5 сек, поддерживает H3-индекс в Redis (перенос водителя между ячейками), стримит координаты активных поездок в Kafka.
+*Почему отдельно:* это доминирующая write-нагрузка (120K/сек) со своими требованиями (volatile, eventual) — нельзя смешивать с booking.
+
+**Matching Service.**
+*Зачем:* по запросу находит топ-5 ближайших свободных водителей (H3 GridDisk) и проводит matching с distributed lock.
+*Почему отдельно:* matching редкий (~60/сек), но требует атомарности «занять водителя» — изолируем от потока координат.
+
+**Trip Service.**
+*Зачем:* state machine поездки (PENDING→…→COMPLETED), real-time tracking пассажиру через WebSocket.
+*Почему отдельно + Postgres:* переходы статусов финансово значимы, нужен ACID. Протокол трекинга — [networking / WebSocket](../../08-networking-and-api/protocols/05-websocket.md).
+
+**Redis (H3-indexed locations).**
+*Зачем:* текущие позиции водителей по H3-ячейкам, booking-локи, surge-значения.
+*Почему Redis:* данные волатильны и нужны за < 1 мс; GEO/Hash-операции и `SET NX` — нативно. Профиль — [Redis](../../06-databases/database-systems-catalog/08-redis.md), сценарии гео/локов — [Redis real scenarios](../../06-databases/database-systems-catalog/08a-redis-real-scenarios.md). Шардинг по `driver_id` — [sharding](../../06-databases/database-systems-catalog/postgresql/12-sharding.md).
+
+**PostgreSQL (trips).**
+*Зачем:* durable state машины поездки.
+*Почему реляционка:* нельзя двойной booking и нужны консистентные переходы — [transactions & locking](../../06-databases/database-systems-catalog/postgresql/04-transactions-and-locking.md).
+
+**Kafka (location streaming).**
+*Зачем:* транспорт координат активной поездки от водителя к пассажиру и другим консьюмерам.
+*Почему через брокер, а не прямой WebSocket:* водитель и пассажир на разных серверах; decoupling + лёгкое добавление консьюмеров (диспетчер, аналитика). Профиль — [Kafka](../../07-message-brokers-and-streaming/01-kafka.md).
+
 ---
 
 ## Фаза 4: Deep Dive
@@ -283,6 +311,26 @@ Routing:
 
 ---
 
+## Сквозные потоки
+
+**1. Обновление позиции водителя.**
+Driver App каждые 5 сек → Location Service → `HSET` координат + пересчёт H3-ячейки; при смене ячейки атомарно `HDEL` из старой и `HSET` в новую. Если поездка активна — координаты в Kafka.
+*Итог:* индекс всегда отражает актуальное положение; geo-запрос видит водителя в правильной ячейке.
+
+**2. Запрос поездки и matching.**
+Пассажир → Matching Service → `GridDisk(cell, k=1)` (7 ячеек) → топ-5 по реальному расстоянию → каждому предложение (timeout 15 сек) → первый принявший фиксируется через `SET driver:{id}:booking NX`.
+*Итог:* O(1) поиск без сканирования; `NX`-лок исключает двойной booking, проигравшие получают cancel.
+
+**3. Трекинг во время поездки.**
+Водитель → координаты в `trip.{id}.location` (Kafka) → Trip Service-консьюмер → WebSocket-push пассажиру.
+*Итог:* пассажир и водитель на разных серверах связаны через брокер; легко подключить ещё консьюмеров.
+
+**4. Surge pricing.**
+Каждые 5 мин по H3-ячейкам (res 7): `demand/supply` → коэффициент → `SET surge:{cell} EX 300`.
+*Итог:* цена реагирует на дисбаланс локально по зонам; значения сами протухают через 5 мин.
+
+---
+
 ## Трейдоффы
 
 | Компонент | Выбор | Альтернатива | Причина |
@@ -326,6 +374,8 @@ Circuit breaker:
   Если Location Service отвечает > 500ms → matching service использует stale data
   Alert инженерам немедленно
 ```
+
+Паттерн размыкания при деградации — [reliability / circuit breaker](../reliability-patterns/03-circuit-breaker.md).
 
 ---
 

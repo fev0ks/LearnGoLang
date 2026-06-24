@@ -93,6 +93,34 @@ flowchart LR
     style Upload fill:#dbeafe,stroke:#1e40af
 ```
 
+### Роль каждого компонента
+
+Сквозная идея — **два независимых пайплайна**: write-heavy upload/transcode (асинхронный, batch, CPU-bound) и read-heavy playback (CDN-first, 23 Tbps). Они масштабируются и оптимизируются раздельно.
+
+**Upload Service.**
+*Зачем:* chunked resumable-загрузка оригинала в S3 (Multipart Upload), затем событие `video.uploaded` в Kafka.
+*Почему отдельно:* загрузка 500 MB ненадёжна одним запросом; resumable-протокол и сборка чанков — отдельная ответственность.
+
+**S3 (raw + processed).**
+*Зачем:* durable-хранилище оригиналов и 5 quality-вариантов, tiering hot→warm→Glacier.
+*Почему object storage:* ~400 PB/год бинарного контента, нужны надёжность и дешёвый cold-tier; метаданные при этом в Postgres.
+
+**Transcode Workers (FFmpeg).**
+*Зачем:* параллельно создают 5 битрейтов и HLS-сегменты.
+*Почему отдельный пул + очередь:* транскодирование CPU-bound и пиковое; раздаём задачи через очередь (механика — кейс [05. Task Queue](./05-task-queue.md)), автоскейл по глубине очереди. Транспорт событий — [Kafka](../../07-message-brokers-and-streaming/01-kafka.md).
+
+**CDN (edge nodes).**
+*Зачем:* раздаёт immutable-сегменты близко к зрителю; origin (S3) видит только cache-miss.
+*Почему обязателен:* 23 Tbps из одного региона невозможны; Zipf (топ-1% = 80% трафика) делает кеш крайне эффективным. Профиль — [CDN / reverse proxy](../../08-networking-and-api/request-lifecycle/04-cdn-load-balancer-reverse-proxy.md), сквозной read-heavy поток — [external flows / read-heavy with CDN](../external-request-flows/02-read-heavy-request-with-cdn-and-cache.md).
+
+**Video metadata (PostgreSQL) + Redis.**
+*Зачем:* структурированные метаданные/статусы (PROCESSING→READY), view_count через Redis INCR с async-flush.
+*Почему так:* счётчик на популярном видео — write hotspot, его буферизуем в Redis (тот же приём, что в [Avito-кейсе](./13-avito-classifieds.md)); индексы метаданных — [postgresql / indexes](../../06-databases/database-systems-catalog/postgresql/02-indexes.md).
+
+**Elasticsearch.**
+*Зачем:* поиск по title/description/tags с весами.
+*Почему отдельный индекс:* 500M+ видео, полнотекстовый поиск с релевантностью — не для реляционного FTS. Профиль — [Elasticsearch / OpenSearch](../../06-databases/database-systems-catalog/09-elasticsearch-and-opensearch.md).
+
 ---
 
 ## Фаза 4: Deep Dive
@@ -128,7 +156,7 @@ S3 Multipart Upload нативно поддерживает это:
 Transcode Orchestrator (консьюмер Kafka):
   Для каждого видео создать задачи транскодирования:
   { video_id, input_s3_key, output_quality: "1080p", codec: "h264" }
-  → Задачи в очередь (Task Queue из кейса 05!)
+  → Задачи в очередь (Task Queue — см. кейс ./05-task-queue.md)
 
 Transcode Workers (FFmpeg):
   Забирают задачу → читают из S3 → FFmpeg → пишут в S3
@@ -370,6 +398,26 @@ Deep ML (out of scope):
   1. Candidate generation (нейронная сеть, миллионы → тысячи)
   2. Ranking (другая сеть, тысячи → десятки)
 ```
+
+---
+
+## Сквозные потоки
+
+**1. Загрузка видео.**
+Creator → initiate-upload → чанки по 5 MB через S3 Multipart → complete → событие `video.uploaded` в Kafka.
+*Итог:* обрыв сети не теряет прогресс (resume по списку загруженных чанков); оригинал durable в S3 до обработки.
+
+**2. Транскодирование.**
+Kafka → Transcode Orchestrator создаёт 5 задач (по качеству) в очередь → FFmpeg-воркеры (автоскейл по глубине) пишут варианты + HLS-сегменты в S3 → статус READY, pre-warm первых сегментов в CDN.
+*Итог:* CPU-bound работа распараллелена и изолирована от playback; зритель получает быстрый старт за счёт прогретого начала.
+
+**3. Воспроизведение (ABR).**
+Player → master playlist → стартует с низкого качества → CDN отдаёт `.ts`-сегменты (hit ~5 мс) → клиент повышает/понижает качество по скорости загрузки.
+*Итог:* 23 Tbps обслуживает CDN, origin видит только длинный хвост; immutable-сегменты кешируются «вечно».
+
+**4. Учёт просмотров и поиск.**
+Каждый просмотр → Redis `INCR view_count` → batch-flush в PostgreSQL раз в 5 мин; публикация видео → индексация в Elasticsearch.
+*Итог:* счётчик не создаёт write-hotspot в БД; поиск и view_count eventual-consistent, что для них допустимо.
 
 ---
 
