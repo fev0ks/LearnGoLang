@@ -9,6 +9,7 @@
 3. [Bloom Filter](./03-bloom-filter.md) — probabilistic membership check, false positive rate
 4. [Trie](./04-trie.md) — prefix tree для autocomplete, search
 5. [Sliding Window Counter](./05-sliding-window-counter.md) — count events за окно времени
+6. [External Merge Sort](./06-external-merge-sort.md) — сортировка датасета, не влезающего в память (диск как scratch, k-way merge)
 
 ## Какие выбирать темы для подготовки
 
@@ -19,6 +20,7 @@
 | Bloom filter | ★★★ | На senior — обязательно. Hot tech-companies. |
 | Sliding window | ★★★ | Rate limiting, аналитика real-time |
 | Trie | ★★ | Реже, но в search/autocomplete контексте |
+| External merge sort | ★★★ | «Данные не влезают в RAM» — big data, системные интервью |
 
 ## Общие принципы
 

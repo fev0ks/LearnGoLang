@@ -11,6 +11,7 @@
 5. [Pub/Sub In-Memory](./05-pubsub.md) — один publisher, много subscriber'ов
 6. [Singleflight](./06-singleflight.md) — дедупликация одинаковых concurrent запросов
 7. [Worker Pool (debug)](./07-worker-pool-debug.md) — найти 5 багов в типовой реализации, errCh, graceful shutdown, semaphore + паттерны
+8. [K максимальных из канала](./08-kmax-from-channel.md) — стриминговый top-K из `<-chan int` с отменой через `context` (select + min-heap, O(k) памяти)
 
 ## Что важно знать
 
