@@ -28,6 +28,7 @@
 - [12. Marketplace Vendor Notifications](./12-marketplace-vendor-notifications.md) — webhook delivery (Stripe-style), outbox + Kafka, per-vendor circuit breaker, HMAC signing, dead letter
 - [13. Avito / Classifieds](./13-avito-classifieds.md) — фасетный поиск (Elasticsearch), category-specific атрибуты (JSONB + денорм), Outbox→ES, медиа-пайплайн, горячее чтение карточек, view counter, модерация/антифрод
 - [14. Stock / Inventory Service](./14-stock-inventory-service.md) — двухфазный резерв (hold→commit/cancel) + TTL, защита от overselling (atomic условный декремент), горячий SKU при flash sale (бакетирование / Redis fast-path), шардинг по product_id, sync-репликация, чтение из кеша vs решение на записи
+- [15. TMS / Transport Management](./15-tms-transport-management.md) — нормализация разнородных источников (anti-corruption adapters), заказ↔маршрут many-to-many (консолидация ~1300/маршрут), типы маршрутов (line-haul/первая/последняя миля/смешанный), составной заказ как бизнес-сага (DAG этапов через хабы), назначение исполнителя (Redis geo + NX-лок), трекинг 10K водителей (stateless WS-gateway)
 
 ## Структура каждого кейса
 
