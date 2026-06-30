@@ -12,6 +12,7 @@
 - [Обработка ошибок PostgreSQL](#обработка-ошибок-postgresql)
 - [Context и timeout](#context-и-timeout)
 - [pgtype: нативные типы PostgreSQL](#pgtype-нативные-типы-postgresql)
+- [Партиционированные таблицы из Go](#партиционированные-таблицы-из-go)
 - [Interview-ready answer](#interview-ready-answer)
 
 ---
@@ -514,6 +515,159 @@ _, err = pool.Exec(ctx,
 
 ---
 
+## Партиционированные таблицы из Go
+
+Со стороны приложения партиционированная таблица — это **обычная таблица**: `INSERT`/`SELECT` идут в родителя, а PostgreSQL сам маршрутизирует строку в нужную партицию и отсекает лишние при чтении (partition pruning). Отдельного API в pgx для этого не нужно. Что действительно делают из Go — это **обслуживание партиций по расписанию**: заранее создать будущую, отцепить и удалить старую (retention). Механику самого партиционирования см. в [05-partitioning.md](./05-partitioning.md).
+
+### Вставка: маршрутизация прозрачна
+
+```go
+// INSERT в РОДИТЕЛЯ — PostgreSQL сам положит строку в orders_2024_06 по created_at
+_, err := pool.Exec(ctx,
+    "INSERT INTO orders (user_id, total, created_at) VALUES ($1, $2, $3)",
+    userID, total, createdAt,
+)
+```
+
+Подвох: если строка не попадает ни в одну партицию и нет `DEFAULT`-партиции — будет ошибка `23514 check_violation` («no partition of relation found for row»). Стоит обработать её явно (обычно = «забыли создать партицию на новый период»):
+
+```go
+var pgErr *pgconn.PgError
+if errors.As(err, &pgErr) && pgErr.Code == "23514" {
+    return fmt.Errorf("нет партиции под дату %s: %w", createdAt, err)
+}
+```
+
+### COPY в партиционированную таблицу
+
+`CopyFrom` в родителя работает — маршрутизация по партициям выполняется на сервере (PG11+):
+
+```go
+_, err := pool.CopyFrom(ctx,
+    pgx.Identifier{"orders"},                       // родитель, не конкретная партиция
+    []string{"user_id", "total", "created_at"},
+    pgx.CopyFromRows(rows),
+)
+```
+
+Для максимальной скорости массовой загрузки за один период грузят **прямо в партицию** (`pgx.Identifier{"orders_2024_06"}`) — меньше накладных расходов на routing.
+
+### Создание будущих партиций по расписанию
+
+Имена партиций — это идентификаторы, их нельзя передать как `$1`-параметр, поэтому DDL собирается строкой. Значения границ при этом **обязательно** экранировать через `pgx.Identifier.Sanitize()` для имени и форматировать даты безопасно:
+
+```go
+// ensureMonthlyPartition создаёт партицию на месяц вперёд, если её ещё нет.
+// Запускать кроном (например, раз в день): идемпотентно благодаря IF NOT EXISTS.
+func ensureMonthlyPartition(ctx context.Context, pool *pgxpool.Pool, month time.Time) error {
+    start := time.Date(month.Year(), month.Month(), 1, 0, 0, 0, 0, time.UTC)
+    end := start.AddDate(0, 1, 0)
+    name := fmt.Sprintf("orders_%04d_%02d", start.Year(), start.Month())
+
+    // имя таблицы — идентификатор, экранируем; границы — литералы дат (формат фиксирован, не из пользователя)
+    sql := fmt.Sprintf(
+        `CREATE TABLE IF NOT EXISTS %s PARTITION OF orders
+             FOR VALUES FROM ('%s') TO ('%s')`,
+        pgx.Identifier{name}.Sanitize(),
+        start.Format("2006-01-02"),
+        end.Format("2006-01-02"),
+    )
+    _, err := pool.Exec(ctx, sql)
+    return err
+}
+```
+
+### Retention: отцепить и удалить старые партиции
+
+```go
+// dropOldPartition архивирует и удаляет старую партицию.
+// DETACH CONCURRENTLY нельзя внутри транзакции — выполняем отдельным Exec.
+func dropOldPartition(ctx context.Context, pool *pgxpool.Pool, name, archiveDir string) error {
+    ident := pgx.Identifier{name}.Sanitize()
+
+    // 1. отцепить без долгого лока (партиция станет обычной таблицей)
+    if _, err := pool.Exec(ctx,
+        fmt.Sprintf("ALTER TABLE orders DETACH PARTITION %s CONCURRENTLY", ident),
+    ); err != nil {
+        return fmt.Errorf("detach %s: %w", name, err)
+    }
+
+    // 2. выгрузить в архив: COPY ... TO STDOUT идёт в io.Writer (файл) через
+    //    нижележащее соединение — высокий уровень pgxpool такого метода не даёт
+    f, err := os.Create(filepath.Join(archiveDir, name+".csv"))
+    if err != nil {
+        return fmt.Errorf("create archive %s: %w", name, err)
+    }
+    defer f.Close()
+
+    conn, err := pool.Acquire(ctx)
+    if err != nil {
+        return err
+    }
+    _, err = conn.Conn().PgConn().CopyTo(ctx, f,
+        fmt.Sprintf("COPY %s TO STDOUT (FORMAT csv, HEADER)", ident))
+    conn.Release()
+    if err != nil {
+        return fmt.Errorf("copy out %s: %w", name, err)
+    }
+    if err := f.Sync(); err != nil { // дождаться записи на диск до DROP
+        return fmt.Errorf("flush archive %s: %w", name, err)
+    }
+
+    // 3. теперь данные сохранены — удаляем таблицу
+    if _, err := pool.Exec(ctx, fmt.Sprintf("DROP TABLE %s", ident)); err != nil {
+        return fmt.Errorf("drop %s: %w", name, err)
+    }
+    return nil
+}
+```
+
+### Запрос: pruning включает ключ партиционирования
+
+```go
+// фильтр по created_at (ключ партиционирования) → план затронет только нужные партиции
+rows, err := pool.Query(ctx,
+    `SELECT id, user_id, total FROM orders
+     WHERE created_at >= $1 AND created_at < $2`,
+    monthStart, monthEnd,
+)
+// без условия по created_at PostgreSQL просканирует ВСЕ партиции — проверять EXPLAIN
+```
+
+> Перечисление партиций для обслуживания (что создавать/дропать) удобно тянуть из каталога: `SELECT inhrelid::regclass FROM pg_inherits WHERE inhparent = 'orders'::regclass;`
+
+---
+
 ## Interview-ready answer
 
-pgx — рекомендуемый драйвер PostgreSQL для Go: нативные типы, быстрее database/sql, pgxpool для connection pooling. Обязательные практики: всегда `defer rows.Close()`, проверять `rows.Err()` после цикла, передавать context. Транзакция: `defer tx.Rollback(ctx)` + `tx.Commit(ctx)` — Rollback после Commit безопасен (no-op). Batch: `pgx.Batch` + `pool.SendBatch` — несколько запросов за один round-trip. COPY через `pool.CopyFrom` — bulk insert в 5-50x быстрее INSERT. Ошибки PostgreSQL через `pgconn.PgError.Code` — `23505` unique violation, `40001` serialization failure. JSONB: pgx автоматически marshals/unmarshals Go struct. Для SERIALIZABLE — retry loop на `40001`. Для работы через PgBouncer в transaction mode: `QueryExecModeCacheDescribe` вместо default (no prepared statements).
+**1. Почему pgx, а не database/sql?**
+
+- pgx работает с нативным протоколом PostgreSQL напрямую: быстрее, поддерживает родные типы (JSONB, массивы, UUID, `numeric`) без прослойки `driver.Value`, имеет свой пул `pgxpool`; `database/sql` остаётся для совместимости с общим интерфейсом.
+
+**2. Какие обязательные практики при чтении строк?**
+
+- Всегда `defer rows.Close()` (иначе соединение не вернётся в пул), проверять `rows.Err()` после цикла `rows.Next()`, передавать `context.Context` для отмены по timeout; удобнее — `pgx.CollectRows` + `RowToStructByName`, который закрывает rows сам.
+
+**3. Как правильно оформить транзакцию?**
+
+- `tx, _ := pool.Begin(ctx)`, сразу `defer tx.Rollback(ctx)`, в конце `tx.Commit(ctx)` — Rollback после успешного Commit безопасен (no-op), поэтому defer не вредит; удобно обернуть в хелпер `WithTx(ctx, pool, func(tx) error {...})`.
+
+**4. Чем ускорить много операций?**
+
+- `pgx.Batch` + `SendBatch` — несколько запросов за один round-trip (меньше сетевых задержек); `pool.CopyFrom` (COPY-протокол) — bulk insert в 5–50× быстрее, чем построчный INSERT.
+
+**5. Как разбирать ошибки PostgreSQL?**
+
+- Через `errors.As` в `*pgconn.PgError` и `pgErr.Code`: `23505` unique violation (плюс `ConstraintName`, чтобы понять какой), `23503` FK, `40001` serialization failure, `40P01` deadlock; на `40001`/`40P01` нужен retry.
+
+**6. Что с JSONB и нативными типами?**
+
+- pgx сам marshals/unmarshals Go-struct в JSONB и обратно (`Scan(&meta)` / передача struct в `Exec`); для nullable — `pgtype.Timestamptz{Valid:bool}`, для массивов — `pgtype.Array[T]`.
+
+**7. Как работать через PgBouncer в transaction mode?**
+
+- Именованные prepared statements не живут между транзакциями, поэтому `cfg.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeCacheDescribe` (или `SimpleProtocol`); см. [09-connection-pooling.md](./09-connection-pooling.md).
+
+**8. Как из Go обслуживать партиционированные таблицы?**
+
+- `INSERT`/`SELECT`/`CopyFrom` идут в родителя — маршрутизация и pruning на сервере; из приложения по расписанию создают будущие партиции (`CREATE TABLE IF NOT EXISTS ... PARTITION OF`, имя через `pgx.Identifier.Sanitize()`) и снимают старые (`DETACH PARTITION ... CONCURRENTLY` + `DROP`, вне транзакции).

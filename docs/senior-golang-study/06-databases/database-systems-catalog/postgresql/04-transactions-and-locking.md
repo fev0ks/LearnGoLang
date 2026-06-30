@@ -91,13 +91,35 @@ COMMIT;
 
 ### Serialization anomaly (SSI)
 
-`SERIALIZABLE` в PostgreSQL реализован через SSI (Serializable Snapshot Isolation) — не блокирует, а отслеживает зависимости и при обнаружении цикла откатывает транзакцию с ошибкой `40001 serialization_failure`. Приложение должно повторять транзакцию.
+`SERIALIZABLE` в PostgreSQL реализован через **SSI (Serializable Snapshot Isolation)** — он не блокирует читателей (в отличие от классического strict-2PL с блокировками на чтение), а строит граф зависимостей между транзакциями и откатывает одну, если видит, что результат не эквивалентен ни одному последовательному порядку.
+
+**Как это работает под капотом.** SSI отслеживает **rw-зависимости** (read-write antidependency): транзакция T1 *прочитала* данные, которые T2 затем *изменила*. Опасный паттерн — «дуга на вход и дуга на выход» у одной транзакции:
+
+```text
+T1 --rw--> T2 --rw--> T3
+```
+
+Если у транзекции есть и входящая, и исходящая rw-дуга (pivot), возможна аномалия (write skew). PostgreSQL обнаруживает такой «опасный треугольник» и откатывает pivot с ошибкой `40001`.
+
+Чтобы засечь, что T1 прочитала, а T2 пишет, нужны **predicate locks** (SIREAD-локи): не настоящие блокировки, а **пометки «эта транзакция читала вот эти строки/диапазон»**. Они:
+- не блокируют чужие операции (читатель не мешает писателю);
+- укрупняются при нехватке памяти: строка → страница → таблица. Грубое укрупнение даёт больше «ложных» конфликтов → больше откатов `40001` под нагрузкой.
+
+```sql
+-- predicate-локи SSI видны как mode = 'SIReadLock' в pg_locks
+SELECT pid, relation::regclass, page, tuple, mode
+FROM pg_locks WHERE mode = 'SIReadLock';
+```
+
+Практические следствия:
+- SERIALIZABLE на чтении тоже может упасть с `40001` — даже у read-only транзакции (если она оказалась pivot). **Любая** транзакция под SERIALIZABLE обязана иметь retry-петлю.
+- Чем короче транзакции и точнее предикаты (есть индекс — лочится диапазон, нет — лочится больше), тем меньше ложных откатов.
 
 ```go
 for {
     err := doSerializableTransaction(ctx, pool)
     if isSerializationFailure(err) {
-        continue // retry
+        continue // retry — обязателен под SERIALIZABLE
     }
     break
 }
@@ -257,7 +279,13 @@ func runOnce(ctx context.Context, pool *pgxpool.Pool) error {
 
 ## Deadlock: как возникает и как лечить
 
-Deadlock — A ждёт B, B ждёт A.
+Deadlock — A ждёт B, B ждёт A. Каждая держит ресурс, нужный другой, и ни одна не отпустит, пока не получит свой, — взаимная блокировка по циклу:
+
+```mermaid
+graph LR
+    A["tx A<br/>держит row 1"] -->|"ждёт row 2"| B["tx B<br/>держит row 2"]
+    B -->|"ждёт row 1"| A
+```
 
 ```sql
 -- Транзакция A:
@@ -271,7 +299,7 @@ UPDATE accounts SET balance = balance - 100 WHERE id = 2;  -- блокирует
 UPDATE accounts SET balance = balance + 100 WHERE id = 1;  -- ждёт строку 1 → DEADLOCK
 ```
 
-PostgreSQL автоматически обнаруживает deadlock (через `deadlock_timeout`, default 1s) и откатывает одну из транзакций с ошибкой `40P01 deadlock_detected`.
+PostgreSQL не предотвращает deadlock заранее, а **обнаруживает** его: транзакция, прождавшая блокировку дольше `deadlock_timeout` (default 1s), запускает поиск цикла в графе ожиданий (wait-for graph). Если цикл найден — одна из транзакций (обычно дешевле откатываемая) получает ошибку `40P01 deadlock_detected` и откатывается, разрывая цикл.
 
 Как избежать:
 1. **Фиксированный порядок блокировки** — всегда обновлять строки в одном порядке (по id).
@@ -374,4 +402,26 @@ ORDER BY l.pid;
 
 ## Interview-ready answer
 
-PostgreSQL поддерживает три уровня изоляции: READ COMMITTED (default) — снапшот per-statement, REPEATABLE READ — снапшот per-transaction (нет non-repeatable read и phantom read), SERIALIZABLE — SSI, нет write skew но нужен retry на `40001`. Row locks: FOR UPDATE блокирует строку для конкурентного UPDATE, SKIP LOCKED пропускает заблокированные строки — стандартный паттерн для queue workers с PostgreSQL. DDL `ALTER TABLE` требует ACCESS EXCLUSIVE — для production использовать `ADD COLUMN` без DEFAULT, `CREATE INDEX CONCURRENTLY`, `NOT VALID` FK. Deadlock: PostgreSQL обнаруживает автоматически за `deadlock_timeout` (1s), откатывает одну транзакцию. Предотвращение: фиксированный порядок блокировки строк. Advisory locks — для distributed mutex без дополнительных систем.
+**1. Какие isolation levels в PostgreSQL?**
+
+- READ COMMITTED (снапшот per-statement), REPEATABLE READ (снапшот per-transaction, нет non-repeatable и phantom read), SERIALIZABLE (SSI, нет write skew).
+
+**2. Как устроен SERIALIZABLE (SSI)?**
+
+- Не блокирует читателей: ставит predicate-локи (SIReadLock), отслеживает rw-antidependency и откатывает «опасную» транзакцию-pivot с `40001` → retry обязателен даже для read-only, а грубое укрупнение локов (нет индекса) повышает число ложных откатов.
+
+**3. Чем FOR UPDATE отличается от SKIP LOCKED?**
+
+- FOR UPDATE блокирует строку и заставляет конкурентов ждать; `FOR UPDATE SKIP LOCKED` пропускает занятые строки — стандартный паттерн очереди задач на нескольких воркерах.
+
+**4. Как избежать deadlock?**
+
+- Фиксированный порядок блокировки строк (по id), короткие транзакции, ранний `SELECT FOR UPDATE`; PostgreSQL сам находит цикл за `deadlock_timeout` (1s) и откатывает одну tx с `40P01`.
+
+**5. Как делать DDL без долгих блокировок?**
+
+- `ALTER TABLE` берёт ACCESS EXCLUSIVE; в production — `ADD COLUMN` без волатильного DEFAULT, `CREATE INDEX CONCURRENTLY`, `ADD CONSTRAINT ... NOT VALID` + отдельный `VALIDATE`.
+
+**6. Зачем advisory locks?**
+
+- Distributed mutex средствами самой БД (`pg_advisory_lock`/`pg_try_advisory_lock`) — например, чтобы только один инстанс выполнял cron-задачу.

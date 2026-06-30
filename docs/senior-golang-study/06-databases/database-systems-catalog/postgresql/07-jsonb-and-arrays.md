@@ -4,6 +4,8 @@
 
 - [JSON vs JSONB](#json-vs-jsonb)
 - [JSONB операторы](#jsonb-операторы)
+- [SQL JSON path и операторы jsonpath](#sql-json-path-и-операторы-jsonpath)
+- [SQL JSON конструкторы и JSON_TABLE](#sql-json-конструкторы-и-json_table)
 - [Индексы для JSONB](#индексы-для-jsonb)
 - [Массивы (Arrays)](#массивы-arrays)
 - [Полнотекстовый поиск (FTS)](#полнотекстовый-поиск-fts)
@@ -122,6 +124,92 @@ SELECT jsonb_object_agg(key, value) FROM ...;
 
 -- собрать JSONB массив
 SELECT jsonb_agg(attributes) FROM products WHERE ...;
+```
+
+---
+
+## SQL JSON path и операторы jsonpath
+
+**Зачем.** Операторы `->`, `@>` хороши для простых проверок, но не умеют условий внутри документа («есть ли тег с `priority > 5`», «любой элемент массива дороже 100»). Для этого есть стандартный язык **SQL/JSON path** (тип `jsonpath`, PG12+) — аналог XPath для JSON.
+
+Базовый синтаксис пути: `$` — корень, `.key` — поле, `[*]` — все элементы массива, `?(...)` — фильтр, `@` — текущий элемент в фильтре.
+
+```sql
+-- jsonb_path_query: вернуть все значения по пути
+SELECT jsonb_path_query(attributes, '$.tags[*]') FROM products WHERE id = 1;
+-- "laptop"
+-- "apple"
+
+-- фильтр: теги, начинающиеся на 'a' (предикат внутри пути)
+SELECT jsonb_path_query(attributes, '$.tags[*] ? (@ like_regex "^a")') FROM products;
+
+-- обращение к вложенным полям + арифметика/сравнение
+SELECT jsonb_path_query(attributes, '$.specs.cores ? (@ > 8)') FROM products;
+```
+
+Два оператора для `WHERE` (оба индексируются GIN с `jsonb_ops`):
+
+```sql
+-- @? : существует ли хоть один матч пути (возвращает bool)
+SELECT * FROM products WHERE attributes @? '$.specs.cores ? (@ >= 12)';
+
+-- @@ : jsonpath-ПРЕДИКАТ истинен (путь сразу содержит условие, без ?(...))
+SELECT * FROM products WHERE attributes @@ '$.specs.cpu == "M3"';
+```
+
+Разница: `@?` спрашивает «нашёлся ли элемент по пути-с-фильтром», `@@` вычисляет путь как булев предикат. Для `like_regex`, диапазонов и арифметики внутри JSON это единственный способ без распаковки документа в строки.
+
+```sql
+-- strict/lax: lax (default) прощает обращение к несуществующим полям, strict — ошибка
+SELECT jsonb_path_query(attributes, 'strict $.missing.field') FROM products;  -- ошибка пути
+SELECT jsonb_path_query(attributes, 'lax $.missing.field') FROM products;     -- пусто, без ошибки
+```
+
+---
+
+## SQL JSON конструкторы и JSON_TABLE
+
+PostgreSQL 16–17 добавили стандартные SQL/JSON-функции — раньше их заменяли `jsonb_build_*` и ручная распаковка.
+
+**Проверка и извлечение (PG16):**
+
+```sql
+-- IS JSON: проверить, что текст — валидный JSON (и какого вида)
+SELECT '{"a":1}' IS JSON OBJECT;        -- true
+SELECT '[1,2]'   IS JSON ARRAY;         -- true
+SELECT 'oops'    IS JSON;               -- false
+
+-- JSON_EXISTS / JSON_VALUE / JSON_QUERY — типобезопасное извлечение по jsonpath
+SELECT
+    JSON_EXISTS(attributes, '$.specs.cpu')              AS has_cpu,    -- bool
+    JSON_VALUE(attributes, '$.specs.cores' RETURNING int) AS cores,    -- скаляр нужного типа
+    JSON_QUERY(attributes, '$.tags')                     AS tags_json  -- фрагмент JSON
+FROM products;
+```
+
+`JSON_VALUE` возвращает **скаляр** (с приведением через `RETURNING`), `JSON_QUERY` — **объект/массив** как JSON. Это чище и строже, чем `->>`/`#>>` с ручным `::int`.
+
+**JSON_TABLE (PG17)** — разложить JSON-документ в реляционную таблицу прямо в `FROM`. Заменяет связки `jsonb_array_elements` + `->>`:
+
+```sql
+-- каждый элемент массива tags → строка таблицы с типизированными колонками
+SELECT p.id, t.tag, t.ord
+FROM products p,
+     JSON_TABLE(p.attributes, '$.tags[*]'
+         COLUMNS (
+             ord  FOR ORDINALITY,              -- порядковый номер элемента
+             tag  text PATH '$'                -- значение элемента
+         )) AS t;
+
+-- разложить массив объектов в плоские строки
+SELECT j.*
+FROM orders o,
+     JSON_TABLE(o.payload, '$.items[*]'
+         COLUMNS (
+             sku    text    PATH '$.sku',
+             qty    int     PATH '$.qty',
+             price  numeric PATH '$.price'
+         )) AS j;
 ```
 
 ---
@@ -351,4 +439,30 @@ CREATE TABLE products (
 
 ## Interview-ready answer
 
-JSONB хранит JSON в бинарном формате — быстрый read, поддерживает GIN индексы. Оператор `@>` — containment check (есть ли ключ/значение в JSON). GIN индекс с `jsonb_path_ops` — только для `@>`, меньше размер. Expression index по конкретному ключу — эффективнее GIN при высокой selectivity. Массивы в PostgreSQL нативные: операторы `@>`, `&&`, `ANY()`, GIN индекс. Полнотекстовый поиск через `tsvector`/`tsquery`, GENERATED ALWAYS STORED вычисляемая колонка для FTS вектора, `ts_rank` для ранжирования. pg_trgm — fuzzy search по триграммам, ускоряет LIKE и `%` оператор похожести. Когда использовать JSONB: динамическая схема, редкие запросы по полям; нормализовать: фиксированная схема, частые запросы, joins, constraints.
+**1. Чем jsonb отличается от json?**
+
+- jsonb — бинарный разобранный формат: быстрый read и GIN-индексы; json — текст as-is (быстрее запись, но без индексов, с сохранением порядка и дубликатов ключей). Для запросов всегда jsonb.
+
+**2. Что делает оператор `@>`?**
+
+- Containment — содержит ли документ заданный ключ/значение/элемент массива; индексируется GIN.
+
+**3. Какой GIN-opclass для JSONB выбрать?**
+
+- `jsonb_path_ops` — только `@>`, меньше и быстрее; `jsonb_ops` (default) — ещё `?`, `?|`, `?&` и jsonpath-операторы.
+
+**4. Как делать условия внутри документа?**
+
+- Язык SQL/JSON path (`jsonpath`, PG12) с фильтрами `?(...)`, `like_regex`, диапазонами; операторы `@?` (есть ли матч) и `@@` (предикат истинен), оба под GIN.
+
+**5. Что нового в SQL/JSON (PG16–17)?**
+
+- `IS JSON`, типобезопасные `JSON_VALUE`/`JSON_QUERY`/`JSON_EXISTS` и `JSON_TABLE` — раскладка JSON в реляционные строки прямо в `FROM`.
+
+**6. Чем индексировать массивы и LIKE?**
+
+- Массивы — GIN (`@>`, `&&`, `ANY`); `LIKE '%..%'` и похожесть — pg_trgm (GIN/GiST по триграммам).
+
+**7. JSONB vs нормализация?**
+
+- JSONB — динамическая/редко запрашиваемая схема, метаданные; нормализация — фиксированная схема, частые запросы/joins/constraints; на практике гибрид (горячие поля колонками, остальное в JSONB). Массивы в PostgreSQL нативные: операторы `@>`, `&&`, `ANY()`, GIN индекс. Полнотекстовый поиск через `tsvector`/`tsquery`, GENERATED ALWAYS STORED вычисляемая колонка для FTS вектора, `ts_rank` для ранжирования. pg_trgm — fuzzy search по триграммам, ускоряет LIKE и `%` оператор похожести. Когда использовать JSONB: динамическая схема, редкие запросы по полям; нормализовать: фиксированная схема, частые запросы, joins, constraints.

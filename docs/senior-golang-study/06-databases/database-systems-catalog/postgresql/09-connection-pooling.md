@@ -254,4 +254,26 @@ SELECT count(*), state FROM pg_stat_activity GROUP BY state ORDER BY count DESC;
 
 ## Interview-ready answer
 
-PostgreSQL — process-per-connection: каждое соединение ~5-10MB процесс. При 500+ прямых соединениях — значительный overhead. Решение: пул перед базой. PgBouncer в transaction mode: держит 20-30 реальных соединений к PG, принимает тысячи от приложений, соединение возвращается в пул после каждой транзакции. Ограничения transaction mode: нельзя SET, именованные prepared statements, LISTEN/NOTIFY. В Go — pgxpool для пула на стороне приложения: `MaxConns = 10-20`, `MaxConnLifetime`, `MaxConnIdleTime`. При множестве инстансов приложения — PgBouncer агрегирует пулы. Правило расчёта: MaxConns ≈ CPU_cores × 2, не нужно 200+ соединений к PG.
+**1. Почему соединения в PostgreSQL дорогие?**
+
+- Process-per-connection: каждое соединение — отдельный процесс ~5–10 MB + context switching и свой кеш каталога; при сотнях прямых соединений overhead значителен.
+
+**2. Что даёт PgBouncer в transaction mode?**
+
+- Принимает тысячи клиентских соединений, держит к PG лишь 20–30 реальных, возвращая соединение в пул после каждой транзакции — максимальное мультиплексирование.
+
+**3. Чего нельзя в transaction mode?**
+
+- Сессионных вещей: `SET`/`RESET`, именованные prepared statements, `LISTEN`/`NOTIFY`, session-level advisory locks — они привязаны к соединению.
+
+**4. Как настроить pgxpool?**
+
+- `MaxConns` ≈ 10–20, `MinConns`, `MaxConnLifetime`, `MaxConnIdleTime`, `HealthCheckPeriod`; для PgBouncer transaction mode — `QueryExecModeCacheDescribe`/`SimpleProtocol`.
+
+**5. Как считать число соединений?**
+
+- `MaxConns ≈ CPU_cores × 2`; bottleneck — диск и CPU, а не число соединений, 200+ к PG не нужны; суммарный пул всех инстансов не должен превышать `max_connections`.
+
+**6. pgxpool или PgBouncer?**
+
+- Один-три инстанса — хватит pgxpool; много инстансов / общий доступ нескольких сервисов / k8s с частым scale — PgBouncer агрегирует пулы перед базой.

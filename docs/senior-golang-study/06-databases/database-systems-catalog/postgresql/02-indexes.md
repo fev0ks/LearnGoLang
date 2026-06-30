@@ -714,4 +714,30 @@ FROM pg_index JOIN pg_class ON pg_class.oid = pg_index.indexrelid;
 
 ## Interview-ready answer
 
-Дефолтный индекс в PostgreSQL — B-tree: сбалансированное дерево, поддерживает equality, range, ORDER BY, O(log n) поиск. Для JSONB и массивов — GIN (инвертированный индекс по элементам). Для геометрии и диапазонов — GiST. Для append-only таблиц с монотонным timestamp — BRIN (хранит min/max по блокам, очень маленький). Partial index уменьшает размер индексируя только нужное подмножество строк. Expression index индексирует результат функции. INCLUDE создаёт covering index для Index Only Scan без чтения heap. Multi-column: первым идёт поле equality или наибольшей selectivity. В production — только `CREATE INDEX CONCURRENTLY`. Неиспользуемые индексы удалять (overhead на write), смотреть `idx_scan = 0` в `pg_stat_user_indexes`.
+**1. Какой индекс по умолчанию и что он умеет?**
+
+- B-tree — сбалансированное дерево (B+tree): equality, range, `ORDER BY` без сортировки, поиск за O(log n); покрывает большинство случаев.
+
+**2. Когда GIN, GiST, BRIN?**
+
+- GIN — инвертированный индекс по элементам (JSONB/массивы/FTS/`LIKE '%..%'`); GiST — геометрия/диапазоны/KNN/exclusion; BRIN — append-only с монотонным ключом (min/max по блокам, очень маленький).
+
+**3. Что такое partial и expression index?**
+
+- Partial индексирует только подмножество строк по `WHERE` (меньше размер); expression — результат функции (`LOWER(email)`); запрос должен повторять то же условие/выражение.
+
+**4. Что даёт covering index (INCLUDE)?**
+
+- Кладёт дополнительные колонки в leaf без участия в ключе → Index Only Scan без чтения heap (если страница all-visible).
+
+**5. Как выбрать порядок колонок в multi-column?**
+
+- Первым — поле equality-предиката или наибольшей selectivity; индекс используется для prefix, но не для условия только по «хвостовой» колонке.
+
+**6. Как строить индексы в production?**
+
+- Только `CREATE INDEX CONCURRENTLY` (не блокирует DML); при падении остаётся INVALID-индекс — дропнуть и пересоздать.
+
+**7. Как находить лишние индексы?**
+
+- `idx_scan = 0` в `pg_stat_user_indexes` за длительный период — кандидаты на удаление (каждый индекс — overhead на write и vacuum).

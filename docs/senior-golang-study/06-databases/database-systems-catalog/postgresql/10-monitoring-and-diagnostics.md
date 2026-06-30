@@ -8,10 +8,12 @@
 - [pg_stat_user_indexes: использование индексов](#pg_stat_user_indexes-использование-индексов)
 - [pg_locks: блокировки](#pg_locks-блокировки)
 - [pg_stat_statements: топ запросов](#pg_stat_statements-топ-запросов)
+- [pg_stat_io: диагностика ввода-вывода](#pg_stat_io-диагностика-ввода-вывода)
 - [Диагностика bloat](#диагностика-bloat)
 - [Диагностика репликации](#диагностика-репликации)
 - [Production checklist](#production-checklist)
-- [Алерты](#алерты)
+- [Алерты (примерные пороги)](#алерты-примерные-пороги)
+- [Инструменты](#инструменты)
 
 ---
 
@@ -28,6 +30,7 @@
 | `pg_stat_subscription` | Состояние подписок (logical replication) |
 | `pg_replication_slots` | Репликационные слоты и их lag |
 | `pg_stat_bgwriter` | Фоновый writer: checkpoints, buffer alloc |
+| `pg_stat_io` | I/O в разрезе backend_type/context (PG16+) |
 | `pg_stat_database` | Статистика per-database |
 
 ---
@@ -203,6 +206,31 @@ WHERE shared_blks_read > 1000
 ORDER BY shared_blks_read DESC
 LIMIT 10;
 ```
+
+---
+
+## pg_stat_io: диагностика ввода-вывода
+
+`pg_stat_io` (PG16+) — отдельное представление, показывающее I/O **в разрезе типа активности** (`backend_type` × `context` × `object`). До PG16 такой детализации не было: непонятно, кто именно грузит диск — обычные запросы, autovacuum, checkpointer или bgwriter.
+
+```sql
+-- кто и сколько читает с диска (reads — мимо shared_buffers)
+SELECT backend_type, object, context,
+       reads, round(read_time::numeric, 0) AS read_ms,
+       writes, round(write_time::numeric, 0) AS write_ms,
+       extends                                  -- расширения файла (рост таблиц/индексов)
+FROM pg_stat_io
+WHERE reads > 0 OR writes > 0
+ORDER BY reads DESC;
+```
+
+Что искать:
+- **`context = 'normal'`, большой `reads`** у `backend_type='client backend'` — рабочая нагрузка не помещается в `shared_buffers` / нет нужных индексов.
+- **`context = 'vacuum'`** с большим I/O — тяжёлый autovacuum, кандидат на throttling-тюнинг.
+- **`evictions`** растут — буферный кеш под давлением, страницы вытесняются чаще, чем хотелось бы.
+- Колонка `read_time`/`write_time` заполняется только при `track_io_timing = on`.
+
+Это первый view, по которому видно **источник** I/O, а не только его суммарный объём (`pg_stat_database`). Для пер-запросного I/O по-прежнему `pg_stat_statements` + `BUFFERS`.
 
 ---
 

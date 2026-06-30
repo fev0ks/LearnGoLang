@@ -339,4 +339,26 @@ random_page_cost = 1.1
 
 ## Interview-ready answer
 
-Ключевые параметры PostgreSQL: `shared_buffers` — 25–40% RAM (кеш страниц), `work_mem` — память per sort/hash operation (не завышать глобально, лучше per-query через SET LOCAL), `effective_cache_size` — 75% RAM (подсказка планировщику об ОС кеше). Для SSD `random_page_cost = 1.1` — критично, иначе планировщик выбирает Seq Scan. pg_stat_statements — расширение для сбора агрегированной статистики запросов: топ по total_exec_time, high stddev = нестабильный план, low hit_rate = нет в кеше. Slow query log: `log_min_duration_statement = 1000`. Диагностика конкретного запроса: `EXPLAIN (ANALYZE, BUFFERS)`. Признаки проблем: `external merge Disk` в Sort → нехватка work_mem; `Seq Scan` на большой таблице → нет индекса или неправильный random_page_cost; `Rows Removed by Filter: много` → нет покрывающего индекса.
+**1. Ключевые параметры памяти?**
+
+- `shared_buffers` — 25–40% RAM (кеш страниц), `work_mem` — память на одну sort/hash-операцию (не завышать глобально, лучше per-query через `SET LOCAL`), `effective_cache_size` — ~75% RAM (подсказка планировщику об ОС-кеше).
+
+**2. Что критично настроить для SSD?**
+
+- `random_page_cost = 1.1` (default 4.0 для HDD) — иначе планировщик завышает стоимость Index Scan и уходит в Seq Scan; плюс повышенный `effective_io_concurrency`.
+
+**3. Зачем pg_stat_statements?**
+
+- Агрегированная статистика по нормализованным запросам: топ по `total_exec_time`, высокий stddev = нестабильный план, низкий cache hit = читает с диска.
+
+**4. Как ловить медленные запросы?**
+
+- `log_min_duration_statement = 1000` (логировать >1с) + `EXPLAIN (ANALYZE, BUFFERS)` для конкретного запроса.
+
+**5. Какие признаки проблем в плане?**
+
+- `external merge Disk` в Sort → мало `work_mem`; `Seq Scan` на большой таблице → нет индекса или неверный `random_page_cost`; большой `Rows Removed by Filter` → нет покрывающего индекса.
+
+**6. Как ускорить bulk load?**
+
+- `SET synchronous_commit = off`, повышенный `work_mem`, `UNLOGGED`-таблица на время загрузки, COPY вместо INSERT.
