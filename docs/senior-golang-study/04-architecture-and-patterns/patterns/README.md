@@ -15,6 +15,7 @@ Go-specific паттерны на уровне кода и архитектур�
 - [07. Проектирование REST API](./07-rest-api-design.md) — ресурсы vs действия, именование URL, HTTP-методы, path/query/body, типичные ошибки и как их избежать
 - [08. Graceful Shutdown](./08-graceful-shutdown.md) — перехват SIGTERM, `signal.NotifyContext`, HTTP + gRPC + worker shutdown, оркестрация компонентов, таймауты, частые ошибки
 - [09. Saga и Outbox: distributed transactions](./09-saga-and-outbox.md) — dual write проблема, transactional outbox с Go-реализацией, inbox dedup, CDC (Debezium), choreography vs orchestration saga, compensation logic, Temporal.io
+- [10. DRY, KISS, YAGNI](./10-dry-kiss-yagni.md) — три принципа дизайна с senior-акцентом: когда каждый **вредит**, конфликты между собой и с SOLID/OCP, rule of three, AHA, необратимые решения
 
 ## Как читать
 
@@ -27,6 +28,7 @@ Go-specific паттерны на уровне кода и архитектур�
 7. `07` — REST API design: ресурсы, правила именования, типичные ошибки из реального опыта
 8. `08` — Graceful shutdown: как корректно остановить сервис под K8s, не теряя запросы и задачи
 9. `09` — Saga и Outbox: distributed transactions через надёжную доставку событий и компенсирующие действия
+10. `10` — DRY/KISS/YAGNI: не лозунги, а где принципы вредят и как разрешать их конфликты с SOLID
 
 ## Что важно уметь объяснить
 
