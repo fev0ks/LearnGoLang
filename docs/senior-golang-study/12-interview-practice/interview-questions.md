@@ -9,9 +9,10 @@
 - [Брокеры сообщений](#брокеры-сообщений)
 - [Сеть и HTTP](#сеть-и-http)
 - [ОС, процессы, память](#ос-процессы-память)
-- [Контейнеры и Kubernetes](#контейнеры-и-kubernetes)
+- [Контейнеры, Docker и Kubernetes](#контейнеры-docker-и-kubernetes)
 - [Архитектура и практики](#архитектура-и-практики)
 - [Инструменты, ORM и эксплуатация](#инструменты-orm-и-эксплуатация)
+- [Observability](#observability)
 - [Алгоритмы и структуры данных](#алгоритмы-и-структуры-данных)
 
 ---
@@ -229,7 +230,18 @@
 
 **Что делать, если запрос тормозит?**
 
-- Сначала посмотреть **план**: `EXPLAIN (ANALYZE, BUFFERS)` — найти узкое место (Seq Scan по большой таблице, дорогой Sort/Hash, расхождение оценки и факта по строкам, вложенные циклы на больших наборах). Дальше по диагнозу: добавить/поправить **индекс** (в т.ч. составной по фильтру+сортировке), переписать запрос (убрать функции над индексируемым столбцом, лишние `DISTINCT`/подзапросы, N+1), обновить статистику `ANALYZE`, заменить OFFSET-пагинацию на keyset, ограничить выборку. Если данные большие — партиционирование/материализованные представления. Принцип: правка → перемерить план. См. [postgresql/03-query-planning.md](../06-databases/database-systems-catalog/postgresql/03-query-planning.md).
+- (Кейс «запрос **стабильно** тормозит».) Сначала посмотреть **план**: `EXPLAIN (ANALYZE, BUFFERS)` — найти узкое место (Seq Scan по большой таблице, дорогой Sort/Hash, расхождение оценки и факта по строкам, вложенные циклы на больших наборах). Дальше по диагнозу: добавить/поправить **индекс** (в т.ч. составной по фильтру+сортировке), переписать запрос (убрать функции над индексируемым столбцом, лишние `DISTINCT`/подзапросы, N+1), обновить статистику `ANALYZE`, заменить OFFSET-пагинацию на keyset, ограничить выборку. Если данные большие — партиционирование/материализованные представления. Принцип: правка → перемерить план. См. [postgresql/03-query-planning.md](../06-databases/database-systems-catalog/postgresql/03-query-planning.md).
+
+**Запрос обычно работает быстро, но иногда тормозит — что делать?**
+
+- Если запрос **непостоянно** медленный, дело обычно **не в тексте запроса**, а в окружении/состоянии — по одному `EXPLAIN` не поймать, нужно **поймать медленный случай в момент, когда он тормозит**. Инструменты: `pg_stat_statements` (смотреть `mean`/`max`/`stddev` времени — **высокий stddev = плавающая латентность**), `auto_explain` с `log_min_duration_statement` (логирует реальный план именно медленного запуска), `pg_stat_activity`/wait events. Типичные причины:
+  - **Нестабильный план / parameter sniffing** — на разных значениях параметров планировщик выбирает разные планы (перекос данных); для одних значений план плохой. Проверить план на «плохих» параметрах; в PG учитывать generic vs custom plan у prepared statements (`plan_cache_mode`).
+  - **Блокировки/ожидание локов** — иногда запрос ждёт строку/таблицу, занятую другой транзакцией. Смотреть `pg_locks`, wait events, долгие транзакции, «горячие» строки.
+  - **Холодный кэш** — данных нет в `shared_buffers`/OS-кэше → чтение с диска. В `EXPLAIN (ANALYZE, BUFFERS)` виден `shared read` vs `hit` (первый прогон медленный, повторные быстрые).
+  - **Пики нагрузки / фоновые процессы** — насыщение CPU/IO в час пик, идущие `autovacuum`/`checkpoint`, соседние тяжёлые запросы. Коррелировать медленные моменты с системными метриками.
+  - **Исчерпание пула соединений** — время уходит на ожидание коннекта, а не на сам запрос. Смотреть метрики пула.
+  - **Раздувание таблицы (bloat)** — накопились dead tuples, скан читает больше; лечится `VACUUM`.
+- Итог: **стабильно медленный** → чинить запрос/индекс (см. выше); **иногда медленный** → искать нестабильный план, локи, кэш, нагрузку — и ловить проблему в момент проявления. См. [postgresql/10-monitoring-and-diagnostics.md](../06-databases/database-systems-catalog/postgresql/10-monitoring-and-diagnostics.md) и [postgresql/04-transactions-and-locking.md](../06-databases/database-systems-catalog/postgresql/04-transactions-and-locking.md).
 
 **Чем отличается EXPLAIN от EXPLAIN ANALYZE?**
 
@@ -270,6 +282,12 @@
 **Как заблокировать строку?**
 
 - `SELECT ... FOR UPDATE` внутри транзакции — берёт **эксклюзивную блокировку** на выбранные строки до конца транзакции: другие транзакции, попытавшиеся сделать `FOR UPDATE`/`UPDATE`/`DELETE` той же строки, **ждут**. Варианты: `FOR NO KEY UPDATE` (слабее), `FOR SHARE` (разделяемая — читать можно, менять нельзя), `FOR UPDATE NOWAIT` (не ждать — сразу ошибка) и `FOR UPDATE SKIP LOCKED` (пропустить занятые — удобно для очередей задач в БД). Применяют для паттерна «прочитал → проверил → обновил» без гонок. См. [relational-databases-and-sql/02-transactions-isolation-and-locks.md](../06-databases/relational-databases-and-sql/02-transactions-isolation-and-locks.md).
+
+**Что такое оптимистичные и пессимистичные блокировки?**
+
+- Две стратегии управления конкурентным доступом. **Пессимистичная** — «конфликт вероятен» → **блокируем сразу**: перед изменением берём лок на строку (`SELECT … FOR UPDATE`), другие ждут. Конфликтов не будет, но падает параллелизм и есть риск deadlock/долгих ожиданий; хороша при **высокой конкуренции** за одни строки (списание денег, склад).
+- **Оптимистичная** — «конфликт редок» → **не блокируем**, а проверяем при коммите: читаем строку с колонкой **`version`/timestamp**, изменяем как `UPDATE … SET ..., version = version + 1 WHERE id = ? AND version = ?`. Если затронуто **0 строк** — значит кто-то уже обновил (версия не совпала) → **конфликт → повторить или отдать ошибку**. Реализуется обычно на **уровне приложения/ORM** (не блокировками БД). Хороша при **низкой конкуренции** и read-heavy.
+- Связь: пессимистичная = блокировки БД (`FOR UPDATE`, см. выше); **Serializable (SSI) в PostgreSQL — по сути оптимистичный** контроль, конфликт ловится откатом `40001` на коммите. См. [relational-databases-and-sql/02-transactions-isolation-and-locks.md](../06-databases/relational-databases-and-sql/02-transactions-isolation-and-locks.md).
 
 ## Брокеры сообщений
 
@@ -379,6 +397,43 @@
 
 - По **IP-адресу назначения** из заголовка пакета, сверяясь с **таблицей маршрутизации**: ищет подходящий маршрут по правилу **longest prefix match** (самая «узкая» подходящая подсеть выигрывает), берёт next-hop и исходящий интерфейс; если конкретного маршрута нет — отправляет в маршрут по умолчанию (default gateway). Попутно уменьшает TTL (защита от петель), при необходимости применяет NAT. Маршруты заполняются статически или протоколами (OSPF, BGP). См. [linux/03-tcp-sockets.md](../10-devops-and-observability/linux/03-tcp-sockets.md).
 
+**Как TCP гарантирует доставку пакетов?**
+
+- Набором механизмов: каждый байт нумеруется (**sequence numbers**), получатель шлёт **ACK** на принятое; неподтверждённое по таймауту (или при 3 дублирующих ACK) — **ретрансмитится**; порядок восстанавливается по номерам, дубликаты отбрасываются, целостность проверяется контрольной суммой. Плюс **контроль потока** (sliding window — не завалить получателя) и **контроль перегрузки** (slow start, congestion avoidance — не завалить сеть). Соединение устанавливается 3-way handshake (SYN/SYN-ACK/ACK). См. [linux/03-tcp-sockets.md](../10-devops-and-observability/linux/03-tcp-sockets.md).
+
+**Почему DNS работает поверх UDP, а не TCP?**
+
+- Запрос-ответ DNS маленький и укладывается в один датаграмм — UDP даёт минимальную латентность без оверхеда на установку соединения (нет 3-way handshake), что важно, т.к. DNS дёргается на каждый резолв. Потеря не страшна — клиент просто переспросит. TCP для DNS **тоже используется**: когда ответ большой (не влезает — раньше >512 байт, с EDNS больше) или при zone transfer между серверами, и для DNS-over-TLS/HTTPS. То есть UDP по умолчанию ради скорости, TCP как фолбэк. См. [request-lifecycle/02-dns-resolution-and-getting-ip.md](../08-networking-and-api/request-lifecycle/02-dns-resolution-and-getting-ip.md).
+
+**Что такое QUIC?**
+
+- Транспортный протокол поверх **UDP**, на котором работает **HTTP/3**. Решает проблемы TCP: встроенный **TLS 1.3** (шифрование и рукопожатие за 0-1 RTT — быстрее установка), **мультиплексирование стримов без head-of-line blocking** (потеря в одном стриме не тормозит другие, в отличие от TCP), **connection migration** (переключение Wi-Fi↔LTE без разрыва соединения по connection id). Надёжность и контроль перегрузки реализованы в самом QUIC (в user space), а не в ядре. См. [protocols/11-protocol-comparison.md](../08-networking-and-api/protocols/11-protocol-comparison.md).
+
+**Какие есть HTTP-методы и что про идемпотентность?**
+
+- `GET` (получить), `POST` (создать/действие), `PUT` (заменить целиком), `PATCH` (частично изменить), `DELETE` (удалить), `HEAD` (как GET, без тела), `OPTIONS` (возможности/CORS preflight). **Безопасные** (не меняют состояние): GET/HEAD/OPTIONS. **Идемпотентные** (повтор даёт тот же результат): GET/PUT/DELETE/HEAD/OPTIONS. **Не идемпотентны:** POST и обычно PATCH — поэтому для их безопасного ретрая нужен idempotency-key. Коды: 2xx успех (200/201/204), 3xx редиректы (301/304), 4xx клиент (400/401/403/404/409/429), 5xx сервер (500/502/503/504). См. [api-design/03-http-methods.md](../08-networking-and-api/api-design/03-http-methods.md).
+
+**В чём разница HTTP/1.1, HTTP/2 и HTTP/3?**
+
+- **HTTP/1.1** — текстовый, постоянные соединения (keep-alive), но **head-of-line blocking**: ответы по соединению строго по очереди. **HTTP/2** — бинарный фрейминг, **мультиплексирование** много запросов в одном TCP-соединении, сжатие заголовков HPACK, server push; HoL убран на уровне HTTP, но остаётся на уровне **TCP** (потеря сегмента тормозит все стримы). **HTTP/3** — поверх **QUIC (UDP)**: убирает и TCP-HoL (стримы независимы), встроенный TLS 1.3, быстрее установка и connection migration. См. [protocols/11-protocol-comparison.md](../08-networking-and-api/protocols/11-protocol-comparison.md).
+
+**Как устроен TLS-handshake и проверка сертификата? Чем подлинный сертификат отличается от самоподписанного?**
+
+- **Handshake (TLS 1.3, упрощённо):** клиент шлёт `ClientHello` (версии, шифры, key share); сервер отвечает `ServerHello` + своим **сертификатом** + параметрами; стороны согласуют общий сеансовый ключ (ECDHE — forward secrecy) и дальше шифруют симметрично. **Проверка сертификата:** браузер проверяет **цепочку подписей** до корневого CA из доверенного хранилища ОС/браузера, срок действия, отзыв (CRL/OCSP) и что домен (SAN) совпадает с запрошенным; сервер доказывает владение приватным ключом.
+- **Подлинный** сертификат подписан доверенным **CA** (по цепочке до корневого) → браузер доверяет автоматически. **Самоподписанный** подписан сам собой, в доверенных CA его нет → браузер ругается («не доверенный»). Технически шифрование то же, но нет подтверждённой **подлинности** (кто угодно может выпустить самоподписанный на любой домен). Годится для локалки/внутренних сервисов (можно добавить в доверенные вручную), не для публичного прода. См. [request-lifecycle/03-tcp-tls-and-http-request.md](../08-networking-and-api/request-lifecycle/03-tcp-tls-and-http-request.md).
+
+**В чём разница между Cookie, Session и JWT?**
+
+- **Cookie** — механизм **хранения** на клиенте (браузер шлёт `Cookie` в каждый запрос к домену); это транспорт, а не способ аутентификации сам по себе. **Session** — состояние на **сервере** (в памяти/Redis/БД): клиент держит в cookie только `session_id`, сервер по нему находит данные; легко отозвать (удалить сессию), но нужен стейт/хранилище и это хуже масштабируется. **JWT** — **самодостаточный** подписанный токен (header.payload.signature): все данные внутри, сервер проверяет подпись и **не хранит состояние** (stateless, удобно для микросервисов), но токен трудно отозвать до истечения и он больше по размеру. Коротко: cookie — где хранить, session — стейт на сервере, JWT — стейт в токене. См. [authentication/02-sessions-and-session-security.md](../11-security/authentication/02-sessions-and-session-security.md) и [authentication/06-jwt.md](../11-security/authentication/06-jwt.md).
+
+**HTTP/2 и gRPC: мультиплексирование, стриминг, плюсы/минусы против REST, protobuf, типы RPC.**
+
+- **gRPC** — RPC-фреймворк поверх **HTTP/2**: бинарный обмен сообщениями **Protobuf** (компактно и быстро, строгая схема `.proto` → кодогенерация `protoc`), мультиплексирование и **стриминг** из коробки. **4 типа вызовов:** unary (1→1), server-streaming (1→N), client-streaming (N→1), bidirectional (N↔N). Метаданные — через **headers** (авторизация, trace). **Плюсы против REST/JSON:** меньше payload и латентность, строгий контракт и кодоген, стриминг, удобно service-to-service. **Минусы:** не читается глазами, слабая поддержка в браузере (нужен **gRPC-Web**/**grpc-gateway** для REST-фасада), сложнее дебажить. **Versioning** — через эволюцию proto (не переиспользовать номера полей, только добавлять). См. [protocols/01-grpc.md](../08-networking-and-api/protocols/01-grpc.md).
+
+**Как проверить, открыт ли порт на сервере?**
+
+- Снаружи: `nc -zv host port` (или `telnet host port`), `nmap -p 443 host` (скан портов), `curl -v host:port`. Изнутри — какие порты **слушаются**: `ss -tlnp` (современная замена `netstat -tlnp`), `lsof -i :443`. `ss`/`lsof` также покажут, **какой процесс** держит порт. См. [linux/03-tcp-sockets.md](../10-devops-and-observability/linux/03-tcp-sockets.md).
+
 ## ОС, процессы, память
 
 **Чем отличаются потоки и процессы?**
@@ -421,7 +476,47 @@
 
 - Полное **программное воспроизведение** другой системы — CPU, инструкций, устройств — на хосте с иной архитектурой. Эмулятор интерпретирует каждую гостевую инструкцию (или JIT-транслирует), поэтому может запустить ПО для **чужой архитектуры** (ARM-бинарь на x86, ретро-консоль на ПК), но работает **медленно**. Отличие от виртуализации: виртуализация исполняет гостевой код **нативно** на том же CPU (та же архитектура, аппаратная поддержка) — быстро; эмуляция симулирует железо программно — гибко, но дорого (пример: QEMU умеет и то, и другое). См. [docker/01-container-vs-virtual-machine.md](../10-devops-and-observability/docker/01-container-vs-virtual-machine.md).
 
-## Контейнеры и Kubernetes
+**Какие знаешь syscalls?**
+
+- Ввод-вывод: `read`, `write`, `open`, `close`, `lseek`. Процессы: `fork`, `execve`, `wait`, `exit`, `kill` (сигнал). Память: `mmap`, `munmap`, `brk`. Сеть: `socket`, `bind`, `listen`, `accept`, `connect`, `send`/`recv`. Мультиплексирование: `epoll_create`/`epoll_ctl`/`epoll_wait`, `select`, `poll`. Файлы/ФС: `stat`, `dup`, `pipe`. Это граница между user space и ядром; в Go рантайм оборачивает их (а сетевые — через netpoller/epoll). См. [linux/04-signals-and-processes.md](../10-devops-and-observability/linux/04-signals-and-processes.md).
+
+**Чем отличается hard link от soft link (symlink)?**
+
+- **Hard link** — ещё одно имя для того же **inode** (тех же данных): все хардлинки равноправны, данные живут, пока есть хоть один; нельзя ссылаться на другой раздел ФС и на директории. **Soft link (символическая ссылка)** — отдельный файл, хранящий **путь** к цели: может указывать куда угодно (другой раздел, директория), но «повисает» (dangling), если цель удалили/переместили. Коротко: hardlink — второе имя данных, symlink — указатель на путь. См. [linux/02-file-descriptors-and-io.md](../10-devops-and-observability/linux/02-file-descriptors-and-io.md).
+
+**Как посмотреть, какой процесс слушает порт?**
+
+- `ss -tlnp` (современная замена `netstat -tlnp`) — TCP-сокеты в LISTEN с PID/именем процесса; `lsof -i :8080` — кто держит конкретный порт; `fuser 8080/tcp`. Для UDP — `ss -ulnp`. См. [linux/03-tcp-sockets.md](../10-devops-and-observability/linux/03-tcp-sockets.md).
+
+**Что такое swap и зачем он нужен?**
+
+- Область на диске, куда ядро вытесняет **неактивные страницы** памяти, когда физической RAM не хватает — процессы «видят» больше памяти, чем есть физически (часть виртуального пространства лежит на диске). Плюс — сервер не падает сразу при пике потребления. Минус — диск на порядки медленнее RAM, при активном свопинге начинается **thrashing** и деградация. Часто на серверах БД swap уменьшают/выключают ради предсказуемой латентности. См. [linux/01-virtual-memory.md](../10-devops-and-observability/linux/01-virtual-memory.md).
+
+**На голом сервере сервис течёт по памяти. Что произойдёт, когда память закончится?**
+
+- Сначала ядро начинает **свопить** неактивные страницы на диск и сбрасывать page cache → растёт I/O, начинается thrashing, латентность падает. Когда исчерпаны и RAM, и swap, срабатывает **OOM Killer**: выбирает процесс с наибольшим `oom_score` (обычно самый прожорливый — наш текущий) и убивает `SIGKILL`, чтобы освободить память. Решение опирается на **анонимную резидентную память** (RSS/heap), которую нельзя просто сбросить, а не на page cache (его ядро освобождает само). См. [linux/01-virtual-memory.md](../10-devops-and-observability/linux/01-virtual-memory.md).
+
+**Как узнать, какой процесс грузит CPU?**
+
+- `top`/`htop` (сортировка по %CPU по умолчанию), `ps aux --sort=-%cpu | head`, `pidstat 1`. `top -H` / `htop` покажут по **потокам**, что для Go-сервиса помогает понять, какая часть грузит. Для «что именно внутри процесса» — уже профилирование (pprof). См. [linux/06-linux-commands.md](../10-devops-and-observability/linux/06-linux-commands.md).
+
+**Чем отличается top от htop?**
+
+- Оба показывают процессы и потребление в реальном времени, но `htop` — удобнее: цветной интерфейс, наглядные бары по ядрам/памяти, скролл и поиск, дерево процессов, убийство/renice мышью, без ввода PID вручную. `top` — базовый, есть почти везде из коробки; `htop` часто нужно доустановить. Функционально `htop` — «top с UI».
+
+**Что означает load average?**
+
+- Три числа (за 1, 5, 15 минут) — среднее число процессов, которые **выполняются или ждут** (runnable + в непрерываемом ожидании, обычно диск I/O). Интерпретация относительно числа **ядер**: la = число ядер → загрузка ~100%; la > ядер → есть очередь (перегрузка); la < ядер → есть запас. Важно: высокий la может быть не только от CPU, но и от **I/O-ожидания**. Тренд по трём числам показывает, растёт нагрузка или спадает. См. [linux/06-linux-commands.md](../10-devops-and-observability/linux/06-linux-commands.md).
+
+**Как найти файлы больше 1 GB в системе?**
+
+- `find / -type f -size +1G` (при желании `-exec ls -lh {} \;` или `... | xargs du -h | sort -rh`). Для быстрого «кто съел диск» — `du -h --max-depth=1 / | sort -rh | head` или `ncdu`. См. [linux/06-linux-commands.md](../10-devops-and-observability/linux/06-linux-commands.md).
+
+**Какими командами шелла пользуешься каждый день?**
+
+- Навигация/файлы: `ls`, `cd`, `cat`, `less`, `head`, `tail`, `touch`, `cp`, `mv`, `rm`, `chmod`, `chown`, `wc`, `diff`, `tar`, `unzip`. Поиск: `grep`, `find`, `history`. Процессы: `ps`, `top`/`htop`, `kill`, `jobs`, `bg`/`fg`. Сеть: `ss`/`netstat`, `lsof`, `ping`, `curl`/`wget`, `ssh`, `scp`, `rsync`, `ifconfig`/`ip`. Сборка/прочее: `make`. Суть ответа на собесе — не перечень, а что **комбинируешь через пайпы** (`grep ... | awk | sort | uniq -c`) и понимаешь стандартные потоки/перенаправление. См. [linux/06-linux-commands.md](../10-devops-and-observability/linux/06-linux-commands.md).
+
+## Контейнеры, Docker и Kubernetes
 
 **Что такое pod в Kubernetes?**
 
@@ -435,9 +530,125 @@
 
 - Объект L7-маршрутизации HTTP/HTTPS-трафика снаружи в Service’ы по хосту и пути (`api.example.com/v1 → service-a`), с терминацией TLS в одной точке. Сам по себе Ingress — лишь правила; их исполняет **Ingress-контроллер** (nginx, Traefik и т.п.). Заменяет россыпь LoadBalancer-ов одним входом. См. [kubernetes/02-core-objects-and-deployment-flow.md](../10-devops-and-observability/kubernetes/02-core-objects-and-deployment-flow.md).
 
+**Чем отличается ReplicaSet от Deployment?**
+
+- **ReplicaSet** держит заданное число одинаковых подов (следит, чтобы реплик было ровно N, пересоздаёт упавшие) — но не умеет обновлять версию. **Deployment** — уровень выше: управляет ReplicaSet’ами и делает **rolling-update / rollback** (создаёт новый RS с новой версией и плавно переливает поды, старый RS оставляет для отката). На практике работают с Deployment, а ReplicaSet он создаёт под капотом. См. [kubernetes/02-core-objects-and-deployment-flow.md](../10-devops-and-observability/kubernetes/02-core-objects-and-deployment-flow.md).
+
+**Разница между ConfigMap и Secret?**
+
+- Оба — способ вынести конфигурацию из образа и прокинуть в под (через env или файлы-тома). **ConfigMap** — для **несекретных** данных (настройки, URL, флаги), хранится как есть. **Secret** — для чувствительных (пароли, токены, ключи, TLS-сертификаты): значения в **base64** (это кодирование, не шифрование!), но к Secret’ам применяют RBAC, шифрование etcd at-rest, они не светятся в описании пода. Семантически различие — сигнал «это чувствительное» + доп. защита. См. [kubernetes/07-node-failure-rollout-and-config-delivery.md](../10-devops-and-observability/kubernetes/07-node-failure-rollout-and-config-delivery.md).
+
+**Что такое Namespace?**
+
+- Логическое разбиение кластера на изолированные «пространства имён» — виртуальные под-кластеры для команд/окружений (dev/stage/prod) в одном физическом кластере. Даёт изоляцию имён (ресурсы уникальны в пределах namespace), квоты (ResourceQuota/LimitRange), разграничение доступа (RBAC). Не изолирует сеть по умолчанию — для этого NetworkPolicy. См. [kubernetes/01-kubernetes-basics-for-backend.md](../10-devops-and-observability/kubernetes/01-kubernetes-basics-for-backend.md).
+
+**Разница между StatefulSet и Deployment? Когда использовать StatefulSet?**
+
+- **Deployment** — для **stateless**-подов: они взаимозаменяемы, имена/сеть эфемерны, порядок не важен. **StatefulSet** — для **stateful**: даёт подам **стабильную идентичность** (постоянное имя `pod-0`, `pod-1`, стабильный сетевой hostname через headless-service) и **своё персистентное хранилище** (PVC на каждый под), плюс упорядоченные rollout/scale. Использовать для БД, кластеров (Kafka, Zookeeper, Elasticsearch, Redis) — там, где под должен помнить, «кто он», и иметь свои данные. См. [kubernetes/02-core-objects-and-deployment-flow.md](../10-devops-and-observability/kubernetes/02-core-objects-and-deployment-flow.md).
+
+**Что такое Job и CronJob?**
+
+- **Job** — запуск пода до **успешного завершения** (batch-задача: миграция, обработка, разовый скрипт); следит за завершением и ретраит при падении, можно параллелить. **CronJob** — Job **по расписанию** (cron-синтаксис): бэкапы, периодические выгрузки, чистки. В отличие от Deployment (сервис работает вечно), Job — «сделал и вышел». См. [kubernetes/02-core-objects-and-deployment-flow.md](../10-devops-and-observability/kubernetes/02-core-objects-and-deployment-flow.md).
+
+**Что такое StorageClass?**
+
+- Описание «класса» динамически выделяемого хранилища: какой провайдер (EBS, GCE PD, Ceph…), тип диска (ssd/hdd), параметры, политика reclaim. Когда под через **PersistentVolumeClaim** просит том с определённым StorageClass, кластер **автоматически** создаёт под него PersistentVolume — без ручного выделения дисков. Разные классы = разные тиры хранилища. См. [kubernetes/02-core-objects-and-deployment-flow.md](../10-devops-and-observability/kubernetes/02-core-objects-and-deployment-flow.md).
+
+**Какими командами kubectl пользовался?**
+
+- Просмотр: `kubectl get pods/deploy/svc -n ns`, `kubectl describe pod <p>` (события, причины), `kubectl get events`. Отладка: `kubectl logs <pod> [-f] [-c container] [--previous]`, `kubectl exec -it <pod> -- sh`, `kubectl port-forward`, `kubectl top pod`. Изменения: `kubectl apply -f`, `kubectl rollout status/undo deploy/<d>`, `kubectl scale`, `kubectl delete`, `kubectl set image`. Контекст: `kubectl config use-context`. См. [kubernetes/04-kubectl-commands.md](../10-devops-and-observability/kubernetes/04-kubectl-commands.md).
+
+**Какими UI для Kubernetes пользовался?**
+
+- CLI-UI **k9s** (терминальный, самый ходовой у бэкендеров), **Lens** (десктоп), официальный **Kubernetes Dashboard**, **Rancher** (управление кластерами), а для GitOps-деплоя — **ArgoCD**/**Flux** (визуализация приложений и синхронизация с git). Плюс встроенные UI облаков (EKS/GKE консоли). На собесе достаточно назвать k9s/Lens + ArgoCD и для чего.
+
+**Как посмотреть логи пода?**
+
+- `kubectl logs <pod>` (стдаут/стдерр), `-f` — follow, `-c <container>` — конкретный контейнер в многоконтейнерном поде, `--previous` — логи **упавшего** предыдущего инстанса (важно при CrashLoopBackOff), `--since=10m`/`--tail=100`. В проде логи из подов собирает агент (Fluent Bit/Promtail) в Loki/ELK — `kubectl logs` эфемерен (умрёт с подом). См. [kubernetes/04-kubectl-commands.md](../10-devops-and-observability/kubernetes/04-kubectl-commands.md).
+
+**Как войти внутрь контейнера в поде?**
+
+- `kubectl exec -it <pod> -- sh` (или `bash`), в многоконтейнерном — `-c <container>`. В минимальных образах (distroless/scratch) шелла нет — тогда **ephemeral debug container**: `kubectl debug -it <pod> --image=busybox --target=<container>`. Как и `docker exec`, запускает новый процесс в неймспейсах пода для отладки. См. [kubernetes/04-kubectl-commands.md](../10-devops-and-observability/kubernetes/04-kubectl-commands.md).
+
+**Какие бывают статусы пода (CrashLoopBackOff, Pending и т.п.)?**
+
+- **Pending** — под не запланирован/не стартовал: нет ресурсов на нодах, не смонтировался том, nodeSelector/taints не сошлись. **ContainerCreating** — тянется образ / монтируются тома. **Running** — работает. **CrashLoopBackOff** — контейнер падает сразу после старта, k8s перезапускает с нарастающей задержкой (backoff) — смотреть `logs --previous` и `describe`. **ImagePullBackOff/ErrImagePull** — не смог скачать образ (нет доступа/тега). **OOMKilled** — превысил лимит памяти. **Completed** — успешно завершился (для Job). **Evicted** — вытеснен с ноды (нехватка ресурсов). Диагностика — `kubectl describe pod` (события) + логи. См. [kubernetes/06-probes-and-graceful-shutdown.md](../10-devops-and-observability/kubernetes/06-probes-and-graceful-shutdown.md).
+
 **Что такое Docker? Чем отличается от виртуализации?**
 
 - Docker — платформа контейнеризации: упаковывает приложение с зависимостями в образ, запускает как изолированный процесс через namespaces/cgroups, разделяя ядро хоста. ВМ виртуализирует железо и тащит полноценную гостевую ОС с собственным ядром через гипервизор. Контейнеры легче, стартуют за секунды, плотнее; ВМ дают более сильную изоляцию. См. [docker/01-container-vs-virtual-machine.md](../10-devops-and-observability/docker/01-container-vs-virtual-machine.md).
+
+**Что такое Docker image и чем отличается от контейнера?**
+
+- **Образ (image)** — неизменяемый шаблон из слоёв (read-only): код + зависимости + метаданные (какой процесс запускать). **Контейнер** — запущенный экземпляр образа: к слоям образа добавляется writable-слой (copy-on-write) и запускается процесс в своих namespaces/cgroups. Аналогия: образ — класс, контейнер — объект; из одного образа поднимают много контейнеров. См. [docker/01-container-vs-virtual-machine.md](../10-devops-and-observability/docker/01-container-vs-virtual-machine.md).
+
+**Как работает Docker под капотом?**
+
+- На фичах ядра Linux: **namespaces** (изоляция — PID, NET, MNT, UTS, IPC, USER: свой список процессов, сеть, ФС), **cgroups** (лимиты на CPU/память/IO), **union/overlay-фс** (слои образа только для чтения + writable-слой контейнера), **capabilities/seccomp/AppArmor** (ограничение прав). Демон `dockerd` через `containerd`/`runc` создаёт контейнер как обычный **процесс хоста** с этими ограничениями — своей ОС и ядра у него нет. См. [docker/01-container-vs-virtual-machine.md](../10-devops-and-observability/docker/01-container-vs-virtual-machine.md).
+
+**Как настроить Docker, чтобы всё работало быстро и безопасно?**
+
+- **Быстро:** multi-stage build (билд-стадия отдельно, в финал только бинарь), минимальный базовый образ (distroless/alpine/scratch), правильный порядок слоёв для кэша (сначала `go.mod`+`go.sum` и `go mod download`, потом код), `.dockerignore`. **Безопасно:** не запускать от root (`USER app`), read-only rootfs, drop capabilities, не зашивать секреты в образ, пинить версии базовых образов по digest, сканировать образы (trivy/grype), минимизировать поверхность (нет shell/пакетов в distroless). См. [dockerfiles-for-go/03-dockerfiles-for-go-projects.md](../10-devops-and-observability/dockerfiles-for-go/03-dockerfiles-for-go-projects.md).
+
+**Как уменьшить размер образа?**
+
+- **Multi-stage build** — собирать в одном образе, в финальный копировать только артефакт. Минимальная база: **scratch** (для статического Go-бинаря) или **distroless**/alpine. Собирать Go статически (`CGO_ENABLED=0`), флаги `-ldflags="-s -w"` (убрать debug-инфо). Меньше слоёв, объединять `RUN`, чистить кэши пакетов в том же слое, `.dockerignore` (не тащить `.git`, тесты). Итог для Go — образы в единицы–десятки МБ. См. [dockerfiles-for-go/03-dockerfiles-for-go-projects.md](../10-devops-and-observability/dockerfiles-for-go/03-dockerfiles-for-go-projects.md).
+
+**Чем отличается COPY от ADD в Dockerfile?**
+
+- `COPY` просто копирует файлы/директории из контекста сборки в образ — предсказуемо, и это **рекомендованный** способ. `ADD` умеет больше: **распаковывать локальные tar-архивы** и **скачивать по URL** — но эта «магия» делает сборку менее очевидной, поэтому по гайдлайнам используют `COPY`, а `ADD` — только когда реально нужна авто-распаковка архива. См. [dockerfiles-for-go/02-dockerfile-anatomy.md](../10-devops-and-observability/dockerfiles-for-go/02-dockerfile-anatomy.md).
+
+**Чем отличается ENTRYPOINT от CMD?**
+
+- `ENTRYPOINT` задаёт **саму команду**, которую контейнер выполняет (что это за контейнер), а `CMD` — **аргументы по умолчанию** к ней (или команду, если ENTRYPOINT не задан). Аргументы `docker run <image> ...` переопределяют `CMD`, но не `ENTRYPOINT`. Типовой паттерн: `ENTRYPOINT ["myapp"]` + `CMD ["--config=/etc/app.yaml"]`. Использовать **exec-форму** (`["..."]`), а не shell-форму — тогда сигналы (SIGTERM) доходят до процесса напрямую. См. [dockerfiles-for-go/02-dockerfile-anatomy.md](../10-devops-and-observability/dockerfiles-for-go/02-dockerfile-anatomy.md).
+
+**Какие типы сетей поддерживает Docker?**
+
+- **bridge** (дефолт — приватная виртуальная сеть на хосте, контейнеры общаются, наружу через NAT; user-defined bridge ещё даёт DNS по имени контейнера), **host** (контейнер использует сеть хоста напрямую, без изоляции — быстрее, но конфликты портов), **none** (без сети), **overlay** (сеть поверх нескольких хостов — для Swarm/кластера), **macvlan** (контейнеру свой MAC/IP в физической сети). См. [docker/02-docker-for-go-services.md](../10-devops-and-observability/docker/02-docker-for-go-services.md).
+
+**Что такое volume и чем отличается от bind mount?**
+
+- Оба монтируют данные в контейнер, но: **volume** управляется Docker (лежит в его области `/var/lib/docker/volumes`, создаётся/удаляется командами docker) — переносимо, не зависит от структуры хоста, лучше для продакшн-данных. **Bind mount** монтирует **конкретный путь хоста** в контейнер — удобно для разработки (примонтировать исходники и hot-reload), но привязан к ФС хоста. См. [docker/02-docker-for-go-services.md](../10-devops-and-observability/docker/02-docker-for-go-services.md).
+
+**Как сделать, чтобы данные не потерялись после удаления контейнера?**
+
+- Хранить их не в writable-слое контейнера (он умирает вместе с контейнером), а в **volume** (`docker volume create` / `-v data:/var/lib/pg`) или bind mount на хост. Тогда `docker rm` контейнера не трогает данные — новый контейнер подхватит тот же volume. Для БД в контейнере это обязательно. См. [docker/02-docker-for-go-services.md](../10-devops-and-observability/docker/02-docker-for-go-services.md).
+
+**Как работать с секретами?**
+
+- Не зашивать в образ и не передавать через `ENV`/`ARG` (видны в истории слоёв и `inspect`). Варианты: **Docker secrets** (в Swarm — монтируются в `/run/secrets`, только в памяти), внешние менеджеры (Vault, AWS Secrets Manager, SOPS), в Kubernetes — Secrets + external-managers; для сборки — `RUN --mount=type=secret` (BuildKit, секрет не попадает в слой). Секреты подкладываются в рантайме, а не в образ. См. [secrets-management/04-kubernetes-secrets-and-external-managers.md](../11-security/secrets-management/04-kubernetes-secrets-and-external-managers.md).
+
+**Как ограничить использование CPU и памяти контейнером?**
+
+- Флагами `docker run` (под капотом — cgroups): память — `--memory=512m` (+ `--memory-swap`), CPU — `--cpus=1.5` (доля ядер) или `--cpu-shares`/`--cpuset-cpus` (привязка к ядрам). В compose — `deploy.resources.limits`. Для Go важно: рантайм по умолчанию берёт `GOMAXPROCS` = число ядер хоста, а не лимит cgroup (до 1.25) — задавать `GOMAXPROCS`/`GOMEMLIMIT` под лимиты контейнера. См. [docker/02-docker-for-go-services.md](../10-devops-and-observability/docker/02-docker-for-go-services.md).
+
+**Что знаешь про docker-compose? Чем отличается от Docker Swarm?**
+
+- **docker-compose** — описание много-контейнерного приложения в одном YAML (сервисы, сети, тома, зависимости) и запуск на **одной машине** (`docker compose up`) — идеально для локальной разработки и простых стендов. **Docker Swarm** — встроенный **оркестратор кластера**: тот же формат, но раскатывает сервисы на **много узлов** с репликами, service discovery, rolling-update, overlay-сетью и балансировкой. Коротко: compose — один хост/дев, Swarm — кластер/прод (хотя в проде чаще берут Kubernetes). См. [docker-compose/01-docker-compose-anatomy.md](../10-devops-and-observability/docker-compose/01-docker-compose-anatomy.md).
+
+**Как подождать другой сервис при старте (в compose)?**
+
+- `depends_on` управляет только **порядком запуска**, но не ждёт готовности сервиса. Правильно — ждать **готовности**: `depends_on` с `condition: service_healthy` + `healthcheck` у зависимости (например, `pg_isready`), либо в самом приложении делать **ретраи подключения с backoff** (не падать на первой неудаче), либо wait-скрипт (`wait-for-it`/`dockerize`). Надёжнее всего — ретраи в коде: сеть в распределёнке всё равно может моргнуть. См. [docker-compose/02-docker-compose-for-go-projects.md](../10-devops-and-observability/docker-compose/02-docker-compose-for-go-projects.md).
+
+**Зачем `docker exec -it <c> bash`?**
+
+- Зайти **внутрь уже запущенного** контейнера интерактивной оболочкой для отладки: посмотреть файлы, процессы, конфиги, сетевые настройки, руками воспроизвести проблему. `-i` — интерактивный STDIN, `-t` — псевдо-TTY. В минимальных образах (distroless/scratch) `bash` может не быть — тогда `sh` или отладка через `docker debug`/эфемерные контейнеры. Важно: `exec` запускает **новый процесс** в контейнере, а не «входит» в основной.
+
+**Как посмотреть логи контейнера?**
+
+- `docker logs <container>` (стдаут/стдерр процесса), `-f` — следить в реальном времени (follow), `--tail 100` — последние N строк, `--since 10m`/`--timestamps`. В приложении логи должны идти в **stdout/stderr** (docker-way), а не в файл внутри контейнера — тогда их собирает драйвер логирования (json-file/journald) и дальше пайплайн (Loki/ELK).
+
+**Как узнать, какие контейнеры запущены?**
+
+- `docker ps` — запущенные (id, образ, порты, статус, имя), `docker ps -a` — все, включая остановленные. Полезно: `docker ps --filter`, `--format` (кастомный вывод), `docker stats` — живое потребление CPU/RAM/сети по контейнерам.
+
+**Как удалить все остановленные контейнеры и ненужные образы?**
+
+- `docker container prune` (остановленные контейнеры), `docker image prune` (dangling-образы; `-a` — все неиспользуемые), либо всё разом — `docker system prune` (`-a --volumes` — агрессивно, с томами; осторожно, удалит и нужные данные). Точечно — `docker rm <c>` / `docker rmi <img>`. См. [docker/02-docker-for-go-services.md](../10-devops-and-observability/docker/02-docker-for-go-services.md).
+
+**Как мониторить контейнеры?**
+
+- Быстро — `docker stats` (CPU/RAM/сеть/IO по контейнерам) и `docker logs`/`docker events`. В проде — **cAdvisor** (метрики контейнеров) + **Prometheus** + **Grafana**, экспортеры на уровне оркестратора (kube-state-metrics в k8s), healthcheck’и, централизованные логи (Loki/ELK) и трейсинг (OpenTelemetry). Метрики: использование vs лимиты cgroup, рестарты, OOM-kill. См. [prometheus-and-metrics/01-metric-types-and-design.md](../10-devops-and-observability/prometheus-and-metrics/01-metric-types-and-design.md).
 
 ## Архитектура и практики
 
@@ -521,6 +732,68 @@
   5. **Подтвердить восстановление.** Убедиться по метрикам, что сервис здоров, и какое-то время понаблюдать (не «полегчало», а реально зелено).
   6. **Постмортем — blameless.** После инцидента: таймлайн, истинная причина (5 whys), конкретные action items, чтобы не повторилось. Разбор процесса, а не поиск виноватого.
 - Главный принцип на собесе: **mitigate first, investigate later**; rollback — обычно самый быстрый путь; постоянная коммуникация; blameless postmortem. См. [incident-investigation-and-profiling/01-how-to-investigate-production-issues.md](../10-devops-and-observability/incident-investigation-and-profiling/01-how-to-investigate-production-issues.md) и [reliability-patterns/09-postmortem.md](../05-system-design/reliability-patterns/09-postmortem.md).
+
+## Observability
+
+**Три столпа observability (metrics, logs, traces). Чем отличаются?**
+
+- **Метрики** — числовые агрегаты во времени (latency, RPS, ошибки, CPU): дёшевы, компактны, хороши для дашбордов и алертов, отвечают на **«что и насколько»** (что-то сломалось, тренд). **Логи** — дискретные события с деталями: отвечают на **«что именно произошло»** в конкретном случае (стектрейс, параметры). **Трейсы** — путь одного запроса через все сервисы: отвечают на **«где именно»** тормозит/падает в распределённой системе. Метрики — заметить проблему, трейсы — локализовать сервис, логи — понять причину. См. [tracing-and-opentelemetry/01-opentelemetry-and-tracing-flow.md](../10-devops-and-observability/tracing-and-opentelemetry/01-opentelemetry-and-tracing-flow.md).
+
+**Три типа метрик?**
+
+- **Counter** — монотонно растущий счётчик (число запросов, ошибок); смотрят через `rate()`. **Gauge** — мгновенное значение, может расти и падать (текущая память, число горутин, глубина очереди). **Histogram** — распределение по бакетам (для латентностей/размеров), из него считают перцентили и SLI. (Есть ещё Summary — перцентили считает клиент; на практике чаще Histogram.) См. [prometheus-and-metrics/01-metric-types-and-design.md](../10-devops-and-observability/prometheus-and-metrics/01-metric-types-and-design.md).
+
+**Как измерять SLI, SLO и SLA?**
+
+- **SLI** (Indicator) — фактически измеряемый показатель качества (доля успешных запросов, доля быстрее 200 мс). **SLO** (Objective) — внутренняя цель по SLI (например, 99.9% за 30 дней), от неё считают **error budget** (допустимую долю ошибок). **SLA** (Agreement) — внешнее обязательство перед клиентом с санкциями за нарушение (обычно слабее SLO, чтобы был запас). Измеряют по метрикам (histogram/counter), считают за окно; SLO обычно строже SLA. См. [reliability-patterns/08-slo-sli-error-budgets.md](../05-system-design/reliability-patterns/08-slo-sli-error-budgets.md).
+
+**Что такое high-cardinality метрик и чем опасно?**
+
+- Кардинальность — число уникальных комбинаций **лейблов** метрики. Каждая уникальная комбинация — отдельный временной ряд. Опасность: лейблы с большим числом значений (`user_id`, `request_id`, `email`, полный URL с параметрами) порождают **взрывной рост числа рядов** → раздувается память и диск TSDB, тормозят запросы, вплоть до падения Prometheus. Классическая ошибка — положить id-шники в лейблы. См. [prometheus-and-metrics/01-metric-types-and-design.md](../10-devops-and-observability/prometheus-and-metrics/01-metric-types-and-design.md).
+
+**Как уменьшить high-cardinality?**
+
+- Не класть в лейблы **неограниченные** значения (id, email, raw URL) — только с малым фиксированным набором (метод, статус-код, endpoint-шаблон `/users/:id`, а не `/users/123`). Нормализовать пути, убирать query-параметры, ограничивать enum’ы. Высокодетальное — в **логи/трейсы**, а не в метрики. При необходимости — агрегировать/дропать лишние лейблы через relabeling. См. [prometheus-and-metrics/01-metric-types-and-design.md](../10-devops-and-observability/prometheus-and-metrics/01-metric-types-and-design.md).
+
+**Почему TSDB Prometheus хороша для метрик?**
+
+- Она заточена под **time-series**: данные пишутся append-only по времени, эффективно **сжимаются** (дельта-кодирование timestamp’ов и значений — байты на точку), группируются по рядам (метрика+лейблы). Локальное хранение, pull-модель со scrape, мощный запросный язык **PromQL** для агрегаций по времени и лейблам. Это на порядок эффективнее, чем лить метрики в реляционную БД. Минус — не для долгого хранения/глобального масштаба (тогда Thanos/Cortex/Mimir). См. [prometheus-and-metrics/01-metric-types-and-design.md](../10-devops-and-observability/prometheus-and-metrics/01-metric-types-and-design.md).
+
+**Чем отличается 90-й перцентиль от 95-го?**
+
+- p90 = значение, ниже которого **90%** измерений (10% медленнее); p95 — ниже которого 95% (5% медленнее). p95 строже и «видит» более редкие, но более медленные случаи — он выше p90. Перцентили показывают **хвосты** латентности, которые прячет среднее (average): среднее может быть отличным, а p95/p99 — плохим из-за редких тормозов, которые бьют по части пользователей. Поэтому SLO обычно ставят на p95/p99, а не на avg. См. [prometheus-and-metrics/01-metric-types-and-design.md](../10-devops-and-observability/prometheus-and-metrics/01-metric-types-and-design.md).
+
+**Что такое структурированные логи и почему они лучше plain text?**
+
+- Структурированный лог — запись в машиночитаемом формате (обычно **JSON**) с полями «ключ-значение» (`{"level":"error","trace_id":"...","user_id":42,"msg":"..."}`), а не свободная строка. Лучше тем, что по полям можно **фильтровать, искать, агрегировать и строить дашборды** в Loki/ELK без хрупкого парсинга регулярками; поля стабильны, легко коррелировать с трейсами. В Go — стандартный `log/slog`. См. [logging-and-log-shipping/02-logging-in-go-and-why-wrap-logger.md](../10-devops-and-observability/logging-and-log-shipping/02-logging-in-go-and-why-wrap-logger.md).
+
+**Какие обязательные поля стоит включать в лог?**
+
+- `timestamp`, `level`, `message`, `service`/`component`, идентификаторы корреляции — **`trace_id`/`span_id`** (связь с трейсингом) и `request_id`, а также контекст (`user_id`, `method`, `path`, `status`, `duration`) и `error` со стектрейсом для ошибок. Ключевое — **trace_id** для корреляции логов одного запроса между сервисами. Не логировать секреты/PII. См. [logging-and-log-shipping/02-logging-in-go-and-why-wrap-logger.md](../10-devops-and-observability/logging-and-log-shipping/02-logging-in-go-and-why-wrap-logger.md).
+
+**Уровни логирования?**
+
+- `DEBUG` (детальная отладка, обычно выключен в проде), `INFO` (нормальные события — старт, обработанный запрос), `WARN` (подозрительное, но не ошибка — ретрай, деградация), `ERROR` (операция не удалась, нужен разбор), `FATAL`/`PANIC` (критично, процесс завершается). Уровень задаётся конфигом — в проде обычно INFO+, DEBUG включают точечно. Правильный уровень определяет, что попадёт в алерты и сколько «шума» в логах.
+
+**Какие инструменты для логирования знаешь?**
+
+- Стек **ELK/Elastic** (Elasticsearch + Logstash + Kibana) или **EFK** (Fluentd/Fluent Bit), **Grafana Loki** (легче ELK, лейблы как в Prometheus), **Graylog**, облачные — **Datadog**, **Splunk**, **AWS CloudWatch**, **GCP Cloud Logging**. Агенты сбора — Fluent Bit / Promtail / Vector. См. [logging-and-log-shipping/03-log-platforms-comparison-table.md](../10-devops-and-observability/logging-and-log-shipping/03-log-platforms-comparison-table.md).
+
+**Что такое distributed tracing и зачем он нужен?**
+
+- Сквозная трассировка одного запроса через **все сервисы** микросистемы: каждому запросу присваивается `trace_id`, который пробрасывается по вызовам, и видно, через какие сервисы он прошёл и сколько занял на каждом шаге. Нужен, потому что в микросервисах метрики/логи одного сервиса не показывают, **где именно** в цепочке из 10 сервисов тормоз или ошибка — трейс это визуализирует. См. [tracing-and-opentelemetry/01-opentelemetry-and-tracing-flow.md](../10-devops-and-observability/tracing-and-opentelemetry/01-opentelemetry-and-tracing-flow.md).
+
+**Что такое span и trace?**
+
+- **Trace** — весь путь запроса через систему (дерево операций), идентифицируется `trace_id`. **Span** — одна операция внутри трейса (HTTP-хендлер, запрос в БД, вызов другого сервиса): имеет имя, время начала/длительность, `span_id`, ссылку на родителя (parent span) и атрибуты/события. Trace = дерево связанных span’ов; вложенность span’ов показывает, что внутри чего и что сколько заняло. См. [tracing-and-opentelemetry/01-opentelemetry-and-tracing-flow.md](../10-devops-and-observability/tracing-and-opentelemetry/01-opentelemetry-and-tracing-flow.md).
+
+**Как добавить OpenTelemetry в микросервис?**
+
+- Подключить OTel SDK: настроить **TracerProvider** с ресурсными атрибутами (имя сервиса) и **exporter** (OTLP); включить **propagation** (W3C TraceContext — проброс `traceparent` между сервисами); навесить **инструментацию** — готовые middleware/interceptor для HTTP (`otelhttp`), gRPC (`otelgrpc`), БД, чтобы span’ы создавались автоматически, плюс ручные span’ы вокруг важной бизнес-логики. Прокинуть `context.Context` по цепочке (в нём живёт span). См. [tracing-and-opentelemetry/02-opentelemetry-in-go-services.md](../10-devops-and-observability/tracing-and-opentelemetry/02-opentelemetry-in-go-services.md).
+
+**Как подключить OTLP exporter и куда он может слать данные?**
+
+- OTLP (OpenTelemetry Protocol) — стандартный протокол экспорта телеметрии (gRPC или HTTP). Настраивается endpoint коллектора (`OTEL_EXPORTER_OTLP_ENDPOINT`), обычно шлют в **OpenTelemetry Collector**, а он уже маршрутизирует/обрабатывает и отправляет дальше в бэкенды: **Jaeger**, **Tempo** (трейсы), **Prometheus**/Mimir (метрики), Loki (логи), или облачные — Datadog, Honeycomb, AWS X-Ray. Плюс Collector-прослойки: батчинг, sampling, ретраи, ребрендинг атрибутов. См. [tracing-and-opentelemetry/02-opentelemetry-in-go-services.md](../10-devops-and-observability/tracing-and-opentelemetry/02-opentelemetry-in-go-services.md).
 
 ## Алгоритмы и структуры данных
 
