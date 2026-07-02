@@ -139,4 +139,4 @@ ON CONFLICT (user_id, event_type) DO NOTHING;
 Различие «найти дубли» (GROUP BY/HAVING) и «удалить, оставив одну» (self-join / окно /
 ctid), знание ловушки `NOT IN`/`NULL` и понимание, что без `UNIQUE`-ограничения
 проблема вернётся. Родственное: [182. Duplicate Emails](leetcode/easy/0182-duplicate-emails.md),
-идемпотентность вставок — [relational-databases-and-sql/06-outbox-idempotency-and-payment-flow.md](../relational-databases-and-sql/06-outbox-idempotency-and-payment-flow.md).
+идемпотентность вставок — [relational-databases-and-sql/06-outbox-idempotency-and-payment-flow.md](../../../relational-databases-and-sql/06-outbox-idempotency-and-payment-flow.md).

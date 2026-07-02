@@ -1,7 +1,7 @@
 # LeetCode SQL
 
 Решения настоящих SQL-задач LeetCode, разложенные по уровню сложности. Аналог
-[go-задач LeetCode](../../../../../topics/06-algorithms-and-tasks/leetcode), только
+[go-задач LeetCode](../../../../../../../topics/06-algorithms-and-tasks/leetcode), только
 вместо Go — SQL.
 
 ## Структура
@@ -20,7 +20,7 @@ leetcode/
 ## Диалект
 
 Решения написаны на стандартном SQL, дружелюбном к PostgreSQL (основная СУБД в этом
-гайде — см. [database-systems-catalog/postgresql](../../database-systems-catalog/postgresql)).
+гайде — см. [postgresql](../../README.md)).
 На LeetCode дефолтный движок — MySQL; различия в синтаксисе (например кавычки вокруг
 зарезервированного `rank`) отмечены прямо в задачах.
 

@@ -2,7 +2,7 @@
 
 Задачи на SQL с разбором и решениями — для подготовки к собеседованиям и тренировки
 запросов. Теория по реляционным БД и SQL лежит рядом:
-[../relational-databases-and-sql](../relational-databases-and-sql/README.md).
+[../relational-databases-and-sql](../../../relational-databases-and-sql/README.md).
 
 ## Структура
 
@@ -62,6 +62,7 @@ sql-tasks/
 | Соседние строки | 180 | `LEAD` / `LAG` |
 | Gaps-and-islands | 601 | трюк `id - ROW_NUMBER()` |
 | Поиск/удаление дублей | 182, Find And Delete Duplicates | `GROUP BY/HAVING`, `DELETE ... USING`, `ctid`, UNIQUE |
+| MVCC и конкурентность | Concurrent Full-Table Update | снапшот, row lock (`xmax`), deadlock, EvalPlanQual |
 
 ## Кастомные задачи
 
@@ -72,3 +73,4 @@ sql-tasks/
 | --- | --- | --- | --- |
 | Latest Tariff Per Pickpoint | Medium | Latest-row-per-group, `DISTINCT ON` | [latest-tariff-per-pickpoint](latest-tariff-per-pickpoint.md) |
 | Find And Delete Duplicates | Medium | Поиск/удаление дублей, `ctid`, UNIQUE | [find-and-delete-duplicates](find-and-delete-duplicates.md) |
+| Concurrent Full-Table Update | Hard | MVCC, row lock, deadlock, bloat/WAL | [concurrent-full-table-update](concurrent-full-table-update.md) |

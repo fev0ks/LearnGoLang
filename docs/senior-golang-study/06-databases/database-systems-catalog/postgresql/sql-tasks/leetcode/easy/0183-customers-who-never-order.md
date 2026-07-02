@@ -57,4 +57,4 @@ WHERE NOT EXISTS (SELECT 1 FROM Orders o WHERE o.customerId = c.id);
 ## Что проверяет на собесе
 
 Понимание anti-join, трёхзначной логики SQL и разницы `NOT IN` / `NOT EXISTS` /
-`LEFT JOIN`. См. [database-fundamentals/04-interview-cases.md](../../../database-fundamentals/04-interview-cases.md).
+`LEFT JOIN`. См. [database-fundamentals/04-interview-cases.md](../../../../../database-fundamentals/04-interview-cases.md).
