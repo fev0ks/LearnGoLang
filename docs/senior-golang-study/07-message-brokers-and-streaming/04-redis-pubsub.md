@@ -1,6 +1,16 @@
 # Redis Pub/Sub
 
-Redis Pub/Sub — простейший механизм broadcast сообщений. Publisher не знает о subscribers, subscriber получает все сообщения канала. At-most-once, нет persistence. Простейший из всех broker-механизмов.
+Redis Pub/Sub — простейший механизм broadcast сообщений: publisher не знает о подписчиках, подписчик получает все сообщения канала. At-most-once, без persistence. Та же семантика fire-and-forget, что у [NATS Core](./08-nats.md); надёжная альтернатива внутри самого Redis — [Redis Streams](./03-redis-streams.md).
+
+## Содержание
+
+- [Механика: PUBLISH / SUBSCRIBE / PSUBSCRIBE](#механика-publish--subscribe--psubscribe)
+- [At-most-once: отличие от Redis Streams](#at-most-once-отличие-от-redis-streams)
+- [Отличие от Redis Streams](#отличие-от-redis-streams)
+- [Go код: publisher и subscriber](#go-код-publisher-и-subscriber)
+- [Use cases: когда Redis Pub/Sub подходит](#use-cases-когда-redis-pubsub-подходит)
+- [Когда НЕ использовать Redis Pub/Sub](#когда-не-использовать-redis-pubsub)
+- [Interview-ready answer](#interview-ready-answer)
 
 ---
 
@@ -79,7 +89,7 @@ Redis Streams:
 
 ---
 
-## Go код из lrn-streams
+## Go код: publisher и subscriber
 
 ### Publisher
 
@@ -202,6 +212,8 @@ Instance A ──PUBLISH──► Redis ──message──► Instance B
         на всех инстансах (горизонтальное масштабирование)
 ```
 
+Hub-паттерн WebSocket-сервера, к которому подключается этот backplane, — [05-websocket.md](../08-networking-and-api/protocols/05-websocket.md).
+
 ```go
 // Hub: при получении WebSocket сообщения
 func (h *Hub) broadcastViaRedis(ctx context.Context, msg []byte) {
@@ -247,13 +259,13 @@ pub.Publish(ctx, "presence", fmt.Sprintf(`{"user":"%s","status":"online"}`, user
 
 ## Когда НЕ использовать Redis Pub/Sub
 
-❌ **Надёжная доставка** — используй Redis Streams или RabbitMQ
+❌ **Надёжная доставка** — [Redis Streams](./03-redis-streams.md) или [RabbitMQ](./02-rabbitmq.md)
 
-❌ **Offline consumers** — используй Redis Streams (XREADGROUP с >)
+❌ **Offline consumers** — Redis Streams (XREADGROUP с `>`)
 
-❌ **Audit trail / история** — используй Redis Streams или Kafka
+❌ **Audit trail / история** — Redis Streams или [Kafka](./01-kafka.md)
 
-❌ **High-volume processing** — для тысяч msg/sec и complex routing — Kafka или RabbitMQ
+❌ **High-volume processing и сложный routing** — Kafka или RabbitMQ
 
 **Redis Pub/Sub = real-time, ephemeral, fire-and-forget**
 

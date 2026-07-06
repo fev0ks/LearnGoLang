@@ -406,7 +406,7 @@ Goroutine может быть в нескольких состояниях:
 
 ### Проблема в контейнерах
 
-В Kubernetes ты задаёшь `cpu: "2"` (2 CPU). Это значит cgroup ограничит контейнер до 2 CPU's worth of time.
+В Kubernetes задаётся `cpu: "2"` (2 CPU). Это значит cgroup ограничит контейнер до 2 CPU's worth of time.
 
 Но `runtime.NumCPU()` в Go возвращает... **число CPU на ноде**, например 32. Go runtime не знает про cgroup лимиты по умолчанию.
 

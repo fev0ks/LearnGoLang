@@ -86,17 +86,17 @@ flowchart LR
 ## Как выбирать схему
 
 Надо смотреть на:
-- кто твой основной traffic source;
+- кто основной traffic source;
 - нужен ли global edge;
 - есть ли Kubernetes;
-- сколько у тебя отдельных сервисов;
+- сколько отдельных сервисов;
 - нужна ли отдельная auth and API policy layer;
 - есть ли heavy static delivery.
 
 ## Practical rule
 
 На system design интервью полезнее показать:
-- почему ты выбрал конкретную topology;
+- почему выбрана конкретная topology;
 - чем она лучше более простой альтернативы;
 - какие у нее failure points;
 - как она меняется при росте нагрузки.

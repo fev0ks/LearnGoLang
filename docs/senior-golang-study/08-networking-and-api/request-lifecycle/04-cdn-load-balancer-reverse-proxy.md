@@ -87,7 +87,7 @@ CDN распределяет копии контента по PoP (Point of Pres
 | **Random** | Простая балансировка без state на LB |
 | **Least Response Time** | Envoy, adaptive; route к самому быстрому |
 
-Для stateless микросервисов в k8s: round robin или least connections — оба хороши. `kube-proxy` использует iptables round robin по умолчанию.
+Для stateless-микросервисов в k8s round robin и least connections одинаково хороши. Нюанс: `kube-proxy` в iptables-режиме выбирает pod **случайно** (statistic random), а не строгим round robin; равномерность получается статистически.
 
 ## Health checks: active vs passive
 
@@ -175,7 +175,7 @@ server {
 | `Traceparent` | W3C Trace Context для distributed tracing |
 | `CF-Connecting-IP` | Реальный IP клиента от Cloudflare |
 
-**IP spoofing**: клиент может сам поставить `X-Forwarded-For: 8.8.8.8`. Доверяй только последнему proxy в цепочке.
+**IP spoofing**: клиент может сам поставить `X-Forwarded-For: 8.8.8.8`. Доверять можно только значениям, добавленным доверенными proxy (последние элементы списка), — всё, что пришло от клиента, подделываемо.
 
 В Go:
 ```go
@@ -202,7 +202,7 @@ outlier_detection:
   max_ejection_percent: 50     # не исключать больше 50% nodes
 ```
 
-Паттерн circuit breaker в приложении (кроме proxy-уровня) полезен для downstream сервисов, которые не проходят через Envoy:
+Паттерн circuit breaker в приложении (кроме proxy-уровня) полезен для downstream-сервисов, которые не проходят через Envoy (подробный разбор паттерна — [03-circuit-breaker.md](../../05-system-design/reliability-patterns/03-circuit-breaker.md)):
 
 ```go
 // sony/gobreaker или самописный с atomic state
@@ -227,8 +227,22 @@ result, err := cb.Execute(func() (interface{}, error) {
 - **LB шлёт на нездоровые instances**: health check endpoint слишком легкий (200 OK всегда) → не отражает реальное состояние (нет DB connection pool).
 - **X-Forwarded-For pollution**: несколько proxy добавляют свои IP → получить реальный client IP сложно.
 - **TLS termination gap**: трафик CDN → origin идёт по HTTP на внутренней сети → нарушение compliance.
-- **Large headers blocked**: nginx по умолчанию `client_header_buffer_size 1k` — JWT токены часто больше.
+- **Large headers blocked**: nginx по умолчанию `client_header_buffer_size 1k`, fallback — `large_client_header_buffers 4 8k`; JWT с толстым payload или пачка cookie могут не влезть → 400/431 от proxy, до backend запрос не дойдёт.
 
 ## Interview-ready answer
 
-L4 балансировщик работает на уровне TCP, не видит HTTP — быстрый, но не может маршрутизировать по URL. L7 видит HTTP, выполняет TLS termination, routing, auth. CDN кэширует на edge, снимает нагрузку с origin; `s-maxage` управляет CDN-кешем отдельно от `max-age`. Health checks бывают active (probe к `/healthz`) и passive (outlier detection по реальному трафику); оба нужны. Sticky sessions — костыль, stateless лучше. Consistent hashing используется для cache affinity — добавление ноды не инвалидирует весь кэш. Timeout proxy должен быть больше timeout приложения, иначе proxy разрывает соединение раньше, backend тратит ресурсы впустую.
+**1. Чем L4 балансировщик отличается от L7?**
+
+- L4 работает с TCP/UDP-потоками, HTTP не видит: быстрый, но маршрутизирует только по IP:port. L7 разбирает HTTP: TLS termination, routing по path/host/заголовкам, auth, rate limiting — ценой overhead на парсинг. Типовая схема: L4 снаружи, L7 внутри.
+
+**2. Как CDN решает, кэшировать ли ответ?**
+
+- По `Cache-Control`: `s-maxage` управляет только shared-кэшем (CDN), `private` запрещает CDN и оставляет browser cache, `no-store` запрещает всё. `Set-Cookie` в ответе и `Vary: Cookie` практически отключают CDN-кэш. Инвалидация — версионирование URL или purge API.
+
+**3. Active vs passive health checks?**
+
+- Active — LB сам пробит `/healthz` по интервалу; passive (outlier detection) — наблюдает за реальным трафиком и выкидывает instance после серии 5xx. Passive реагирует быстрее, но до исключения страдают реальные запросы. Active обязательны, passive — дополнение. При деплое нужен connection draining дольше максимального запроса.
+
+**4. Почему timeout у proxy должен быть больше timeout приложения?**
+
+- Если `proxy_read_timeout` меньше, proxy вернёт клиенту 504 и разорвёт соединение, а backend продолжит обрабатывать запрос и тратить ресурсы на ответ, который никто не ждёт. Таймауты выстраиваются по убыванию снаружи внутрь.

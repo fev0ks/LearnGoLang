@@ -11,7 +11,7 @@
 resp, err := http.Get("https://api.example.com/users")
 
 // DefaultClient = &http.Client{} — нет таймаутов!
-// Если сервер зависнет — твоя горутина висит вечно → goroutine leak
+// Если сервер зависнет — горутина висит вечно → goroutine leak
 ```
 
 ---

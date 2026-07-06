@@ -489,4 +489,18 @@ transport.CloseIdleConnections()  // принудительно закрыть i
 
 ## Interview-ready answer
 
-TCP backlog — две очереди: SYN queue (SYN_RCVD, ждут ACK) и accept queue (ESTABLISHED, ждут accept()). Переполнение accept queue → silently drop или RST → клиент видит timeout. `net.core.somaxconn` ограничивает максимум. TIME_WAIT нужен чтобы гарантировать доставку последнего ACK и истечение "блуждающих пакетов" в сети; длится 2*MSL ≈ 60s; тысячи TIME_WAIT — нормально для active-close сервера. CLOSE_WAIT — это баг: приложение получило FIN но не вызвало close(); расти не должен. SO_REUSEPORT: несколько сокетов биндятся на один порт, ядро балансирует между ними — использует nginx для multi-worker. Nagle's algorithm буферизует маленькие пакеты; TCP_NODELAY отключает — нужен для API серверов и Redis клиентов. Socket buffers (SO_RCVBUF/SO_SNDBUF) определяют throughput на высоколатентных каналах. В Go `net.Listen` автоматически ставит SO_REUSEADDR; HTTP сервер отключает Nagle; `IdleConnTimeout` в Transport управляет временем жизни keep-alive соединений.
+**1. Что такое TCP backlog и чем грозит его переполнение?**
+
+- Две очереди: SYN queue (полуоткрытые, ждут ACK) и accept queue (ESTABLISHED, ждут `accept()`). Переполнение accept queue — silently drop или RST, клиент видит timeout. Максимум ограничен `net.core.somaxconn`.
+
+**2. TIME_WAIT против CLOSE_WAIT?**
+
+- TIME_WAIT — нормальное состояние стороны, закрывшей соединение: гарантирует доставку последнего ACK и вымирание блуждающих пакетов, длится 2*MSL (~60 c); тысячи TIME_WAIT у active-close сервера — норма. CLOSE_WAIT — баг приложения: FIN получен, а `close()` не вызван; расти не должен.
+
+**3. Зачем TCP_NODELAY и SO_REUSEPORT?**
+
+- Nagle буферизует маленькие пакеты ради экономии сети — для API-серверов и Redis-клиентов это лишняя latency, поэтому TCP_NODELAY (Go HTTP-сервер отключает Nagle сам). SO_REUSEPORT позволяет нескольким сокетам слушать один порт, ядро балансирует между ними — так работает multi-worker nginx.
+
+**4. Что тюнить для throughput?**
+
+- Socket buffers (SO_RCVBUF/SO_SNDBUF) определяют пропускную способность на каналах с высокой latency (bandwidth-delay product). В Go — `IdleConnTimeout` у Transport управляет временем жизни keep-alive соединений.

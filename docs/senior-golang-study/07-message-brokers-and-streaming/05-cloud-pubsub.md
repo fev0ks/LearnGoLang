@@ -1,6 +1,13 @@
 # Cloud Pub/Sub: Google Cloud и AWS SNS+SQS
 
-Cloud-managed messaging — no-ops альтернатива self-hosted Kafka/RabbitMQ. Платишь больше за каждое сообщение, но не управляешь инфраструктурой.
+Cloud-managed messaging — no-ops альтернатива self-hosted [Kafka](./01-kafka.md)/[RabbitMQ](./02-rabbitmq.md): выше цена за каждое сообщение, зато нет своей инфраструктуры и эксплуатации.
+
+## Содержание
+
+- [Google Cloud Pub/Sub](#google-cloud-pubsub)
+- [AWS SNS + SQS: fan-out паттерн](#aws-sns--sqs-fan-out-паттерн)
+- [Cloud vs Self-hosted](#cloud-vs-self-hosted)
+- [Interview-ready answer](#interview-ready-answer)
 
 ---
 
@@ -73,13 +80,9 @@ func subscribeMessages(ctx context.Context, projectID, subID string) error {
 
 ### Dead Letter Topic
 
-```go
-// При создании subscription через API/gcloud/Terraform
-// Сообщения попадают в DLT после N неудачных доставок
-// Затем нужна отдельная subscription на DLT для анализа
-```
+DLT настраивается при создании subscription (API/gcloud/Terraform): после N неудачных доставок сообщение уходит в dead-letter topic, на который заводится отдельная subscription для разбора.
 
-```yaml
+```bash
 # gcloud CLI
 gcloud pubsub subscriptions create fulfillment-sub \
   --topic=orders \
@@ -164,9 +167,8 @@ func consumeSQS(ctx context.Context, client *sqs.Client, queueURL string) error 
 
 ### SQS Dead Letter Queue
 
-```go
-// При создании SQS через Terraform/CloudFormation:
-// maxReceiveCount = 3 → после 3 неудачных попыток → DLQ
+```hcl
+# Terraform: maxReceiveCount = 3 → после 3 неудачных попыток → DLQ
 resource "aws_sqs_queue" "fulfillment_dlq" {
   name = "fulfillment-dlq"
 }
@@ -189,7 +191,7 @@ resource "aws_sqs_queue" "fulfillment" {
 | Операционная нагрузка | Минимальная | Высокая |
 | Стоимость | Pay-per-message (дороже при масштабе) | Дешевле при больших объёмах |
 | Vendor lock-in | ✅ | ❌ |
-| SLA | ≥ 99.9% | Зависит от тебя |
+| SLA | ≥ 99.9% | зависит от команды |
 | Настройка | Минимальная | Полный контроль |
 | Retention | До 7 дней (GCP), 4 дней (SQS) | Дни/недели/месяцы |
 | Throughput | Авто-масштабирование | Ручной scaling |
@@ -212,3 +214,7 @@ resource "aws_sqs_queue" "fulfillment" {
 **1. Чем SNS+SQS отличается от Kafka?**
 
 - SNS+SQS — managed сервисы с fan-out (SNS) и очередями (SQS), нет replay, retention до 4 дней. Kafka — distributed log с retention неделями/месяцами, consumer groups, replay с любого offset. SNS+SQS проще операционно, дороже при масштабе; Kafka сложнее, но гибче и дешевле при больших объёмах.
+
+**2. Когда managed-брокер вместо self-hosted?**
+
+- Когда некому эксплуатировать кластер: маленькая команда, умеренная нагрузка, replay дольше retention (4–7 дней) не нужен, стек уже в этом облаке. Self-hosted окупается на больших объёмах (pay-per-message становится дороже железа), при жёстких требованиях к data residency и долгому retention. Сводное сравнение — [07-comparison.md](./07-comparison.md).

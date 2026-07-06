@@ -11,6 +11,7 @@
 - [05. ORM And Query Builder Options](./05-orm-and-query-builder-options.md) — squirrel (dynamic WHERE), GORM N+1, Ent, Bun
 - [06. Choosing A Library For A Go Service](./06-choosing-a-library-for-a-go-service.md) — decision guide, рецепты, production checklist
 - [Helper Types And Tools](../../../03-go-libraries-and-ecosystem/) — shopspring/decimal, google/uuid, samber/lo, pkg/errors → раздел 03
+- [Migrations](../migrations/README.md) — инструменты миграций в Go (goose/golang-migrate/Atlas) и production-обвязка → соседний раздел
 
 ## Как читать
 

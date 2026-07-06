@@ -379,4 +379,14 @@ Production-ready experimentation требует:
 
 ## Interview-ready answer
 
-Я бы считал variant там, где находится риск. Для business logic, pricing и side effects - на backend, с local cached config и быстрым fallback в control. Для простых UI-only тестов можно использовать frontend SDK, но нужно избежать flicker и логировать exposure только после реального показа. Variant нужно передавать в response/bootstrap config, добавлять в analytics events и traces, но не доверять client-provided variant для критичных решений. Отдельно нужно продумать cache key, SSR hydration, mobile app versions и kill switch.
+**1. Где считать variant — на UI или на backend?**
+
+- Там, где находится риск: business logic, pricing и side effects — на backend с локальным cached config и быстрым fallback в control; простые UI-only тесты — можно frontend SDK, но с защитой от flicker и exposure только после реального показа.
+
+**2. Как variant проходит через систему?**
+
+- Передаётся в response/bootstrap config, добавляется в analytics events и traces. Client-provided variant для критичных решений не является источником истины.
+
+**3. Что легко забыть при реализации?**
+
+- Cache key (вариант должен участвовать в ключе кэша), SSR hydration (не разъехаться между сервером и клиентом), старые версии mobile app и kill switch.

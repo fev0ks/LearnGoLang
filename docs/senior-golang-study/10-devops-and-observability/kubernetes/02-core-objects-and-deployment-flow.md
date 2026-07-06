@@ -84,7 +84,7 @@ spec:
 
 `ReplicaSet` создается Deployment автоматически. Держит нужное число Pod'ов живыми. Каждый новый deploy (изменение template) создает новый ReplicaSet — старый сохраняется с `replicas: 0` для возможности rollback.
 
-Прямое создание ReplicaSet не нужно: всегда используй Deployment.
+Прямое создание ReplicaSet не нужно — рабочий уровень абстракции это Deployment.
 
 ## Service
 
@@ -202,7 +202,7 @@ spec:
       app: api-server
 ```
 
-Без PDB при `kubectl drain node` все Pod'ы на ноде могут быть убраны одновременно — даже если у тебя 3 реплики, 2 из которых на этой ноде.
+Без PDB при `kubectl drain node` все Pod'ы на ноде могут быть убраны одновременно — даже при 3 репликах, 2 из которых оказались на этой ноде.
 
 ## Deployment flow
 
@@ -232,4 +232,18 @@ kubectl rollout history deployment/api-server
 
 ## Interview-ready answer
 
-Базовая цепочка: Deployment управляет ReplicaSet, ReplicaSet держит Pod'ы живыми. Service дает стабильный DNS и балансирует трафик — Pod'ы могут пересоздаваться с новыми IP, Service это скрывает. ConfigMap и Secret хранят runtime-конфиг отдельно от image. При rolling update Kubernetes создает новый ReplicaSet и постепенно переключает трафик, дожидаясь readiness probe перед удалением старых Pod'ов — поэтому readiness probe критичен для zero-downtime deploy. HPA масштабирует число реплик по CPU или custom metrics, но требует наличия resources.requests. PDB гарантирует, что при maintenance кластера не упадет слишком много Pod'ов одновременно.
+**1. Как связаны Deployment, ReplicaSet, Pod и Service?**
+
+- Deployment управляет ReplicaSet-ами (новый на каждый deploy, старый хранится для rollback), ReplicaSet держит нужное число Pod-ов живыми. Service даёт стабильный DNS и балансирует трафик — Pod-ы пересоздаются с новыми IP, Service это скрывает через label selector.
+
+**2. Как устроен zero-downtime rolling update?**
+
+- `maxUnavailable: 0` + `maxSurge: 1`: создаётся новый ReplicaSet, поднимается новый Pod, Kubernetes ждёт прохождения readiness probe и только потом удаляет старый Pod — и так до полной замены. Без readiness probe трафик пойдёт в неготовый Pod — 502/503 на каждом деплое. Откат — `kubectl rollout undo`.
+
+**3. Что нужно для работы HPA и зачем PDB?**
+
+- HPA масштабирует реплики по метрикам, но утилизация считается от `resources.requests` — без них HPA не работает. PDB ограничивает, сколько Pod-ов можно одновременно убрать при voluntary disruption (drain, обновление кластера): без него drain ноды может снести большинство реплик разом.
+
+**4. Env vars или volume mount для ConfigMap?**
+
+- Env — просто и видно в `kubectl exec`, но смена значения требует rollout. Volume mount обновляется в живом Pod (~1 мин задержки) без rollout, но приложение должно уметь перечитывать файл. Секреты в etcd по умолчанию не шифруются — для production нужен encryption at rest или внешний manager.

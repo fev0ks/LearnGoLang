@@ -140,7 +140,7 @@ output "service_url" {
 
 У ресурса два вида полей:
 
-**Arguments** — то что ты задаёшь (входные параметры):
+**Arguments** — то, что задаётся (входные параметры):
 ```hcl
 resource "google_sql_database_instance" "main" {
   name             = "my-db"          # argument
@@ -157,7 +157,7 @@ google_sql_database_instance.main.public_ip_address
 google_sql_database_instance.main.self_link
 ```
 
-Разница важна: аргументы ты указываешь, атрибуты Terraform читает из API после создания.
+Разница важна: аргументы указываются вручную, атрибуты Terraform читает из API после создания.
 
 ---
 

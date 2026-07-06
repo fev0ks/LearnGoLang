@@ -1,38 +1,39 @@
 # RabbitMQ
 
-RabbitMQ — классический message broker на основе AMQP протокола. Его уникальная сила — гибкий routing через exchange/binding модель. Идеален для task queues, event-driven pipelines и сложного роутинга.
+RabbitMQ — классический message broker на основе протокола AMQP 0-9-1. Его сила — гибкая маршрутизация через модель exchange/binding. Ниша: task queues, event-driven пайплайны, сложный routing. Контраст с [Kafka](./01-kafka.md): очередь удаляет сообщение после подтверждения, реплея нет.
 
----
+## Содержание
+
+- [Архитектура: exchange → binding → queue](#архитектура-exchange--binding--queue)
+- [Типы exchange](#типы-exchange)
+- [Надёжность: confirms, ack/nack, prefetch, DLQ](#надёжность-confirms-acknack-prefetch-dlq)
+- [Quorum queues](#quorum-queues)
+- [Go код: publisher и subscriber](#go-код-publisher-и-subscriber)
+- [Competing consumers паттерн](#competing-consumers-паттерн)
+- [Production-грабли](#production-грабли)
+- [Когда RabbitMQ, когда Kafka](#когда-rabbitmq-когда-kafka)
+- [Interview-ready answer](#interview-ready-answer)
 
 ## Архитектура: exchange → binding → queue
 
-```
-Producer
-    │
-    ▼
-[Exchange]  ←── тип и routing key определяют куда идёт сообщение
-    │
-  [Binding]  ←── правило "forward если routing key совпадает"
-    │
-  [Queue]   ←── очередь; consumer читает из неё
-    │
-    ▼
-Consumer
+```mermaid
+flowchart LR
+    P[Producer] --> E{{"Exchange<br/>(тип + routing key)"}}
+    E -- binding --> Q1[Queue A]
+    E -- binding --> Q2[Queue B]
+    Q1 --> C1[Consumer 1]
+    Q2 --> C2[Consumer 2]
 ```
 
-**Exchange** — точка входа. Producer всегда публикует в exchange, никогда напрямую в queue.
-
-**Queue** — хранилище сообщений. Consumer подписывается на queue, не на exchange.
-
-**Binding** — связь между exchange и queue с опциональным routing key.
-
----
+- **Exchange** — точка входа. Producer всегда публикует в exchange, никогда напрямую в queue.
+- **Queue** — хранилище сообщений. Consumer подписывается на queue, не на exchange.
+- **Binding** — связь exchange → queue с опциональным routing key: правило «форвардить сюда, если ключ совпадает».
 
 ## Типы exchange
 
 ### Fanout — broadcast
 
-```
+```text
 Exchange (fanout)
     ├── Queue A  ← все получают копию
     ├── Queue B  ← все получают копию
@@ -41,24 +42,22 @@ Exchange (fanout)
 Routing key игнорируется
 ```
 
-Use case: broadcast событий (notifications, cache invalidation), чат (каждый participant имеет свою queue).
+Use case: broadcast событий (notifications, cache invalidation); чат, где у каждого участника своя queue.
 
 ### Direct — точное совпадение
 
-```
+```text
 Exchange (direct)
     ├── [binding: routing_key="error"] → Queue "errors"
     ├── [binding: routing_key="info"]  → Queue "logs"
     └── [binding: routing_key="warn"]  → Queue "alerts"
-
-Producer указывает routing_key → попадает в matching queue
 ```
 
 Use case: логи по уровням, задачи по типу.
 
 ### Topic — паттерн по ключу
 
-```
+```text
 Exchange (topic)
     ├── [binding: "orders.#"]       → Queue "all-orders"
     ├── [binding: "orders.created"] → Queue "new-orders"
@@ -68,54 +67,78 @@ Exchange (topic)
 "*" — ровно одно слово
 ```
 
-Use case: событийные системы с категоризацией (orders.created.EU, payments.failed.USD).
+Use case: событийные системы с категоризацией (`orders.created.EU`, `payments.failed.USD`).
 
 ### Headers — по заголовкам
 
-```
+```text
 Exchange (headers, match: all/any)
     ├── [binding: {"format":"json", "type":"order"}] → Queue A
     └── [binding: {"format":"xml"}]                  → Queue B
 ```
 
-Routing key игнорируется, решение по headers сообщения.
-Используется редко — дороже topic.
+Routing key игнорируется, решение — по headers сообщения. Используется редко: дороже topic.
 
----
+## Надёжность: confirms, ack/nack, prefetch, DLQ
 
-## Delivery: ack/nack, prefetch, DLQ
+Надёжная доставка в RabbitMQ собирается из **двух половин** — подтверждения на стороне публикации и на стороне потребления. Частая ошибка — настроить только вторую.
 
-### Manual Acknowledgement
+### Publisher confirms — подтверждение публикации
+
+`DeliveryMode: Persistent` сам по себе **не гарантирует**, что сообщение доехало: publish — асинхронная операция, и без confirm-режима брокер может упасть до записи на диск, а publisher об этом не узнает. Confirm-режим заставляет брокер подтверждать каждую публикацию:
 
 ```go
-// AutoAck=false → consumer явно подтверждает обработку
-delivery.Ack(false)    // подтвердить это сообщение
-delivery.Nack(false, true)  // отклонить + requeue=true → вернуть в очередь
-delivery.Reject(false) // отклонить + requeue=false → в DLQ (если настроен)
+ch.Confirm(false) // перевести канал в confirm mode
+
+// amqp091-go: publish с ожиданием подтверждения
+conf, err := ch.PublishWithDeferredConfirmWithContext(ctx,
+    exchangeName, routingKey, false, false,
+    amqp.Publishing{
+        DeliveryMode: amqp.Persistent,
+        ContentType:  "application/json",
+        Body:         data,
+    },
+)
+if err != nil {
+    return err
+}
+if ok, err := conf.WaitContext(ctx); err != nil || !ok {
+    return fmt.Errorf("publish not confirmed: %w", err) // retry / outbox
+}
 ```
+
+Итог: at-least-once на публикации = persistent message + durable queue + publisher confirm. Для критичных событий поверх этого — outbox-паттерн ([06-outbox-idempotency-and-payment-flow.md](../06-databases/relational-databases-and-sql/06-outbox-idempotency-and-payment-flow.md)).
+
+### Manual acknowledgement — подтверждение обработки
+
+```go
+// autoAck=false → consumer явно подтверждает обработку
+d.Ack(false)         // подтвердить это сообщение
+d.Nack(false, true)  // отклонить, requeue=true → вернуть в очередь
+d.Nack(false, false) // отклонить, requeue=false → в DLQ (если настроен)
+```
+
+Осторожно с `requeue=true` для постоянно падающих сообщений: без счётчика попыток получается бесконечный цикл (см. DLQ ниже).
 
 ### Prefetch (QoS)
 
 ```go
-// Не отправлять consumer более N несеwknitted сообщений
+// Не отправлять consumer-у более N неподтверждённых (unacked) сообщений.
+// Вызывать ДО ch.Consume — иначе первые доставки уйдут без лимита.
 ch.Qos(
-    10,    // prefetchCount: max N сообщений без ACK
-    0,     // prefetchSize: 0 = без ограничения по байтам
+    10,    // prefetchCount: max N сообщений без ack
+    0,     // prefetchSize: 0 = без лимита по байтам
     false, // global: false = per-consumer
 )
 ```
 
-Без prefetch — RabbitMQ может отправить все сообщения одному fast consumer'у, пока другой голодает.
+Без prefetch брокер может отгрузить тысячи сообщений одному быстрому consumer-у, пока остальные простаивают, а при падении этого consumer-а все unacked вернутся в очередь разом.
 
 ### Dead Letter Queue (DLQ)
 
-Сообщения попадают в DLQ когда:
-- consumer отклонил (`nack` или `reject` с `requeue=false`)
-- сообщение истекло (message TTL)
-- очередь переполнена (queue overflow + `x-overflow: reject-publish`)
+Сообщение попадает в DLQ, когда: consumer отклонил его с `requeue=false`; истёк message TTL; очередь переполнена.
 
 ```go
-// Объявить queue с DLQ
 args := amqp.Table{
     "x-dead-letter-exchange":    "dlq.exchange",
     "x-dead-letter-routing-key": "failed",
@@ -124,11 +147,25 @@ args := amqp.Table{
 ch.QueueDeclare("orders", true, false, false, false, args)
 ```
 
----
+## Quorum queues
+
+Классические зеркалируемые очереди (classic mirrored queues) **deprecated** и удалены в RabbitMQ 4.x. Современный ответ на HA — **quorum queues**: реплицируемая очередь на основе Raft.
+
+- Данные реплицируются на кворум узлов; очередь переживает падение узла без потери подтверждённых сообщений.
+- Всегда durable; в объявлении — `x-queue-type: quorum`.
+- Встроенный счётчик доставок `x-delivery-count` → нативный `delivery-limit` (после N попыток — в DLQ), чего нет у классических очередей.
+- Цена: больше памяти/диска, чуть выше latency, не поддерживают некоторые фичи классических (priority, exclusive).
+
+```go
+args := amqp.Table{"x-queue-type": "quorum", "x-delivery-limit": int32(5)}
+ch.QueueDeclare("orders", true, false, false, false, args)
+```
+
+Правило: для всего, что нельзя терять, — quorum queue; классические — для эфемерных и exclusive-очередей.
 
 ## Go код: publisher и subscriber
 
-Пример основан на реальном коде из `lrn-streams/internal/transport/rabbitmq/`.
+Сценарий — fanout broadcast: каждый подписчик получает копию каждого события.
 
 ### Publisher (fanout exchange)
 
@@ -138,7 +175,8 @@ package rabbitmq
 import (
     "context"
     "encoding/json"
-    
+    "fmt"
+
     amqp "github.com/rabbitmq/amqp091-go"
 )
 
@@ -160,18 +198,25 @@ func NewPublisher(amqpURL string) (*Publisher, error) {
         return nil, fmt.Errorf("channel: %w", err)
     }
 
-    // Декларируем exchange (idempotent — создаётся только если не существует)
+    // Декларация idempotent — создаётся, только если не существует
     if err := ch.ExchangeDeclare(
-        exchangeName,  // name
-        "fanout",      // type
-        true,          // durable — переживёт перезапуск брокера
-        false,         // auto-delete
-        false,         // internal
-        false,         // no-wait
-        nil,           // args
+        exchangeName, // name
+        "fanout",     // type
+        true,         // durable — переживёт перезапуск брокера
+        false,        // auto-delete
+        false,        // internal
+        false,        // no-wait
+        nil,          // args
     ); err != nil {
-        ch.Close(); conn.Close()
+        ch.Close()
+        conn.Close()
         return nil, fmt.Errorf("exchange declare: %w", err)
+    }
+
+    if err := ch.Confirm(false); err != nil { // publisher confirms
+        ch.Close()
+        conn.Close()
+        return nil, fmt.Errorf("confirm mode: %w", err)
     }
     return &Publisher{conn: conn, ch: ch}, nil
 }
@@ -181,17 +226,23 @@ func (p *Publisher) Publish(ctx context.Context, event any) error {
     if err != nil {
         return fmt.Errorf("marshal: %w", err)
     }
-    return p.ch.PublishWithContext(ctx,
-        exchangeName,  // exchange
-        "",            // routing key (игнорируется для fanout)
-        false,         // mandatory
-        false,         // immediate
+    conf, err := p.ch.PublishWithDeferredConfirmWithContext(ctx,
+        exchangeName, // exchange
+        "",           // routing key (fanout игнорирует)
+        false, false,
         amqp.Publishing{
             ContentType:  "application/json",
-            DeliveryMode: amqp.Persistent, // пережить перезапуск
+            DeliveryMode: amqp.Persistent,
             Body:         data,
         },
     )
+    if err != nil {
+        return fmt.Errorf("publish: %w", err)
+    }
+    if ok, err := conf.WaitContext(ctx); err != nil || !ok {
+        return fmt.Errorf("not confirmed: %w", err)
+    }
+    return nil
 }
 
 func (p *Publisher) Close() error {
@@ -220,73 +271,74 @@ func NewSubscriber[T any](amqpURL string) (*Subscriber[T], error) {
         return nil, err
     }
 
-    // Убедимся что exchange существует
     ch.ExchangeDeclare(exchangeName, "fanout", true, false, false, false, nil)
 
-    // Exclusive queue: уникальная для этого подключения, удаляется при disconnect
-    // Имя автогенерируется (пустая строка)
+    // Prefetch — ДО Consume
+    if err := ch.Qos(10, 0, false); err != nil {
+        ch.Close()
+        conn.Close()
+        return nil, err
+    }
+
+    // Exclusive queue: своя на каждое подключение, имя автогенерируется,
+    // удаляется при disconnect — так fanout даёт broadcast каждому подписчику
     q, err := ch.QueueDeclare(
-        "",     // name: auto-generated
-        false,  // durable: нет — exclusive queue ephemeral
-        true,   // auto-delete: удалить при disconnect
-        true,   // exclusive: только это соединение
+        "",    // name: auto-generated
+        false, // durable: нет — очередь эфемерная
+        true,  // auto-delete
+        true,  // exclusive
         false,
         nil,
     )
     if err != nil {
-        ch.Close(); conn.Close()
+        ch.Close()
+        conn.Close()
         return nil, err
     }
 
-    // Связываем queue с exchange
     if err := ch.QueueBind(q.Name, "", exchangeName, false, nil); err != nil {
-        ch.Close(); conn.Close()
+        ch.Close()
+        conn.Close()
         return nil, err
     }
 
-    // Начинаем потребление
     deliveries, err := ch.Consume(
         q.Name, // queue
         "",     // consumer tag (auto)
-        false,  // auto-ack: нет, подтверждаем вручную
+        false,  // auto-ack: нет — подтверждаем вручную
         true,   // exclusive
         false,  // no-local
         false,  // no-wait
         nil,
     )
     if err != nil {
-        ch.Close(); conn.Close()
+        ch.Close()
+        conn.Close()
         return nil, err
     }
 
-    // Ограничиваем prefetch
-    ch.Qos(10, 0, false)
-
-    s := &Subscriber[T]{
-        conn: conn,
-        ch:   ch,
-        msgs: make(chan T, 64),
-    }
+    s := &Subscriber[T]{conn: conn, ch: ch, msgs: make(chan T, 64)}
     go s.consumeLoop(deliveries)
     return s, nil
 }
 
+// handler вызывается синхронно: ack уходит только после успешной обработки.
+// Если отправлять сообщение в канал и ack-ать сразу — подтверждение произойдёт
+// ДО фактической обработки, и at-least-once превратится в "доставлено в буфер".
 func (s *Subscriber[T]) consumeLoop(deliveries <-chan amqp.Delivery) {
     defer close(s.msgs)
     for d := range deliveries {
         var event T
         if err := json.Unmarshal(d.Body, &event); err != nil {
-            d.Nack(false, false) // отклонить → в DLQ
+            d.Nack(false, false) // poison message не возвращаем в очередь — в DLQ
             continue
         }
-        s.msgs <- event
-        d.Ack(false) // подтвердить после успешной обработки
+        s.msgs <- event // блокирует, пока потребитель не заберёт
+        d.Ack(false)
     }
 }
 
-func (s *Subscriber[T]) Messages() <-chan T {
-    return s.msgs
-}
+func (s *Subscriber[T]) Messages() <-chan T { return s.msgs }
 
 func (s *Subscriber[T]) Close() error {
     s.ch.Close()
@@ -294,29 +346,32 @@ func (s *Subscriber[T]) Close() error {
 }
 ```
 
----
-
 ## Competing consumers паттерн
 
 Несколько consumers на **одной** queue — задачи распределяются между ними:
 
-```
+```text
 Queue "tasks"
-    ├── Consumer A  ← обрабатывает task 1, 4, 7 ...
-    ├── Consumer B  ← обрабатывает task 2, 5, 8 ...
-    └── Consumer C  ← обрабатывает task 3, 6, 9 ...
+    ├── Consumer A  ← task 1, 4, 7 ...
+    ├── Consumer B  ← task 2, 5, 8 ...
+    └── Consumer C  ← task 3, 6, 9 ...
 ```
 
 ```go
-// Три instance одного сервиса подключаются к одной queue
-// RabbitMQ автоматически балансирует задачи (round-robin)
-ch.QueueDeclare("tasks", true, false, false, false, nil) // shared, durable
+// Три инстанса одного сервиса подключаются к одной queue —
+// RabbitMQ балансирует задачи (round-robin с учётом prefetch)
+ch.QueueDeclare("tasks", true, false, false, false,
+    amqp.Table{"x-queue-type": "quorum"})
 ch.Consume("tasks", "worker-1", false, false, false, false, nil)
 ```
 
-Отличие от Kafka: в RabbitMQ нет явного понятия consumer group, competing consumers реализуется просто несколькими подключениями к одной queue.
+Отличие от Kafka: явного понятия consumer group нет — work-sharing получается просто несколькими подписчиками одной queue, а broadcast — отдельной queue на каждого подписчика (fanout).
 
----
+## Production-грабли
+
+- **`amqp091-go` не переподключается сам.** При обрыве соединения `Connection` и `Channel` мёртвые навсегда; канал `deliveries` закрывается. Нужен reconnect-слой: слушать `conn.NotifyClose(...)`, пересоздавать connection/channel/подписки с backoff — или взять обёртку с автопереподключением. Это самая частая причина «consumer молча перестал получать сообщения после сетевого моргания».
+- **Unbounded queue.** Если consumers отстают, очередь растёт, пока не съест диск/память и брокер не начнёт душить publishers (flow control). Ставить `x-max-length`/TTL + алерт на глубину очереди.
+- **Одно соединение на всё.** Каналы мультиплексируются в одном TCP-соединении, но publish и consume лучше разносить по разным соединениям: flow control на публикацию может заблокировать и потребление.
 
 ## Когда RabbitMQ, когда Kafka
 
@@ -324,34 +379,34 @@ ch.Consume("tasks", "worker-1", false, false, false, false, nil)
 |---|---|---|
 | Основная модель | Message queue | Event log |
 | Routing | Гибкий (exchange types) | По ключу → партиция |
-| Throughput | Умеренный (50-100k msg/s) | Высокий (1M+ msg/s) |
-| Persistence | Optional (durable) | По умолчанию |
-| Replay | ❌ | ✅ |
-| Consumer groups | Competing consumers (queue) | True groups (partition assignment) |
-| Ordering | Per-queue | Per-partition |
-| Latency | Очень низкая (мкс-мс) | Выше (batching) |
+| Throughput | Умеренный (50–100k msg/s) | Высокий (1M+ msg/s) |
+| Persistence | Durable queues + persistent messages | По умолчанию, retention днями |
+| Replay | ❌ (после ack сообщение удалено) | ✅ с любого offset |
+| Распределение работы | Competing consumers (queue) | Consumer groups (partition assignment) |
+| Ordering | Per-queue (ломается при requeue/нескольких consumers) | Per-partition |
+| Latency | Очень низкая (доли мс) | Выше (batching) |
 | Операционная сложность | Умеренная | Высокая |
 
-**Выбирай RabbitMQ когда:**
-- Task queues (email, notifications, background jobs)
-- Сложный routing по типам событий
-- Нужна низкая latency
-- Команда не готова к Kafka
-
-**Выбирай Kafka когда:**
-- High-throughput event streaming
-- Нужен replay/reprocessing
-- Event sourcing / audit log
-- Несколько независимых consumer groups
-
----
+RabbitMQ — когда: task queues (email, notifications, background jobs), сложный routing по типам событий, низкая latency, брокер нужен «попроще». Kafka — когда: high-throughput streaming, replay/reprocessing, event sourcing, несколько независимых групп читателей. Сводная таблица по всем брокерам — [07-comparison.md](./07-comparison.md).
 
 ## Interview-ready answer
 
-**Q: Объясни exchange/queue/binding в RabbitMQ**
+**1. Объясни модель exchange/queue/binding.**
 
-Producer публикует в exchange — routing component. Exchange не хранит сообщения сам. Binding связывает exchange и queue с правилом: "если routing key совпадает — форвардить сюда". Queue хранит сообщения для consumer. Тип exchange определяет routing логику: fanout (broadcast всем), direct (точное совпадение ключа), topic (glob-паттерн по ключу).
+- Producer публикует в exchange — компонент маршрутизации, который сам сообщения не хранит. Binding связывает exchange с queue правилом «форвардить, если routing key совпадает». Queue хранит сообщения для consumers. Тип exchange задаёт логику: fanout — broadcast всем привязанным очередям, direct — точное совпадение ключа, topic — glob-паттерн (`orders.#`), headers — по заголовкам.
 
-**1. Зачем exclusive queue в fanout-архитектуре?**
+**2. Как получить надёжную доставку end-to-end?**
 
-- При broadcast каждый consumer должен получить копию сообщения. Для этого каждый consumer создаёт **свою** queue (exclusive, auto-delete) и привязывает к fanout exchange. Тогда fanout exchange копирует сообщение в каждую queue. Если бы все consumers читали из одной queue — это был бы competing consumers (load balancing), а не broadcast.
+- Три составляющие: durable queue (лучше quorum) + persistent message + **publisher confirms** на публикации; manual ack после обработки на потреблении; идемпотентный consumer, потому что всё это даёт at-least-once — дубликаты возможны. Без confirms publish — fire-and-forget: брокер может упасть до записи, и publisher не узнает.
+
+**3. Зачем exclusive queue в fanout-архитектуре?**
+
+- При broadcast каждый consumer должен получить копию сообщения, поэтому каждый создаёт **свою** queue (exclusive, auto-delete) и привязывает её к fanout exchange — тот копирует сообщение во все очереди. Если бы все читали одну queue, получился бы competing consumers (распределение нагрузки), а не broadcast.
+
+**4. Что такое quorum queues и чем они лучше mirrored?**
+
+- Реплицируемые очереди на Raft: подтверждённое сообщение хранится на кворуме узлов и переживает падение узла. Классические mirrored queues имели проблемы с ресинхронизацией после failover и удалены в RabbitMQ 4.x. Бонус quorum — встроенный delivery-limit: после N неудачных доставок сообщение уходит в DLQ, что решает проблему бесконечного requeue.
+
+**5. Зачем prefetch (QoS)?**
+
+- Ограничивает число unacked-сообщений на consumer-а. Без него брокер отгружает всё одному быстрому потребителю: остальные простаивают, а при падении этого consumer-а вся пачка возвращается в очередь разом. Ставится до `Consume`; типичные значения — единицы–десятки при тяжёлой обработке.

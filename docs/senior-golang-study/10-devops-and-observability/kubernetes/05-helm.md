@@ -17,12 +17,13 @@ Helm — менеджер пакетов для Kubernetes. Если Kubernetes 
 - [Helm команды](#helm-команды)
 - [Releases и namespaces](#releases-и-namespaces)
 - [Антипаттерны](#антипаттерны)
+- [Interview-ready answer](#interview-ready-answer)
 
 ---
 
 ## Проблема без Helm
 
-Без Helm для каждого окружения нужно отдельно описывать манифесты. Если у тебя два сервиса и три окружения — уже 6 почти одинаковых Deployment файлов. Изменить количество реплик → руками в каждом файле.
+Без Helm для каждого окружения нужно отдельно описывать манифесты. Два сервиса и три окружения — уже 6 почти одинаковых Deployment-файлов; изменение числа реплик — руками в каждом.
 
 ```
 # Без Helm: отдельные файлы на каждое окружение
@@ -113,7 +114,7 @@ appVersion: "0.1.0"      # версия приложения — информа�
 `values.yaml` — это объект с любой структурой. Внутри шаблонов к нему обращаются через `.Values`.
 
 ```yaml
-# values.yaml из проекта
+# values.yaml учебного чарта (локальный kind-стенд)
 global:
   appEnv: local
   imagePullPolicy: IfNotPresent   # не тянуть образ если он уже есть на ноде
@@ -421,7 +422,7 @@ labels:
 # template "url-shortener.labels" .  ← так не получится пропустить через nindent
 ```
 
-Всегда используй `include`, не `template`.
+Правило: всегда `include`, не `template`.
 
 ---
 
@@ -503,7 +504,7 @@ stringData:
 data:
   DB_DSN: cG9zdGdyZXM6Ly91c2VyOnBhc3NAaG9zdC9kYg==
 
-# Используй stringData в шаблонах — проще читать и не нужно кодировать вручную
+# В шаблонах удобнее stringData — читается и не требует ручного кодирования
 ```
 
 При `helm template` Secret со stringData выглядит так:
@@ -736,7 +737,7 @@ spec:
       {{- end }}
 ```
 
-### ClusterIP vs NodePort в этом проекте
+### ClusterIP vs NodePort в локальном kind-окружении
 
 В `values.yaml` (по умолчанию) — `ClusterIP`: сервис доступен только внутри кластера.
 
@@ -787,7 +788,7 @@ helm template sandbox-url-shortener ./deploy/helm/url-shortener \
   --namespace sandbox-url-shortener
 ```
 
-`helm template` — главный инструмент отладки. Запускай его чтобы увидеть реальные YAML которые будут применены.
+`helm template` — главный инструмент отладки: показывает реальные YAML, которые будут применены.
 
 ### helm upgrade --install
 
@@ -931,4 +932,28 @@ resources:
 
 **Не использовать `helm template` перед apply**
 
-Запускай `helm template` для проверки шаблонов перед `helm upgrade --install`. Ошибки в шаблонах видны до применения к кластеру.
+`helm template` перед `helm upgrade --install` показывает ошибки шаблонов до применения к кластеру — пропуск этого шага означает отладку прямо на кластере.
+
+---
+
+## Interview-ready answer
+
+**1. Что такое chart, values и release?**
+
+- Chart — пакет шаблонов манифестов; values — входные параметры (values.yaml + переопределения `-f`/`--set`, мержатся поверх); release — конкретная установка чарта в кластер со своей историей ревизий (метаданные Helm хранит как Secret в namespace). Один чарт → много releases с разными values.
+
+**2. Чем `version` отличается от `appVersion` в Chart.yaml?**
+
+- `version` — версия самого чарта (меняется при изменении шаблонов, SemVer), `appVersion` — версия деплоящегося приложения, чисто информационное поле. Bump-ается независимо.
+
+**3. Чем `include` отличается от `template` и зачем `dict`?**
+
+- Оба вызывают именованный шаблон, но `include` возвращает строку, которую можно пайплайнить (`| nindent 4`), а `template` выводит напрямую — поэтому используется только `include`. Именованный шаблон принимает один аргумент-контекст; несколько параметров передаются упаковкой в `dict "root" . "service" "x"`.
+
+**4. Почему нельзя менять labels в selector?**
+
+- `spec.selector` Deployment immutable: если полные labels (с версией чарта) попадут в selector, любое обновление версии сломает деплой. Поэтому в selector идут только стабильные `selectorLabels` (name + instance), а изменяемые labels — только в metadata.
+
+**5. Как Helm работает с секретами?**
+
+- Настоящие секреты в values.yaml — антипаттерн (файл в git). Варианты: helm-secrets (SOPS-шифрование values), External Secrets Operator (подтягивает из Vault/Secret Manager), передача через `--set` из переменных CI/CD.

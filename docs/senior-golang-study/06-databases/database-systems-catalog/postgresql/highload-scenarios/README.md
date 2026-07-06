@@ -8,6 +8,8 @@ Companion к разделу [postgresql](../README.md). Конкретные pro
 - [02 Bulk UPDATE/DELETE без bloat и долгих локов](./02-bulk-update-delete.md) — батчи по ключу/`ctid`, throttle, partition DROP вместо DELETE.
 - [03 Upsert под нагрузкой](./03-upsert-at-scale.md) — `ON CONFLICT`, дедупликация, батч-upsert, конкуренция за горячие строки.
 - [04 Горячие строки и счётчики](./04-hot-rows-and-counters.md) — lock contention на одной строке, sharded counters, INCR+flush.
+- [05 Онлайн-миграция: добавить колонку на большой таблице](./05-online-schema-migration.md) — константный vs волатильный DEFAULT, missing value (PG 11+), nullable + бэкфилл, быстрый `SET NOT NULL` через `NOT VALID`, `lock_timeout` против lock queue.
+- [06 Zero-downtime изменения схемы: 15 кейсов](./06-zero-downtime-patterns.md) — rename/смена типа/split колонок, UNIQUE/FK/индекс без блокировок, INT→UUID, партиционирование существующей таблицы, чистка миллиардов строк, переезд на новую БД, major upgrade — через 5 паттернов (expand/contract, dual write, backfill, параллельная схема, постепенное переключение).
 
 ## Смежные практики (уже в других файлах)
 

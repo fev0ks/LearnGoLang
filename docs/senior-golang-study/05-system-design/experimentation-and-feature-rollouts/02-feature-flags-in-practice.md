@@ -548,4 +548,14 @@ Feature flags создают долг.
 
 ## Interview-ready answer
 
-Feature flag - это механизм отделения deploy от release. В production я бы получал flags через SDK или internal config service, но evaluation держал бы локальной: background sync загружает config в `atomic.Value` snapshot, а request path читает его без lock. Для backend-critical решений вроде pricing, permissions, checkout и side effects variant должен считаться на server, а UI получает только безопасный bootstrap config. Включение идет постепенно: internal users, beta, 1%, 10%, 50%, 100%, с guardrail metrics и kill switch. После rollout temporary flag нужно удалить, иначе он превращается в technical debt. Детальная реализация клиента на Go — в `02a`.
+**1. Что такое feature flag и как его правильно эксплуатировать?**
+
+- Механизм отделения deploy от release. Flags приходят через SDK или internal config service, но evaluation локальная: background sync грузит config в `atomic.Value`-snapshot, request path читает без локов.
+
+**2. Где считать variant — client или server?**
+
+- Для backend-critical решений (pricing, permissions, checkout, side effects) variant считается на сервере; UI получает только безопасный bootstrap config — client-provided значению доверять нельзя.
+
+**3. Как выглядит правильный rollout через флаг?**
+
+- Постепенно: internal users → beta → 1% → 10% → 50% → 100%, с guardrail-метриками и kill switch. После полного включения temporary flag удаляется — иначе он превращается в technical debt. Реализация клиента на Go — в 02a.

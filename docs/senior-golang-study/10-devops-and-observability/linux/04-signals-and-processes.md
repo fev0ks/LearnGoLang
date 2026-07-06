@@ -347,4 +347,18 @@ go func() {
 
 ## Interview-ready answer
 
-SIGTERM — запрос на завершение, можно поймать и обработать gracefully. SIGKILL — немедленное уничтожение ядром, нельзя поймать. `docker stop` посылает SIGTERM, ждёт timeout (10s), затем SIGKILL. PID 1 особый: нет default signal handlers, SIGTERM игнорируется если явно не обработан. В Go: `signal.NotifyContext` или `signal.Notify(ch, syscall.SIGTERM)` — обязательно для корректного shutdown при запуске как PID 1. Zombie — завершившийся процесс, чей родитель не вызвал `wait()`. Orphan — процесс, чей родитель умер; переприписывается к PID 1, который должен их reap. В Kubernetes между SIGTERM и остановкой трафика есть race condition — нужен sleep 5s (preStop hook) перед началом shutdown.
+**1. SIGTERM vs SIGKILL?**
+
+- SIGTERM — запрос на завершение: ловится и обрабатывается gracefully. SIGKILL — немедленное уничтожение ядром, поймать нельзя. `docker stop` шлёт SIGTERM, ждёт timeout (10 c), затем SIGKILL — в это окно должен уложиться graceful shutdown.
+
+**2. Чем особен PID 1?**
+
+- У PID 1 нет default-обработчиков: SIGTERM игнорируется, если не обработан явно. Поэтому Go-сервису в контейнере обязателен `signal.NotifyContext`/`signal.Notify` — иначе контейнер убивается только по SIGKILL.
+
+**3. Zombie и orphan процессы?**
+
+- Zombie — завершившийся процесс, чей родитель не вызвал `wait()` (висит записью в таблице процессов). Orphan — процесс с умершим родителем: переприписывается PID 1, который обязан их reap — отсюда tini в контейнерах с форками.
+
+**4. Какой race в Kubernetes при остановке?**
+
+- Между SIGTERM и обновлением Service endpoints есть задержка: новые запросы ещё приходят в завершающийся Pod. Решение — sleep ~5 c (preStop hook или в коде) до начала shutdown.

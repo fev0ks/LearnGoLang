@@ -395,12 +395,18 @@ func (w *Worker) process(ctx context.Context, job Job) {
 
 ## Interview-ready answer
 
-> "Фоновые воркеры в Go — это прежде всего правильный graceful shutdown и bounded concurrency.
->
-> Graceful shutdown: `signal.NotifyContext` ловит SIGTERM, передаёт ctx в воркеры, они заканчивают текущую задачу и выходят. `sync.WaitGroup` + timeout контекст дают уверенность что всё завершилось до kill-9.
->
-> Worker pool: bounded channel как семафор. Без ограничения параллельности под нагрузкой можно получить 10K goroutines и исчерпанный DB connection pool.
->
-> Для distributed periodic jobs (только один инстанс в кластере): Redis SETNX или PostgreSQL advisory lock. Простой, надёжный, не нужен Zookeeper.
->
-> Idempotency: таблица `processed_messages` с `ON CONFLICT DO NOTHING`. At-least-once delivery из брокера + идемпотентный воркер = exactly-once семантика на уровне бизнес-логики."
+**1. Что главное в фоновых воркерах на Go?**
+
+- Правильный graceful shutdown и bounded concurrency. Shutdown: `signal.NotifyContext` ловит SIGTERM, ctx передаётся в воркеры, они дорабатывают текущую задачу и выходят; `sync.WaitGroup` + timeout-контекст гарантируют завершение до SIGKILL.
+
+**2. Зачем ограничивать параллелизм?**
+
+- Worker pool с bounded channel как семафором: без ограничения под нагрузкой получаются десятки тысяч горутин и исчерпанный DB connection pool — latency растёт до таймаутов.
+
+**3. Как сделать periodic job единственным в кластере?**
+
+- Distributed lock: Redis `SETNX` или PostgreSQL advisory lock — просто и надёжно, отдельный координатор не нужен.
+
+**4. Как получить exactly-once на уровне бизнес-логики?**
+
+- At-least-once доставка из брокера + идемпотентный воркер: таблица `processed_messages` с `ON CONFLICT DO NOTHING` — повторная обработка того же сообщения становится no-op.

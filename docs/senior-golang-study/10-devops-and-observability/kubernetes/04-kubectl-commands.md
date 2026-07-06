@@ -18,6 +18,7 @@
 - [Apply, delete, scale](#apply-delete-scale)
 - [Полезные флаги и алиасы](#полезные-флаги-и-алиасы)
 - [Быстрый troubleshooting workflow](#быстрый-troubleshooting-workflow)
+- [Interview-ready answer](#interview-ready-answer)
 
 ---
 
@@ -32,17 +33,17 @@ kubectl config get-contexts
 ```
 CURRENT   NAME                                    CLUSTER                              AUTHINFO                            NAMESPACE
           docker-desktop                          docker-desktop                       docker-desktop
-*         gke_skibookers_europe-west4_skiprod     gke_skibookers_europe-west4_skiprod  gke_skibookers_europe-west4_skiprod
+*         gke_mycompany_europe-west4_prod     gke_mycompany_europe-west4_prod  gke_mycompany_europe-west4_prod
           minikube                                minikube                             minikube                            default
 ```
 Звёздочка — текущий активный контекст.
 
 ```bash
 # Переключить контекст
-kubectl config use-context gke_skibookers_europe-west4_skiprod
+kubectl config use-context gke_mycompany_europe-west4_prod
 ```
 ```
-Switched to context "gke_skibookers_europe-west4_skiprod".
+Switched to context "gke_mycompany_europe-west4_prod".
 ```
 
 ```bash
@@ -50,17 +51,17 @@ Switched to context "gke_skibookers_europe-west4_skiprod".
 kubectl config current-context
 ```
 ```
-gke_skibookers_europe-west4_skiprod
+gke_mycompany_europe-west4_prod
 ```
 
 ```bash
 # Получить credentials для GKE кластера (Google Cloud)
-export KUBECONFIG=/Users/fev0ks/.kube/config
-gcloud container clusters get-credentials skiprod --region europe-west4 --project skibookers
+export KUBECONFIG=~/.kube/config
+gcloud container clusters get-credentials prod --region europe-west4 --project mycompany
 ```
 ```
 Fetching cluster endpoint and auth data.
-kubeconfig entry generated for skiprod.
+kubeconfig entry generated for prod.
 ```
 
 ```bash
@@ -141,8 +142,8 @@ kubectl get pods -o wide
 ```
 ```
 NAME                           READY   STATUS    RESTARTS   AGE   IP            NODE                    NOMINATED NODE
-api-server-7d6b8f9c4-xkp2m    1/1     Running   0          3h    10.96.1.14    gke-skiprod-pool-abc12   <none>
-api-server-7d6b8f9c4-rtq8n    1/1     Running   0          3h    10.96.1.15    gke-skiprod-pool-def34   <none>
+api-server-7d6b8f9c4-xkp2m    1/1     Running   0          3h    10.96.1.14    gke-prod-pool-abc12   <none>
+api-server-7d6b8f9c4-rtq8n    1/1     Running   0          3h    10.96.1.15    gke-prod-pool-def34   <none>
 ```
 
 ```bash
@@ -153,7 +154,7 @@ kubectl describe pod api-server-7d6b8f9c4-xkp2m -n production
 Name:             api-server-7d6b8f9c4-xkp2m
 Namespace:        production
 Priority:         0
-Node:             gke-skiprod-pool-abc12/10.132.0.5
+Node:             gke-prod-pool-abc12/10.132.0.5
 Start Time:       Mon, 22 Apr 2026 09:00:00 +0000
 Labels:           app=api-server
                   pod-template-hash=7d6b8f9c4
@@ -161,7 +162,7 @@ Status:           Running
 IP:               10.96.1.14
 Containers:
   api-server:
-    Image:          gcr.io/skibookers/api-server:v1.2.3
+    Image:          gcr.io/mycompany/api-server:v1.2.3
     Port:           8080/TCP
     Limits:
       cpu:     500m
@@ -185,8 +186,8 @@ Conditions:
 Events:
   Type    Reason     Age   From               Message
   ----    ------     ----  ----               -------
-  Normal  Scheduled  3h    default-scheduler  Successfully assigned production/api-server-7d6b8f9c4-xkp2m to gke-skiprod-pool-abc12
-  Normal  Pulled     3h    kubelet            Container image "gcr.io/skibookers/api-server:v1.2.3" already present on machine
+  Normal  Scheduled  3h    default-scheduler  Successfully assigned production/api-server-7d6b8f9c4-xkp2m to gke-prod-pool-abc12
+  Normal  Pulled     3h    kubelet            Container image "gcr.io/mycompany/api-server:v1.2.3" already present on machine
   Normal  Started    3h    kubelet            Started container api-server
 ```
 
@@ -312,7 +313,7 @@ kubectl run netshoot --image=nicolaka/netshoot -it --rm --restart=Never -n produ
 ```bash
 # Посмотреть что внутри запущенного контейнера без exec (если нет shell)
 kubectl debug -it api-server-7d6b8f9c4-xkp2m --image=busybox --target=api-server
-# Ephemeral container — Go 1.16+ / K8s 1.23+
+# Ephemeral container — K8s 1.23+ (GA с 1.25); нужен для distroless/scratch образов
 ```
 
 ---
@@ -344,7 +345,7 @@ Pod Template:
   Labels:  app=api-server
   Containers:
    api-server:
-    Image:  gcr.io/skibookers/api-server:v1.2.3
+    Image:  gcr.io/mycompany/api-server:v1.2.3
     ...
 OldReplicaSets:  <none>
 NewReplicaSet:   api-server-7d6b8f9c4 (3/3 replicas created)
@@ -368,8 +369,8 @@ kubectl rollout history deployment/api-server -n production
 ```
 REVISION  CHANGE-CAUSE
 1         kubectl apply --filename=deploy.yaml
-2         kubectl set image deployment/api-server api-server=gcr.io/skibookers/api-server:v1.2.2
-3         kubectl set image deployment/api-server api-server=gcr.io/skibookers/api-server:v1.2.3
+2         kubectl set image deployment/api-server api-server=gcr.io/mycompany/api-server:v1.2.2
+3         kubectl set image deployment/api-server api-server=gcr.io/mycompany/api-server:v1.2.3
 ```
 
 ```bash
@@ -388,7 +389,7 @@ deployment.apps/api-server rolled back
 
 ```bash
 # Обновить image (задеплоить новую версию)
-kubectl set image deployment/api-server api-server=gcr.io/skibookers/api-server:v1.2.4 -n production
+kubectl set image deployment/api-server api-server=gcr.io/mycompany/api-server:v1.2.4 -n production
 
 # Принудительный restart всех pod (без изменения image)
 kubectl rollout restart deployment/api-server -n production
@@ -449,7 +450,7 @@ kubectl port-forward svc/kafka-ui 8080:8080 -n default
 kubectl port-forward svc/postgres 5433:5432 -n default
 
 # Пробросить сервис на порт 9080 (удалённый порт — 9081)
-kubectl port-forward svc/skibookers-platform-core 9080:9081 -n default
+kubectl port-forward svc/platform-core 9080:9081 -n default
 ```
 ```
 Forwarding from 127.0.0.1:5433 -> 5432
@@ -565,9 +566,9 @@ kubectl top nodes
 ```
 ```
 NAME                          CPU(cores)   CPU%   MEMORY(bytes)   MEMORY%
-gke-skiprod-pool-abc12        823m         20%    3840Mi          50%
-gke-skiprod-pool-def34        412m         10%    2048Mi          26%
-gke-skiprod-pool-ghi56        1124m        28%    4352Mi          56%
+gke-prod-pool-abc12        823m         20%    3840Mi          50%
+gke-prod-pool-def34        412m         10%    2048Mi          26%
+gke-prod-pool-ghi56        1124m        28%    4352Mi          56%
 ```
 
 ```bash
@@ -593,8 +594,8 @@ kubectl get events -n production --sort-by='.lastTimestamp'
 ```
 ```
 LAST SEEN   TYPE      REASON              OBJECT                                MESSAGE
-5m          Normal    Scheduled           Pod/api-server-new-8e7c9d0b5-zyx1    Successfully assigned to gke-skiprod-pool-abc12
-5m          Normal    Pulling             Pod/api-server-new-8e7c9d0b5-zyx1    Pulling image "gcr.io/skibookers/api-server:v1.2.4"
+5m          Normal    Scheduled           Pod/api-server-new-8e7c9d0b5-zyx1    Successfully assigned to gke-prod-pool-abc12
+5m          Normal    Pulling             Pod/api-server-new-8e7c9d0b5-zyx1    Pulling image "gcr.io/mycompany/api-server:v1.2.4"
 4m          Normal    Pulled              Pod/api-server-new-8e7c9d0b5-zyx1    Successfully pulled image
 4m          Normal    Started             Pod/api-server-new-8e7c9d0b5-zyx1    Started container api-server
 2m          Warning   BackOff             Pod/worker-5c4d3e2f1-abc12           Back-off restarting failed container
@@ -662,8 +663,8 @@ kubectl apply -f deployment.yaml --dry-run=server  # отправить в API s
 kubectl diff -f deployment.yaml
 ```
 ```diff
--  image: gcr.io/skibookers/api-server:v1.2.3
-+  image: gcr.io/skibookers/api-server:v1.2.4
+-  image: gcr.io/mycompany/api-server:v1.2.3
++  image: gcr.io/mycompany/api-server:v1.2.4
 ```
 
 ```bash
@@ -734,7 +735,7 @@ alias kd='kubectl describe'
 alias kdp='kubectl describe pod'
 
 # Быстрое переключение контекста
-alias kprod='kubectl config use-context gke_skibookers_europe-west4_skiprod'
+alias kprod='kubectl config use-context gke_mycompany_europe-west4_prod'
 alias klocal='kubectl config use-context docker-desktop'
 ```
 
@@ -746,7 +747,7 @@ brew install kubectx
 
 # Показать контексты и переключить
 kubectx                       # список контекстов
-kubectx gke_skibookers_...    # переключить
+kubectx gke_mycompany_...    # переключить
 kubectx -                     # вернуться к предыдущему
 
 # Переключить namespace
@@ -828,3 +829,19 @@ kubectl exec api-server-7d6b8f9c4-xkp2m -n production -- env | sort
 # Нет ли OOM за последнее время
 kubectl get events -n production --field-selector reason=OOMKilling
 ```
+
+---
+
+## Interview-ready answer
+
+**1. Pod не стартует — как диагностировать?**
+
+- Сначала `kubectl get pods` — статус подсказывает класс проблемы (Pending / ImagePullBackOff / CrashLoopBackOff / OOMKilled). Затем `kubectl describe pod` — секция Events внизу почти всегда содержит причину (FailedScheduling, неверный tag, failed probe). Для падающего приложения — `kubectl logs --previous`: логи именно того контейнера, который умер.
+
+**2. Чем describe отличается от logs и events?**
+
+- `logs` — stdout/stderr самого приложения; `describe` — состояние объекта глазами Kubernetes (probes, лимиты, mounts) плюс его события; `get events` — события всего namespace, полезно когда непонятно, какой объект виноват. Диагностика обычно идёт describe → events → logs.
+
+**3. Service не отдаёт трафик на pod — что проверять?**
+
+- `kubectl get endpoints <svc>`: если ENDPOINTS пуст — selector Service не совпадает с labels pod-ов (`get pods --show-labels`) либо pod-ы не проходят readiness probe (не-ready pod из endpoints исключается). `port-forward` к pod-у напрямую помогает отделить проблему приложения от проблемы маршрутизации.

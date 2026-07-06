@@ -1268,20 +1268,14 @@ ID полей:
 
 ## Interview-ready answer
 
-> **Как спроектировать хороший REST API?**
+**1. Как спроектировать хороший REST API?**
 
-REST API строится вокруг ресурсов — существительных, а не глаголов. URL `/orders/123` — адрес конкретного заказа. Действие выражается HTTP-методом: GET — прочитать, POST — создать, PATCH — частично обновить, DELETE — удалить.
+- Вокруг ресурсов-существительных: URL `/orders/123` — адрес заказа, действие выражается HTTP-методом (GET/POST/PATCH/DELETE). Правила именования: plural nouns (`/orders`, не `/order/list`), kebab-case (`/contact-info`), ID в path (`/orders/123`, не `?id=123`). State-machine-переходы — через sub-resource: `POST /payments/{id}/confirmation` — создание ресурса-подтверждения, а не вызов метода. Хороший API самодокументируется: `GET /users/123/orders?status=pending` понятен без документации.
 
-Три главных правила именования: **plural nouns** для коллекций (`/orders`, не `/order/list`), **kebab-case** (`/contact-info`, не `/contactInfo`), **ID ресурса в path** (`/orders/123`, не `/orders?id=123`).
+**2. Какие частые ошибки в URL-дизайне?**
 
-Частые ошибки: глаголы в URL (`/orders/confirm` → лучше `POST /orders/123/confirmation`), POST вместо GET для read-операций, суффикс `/list` на коллекциях, аббревиатуры в путях.
+- Глаголы в URL (`/orders/confirm` → `POST /orders/123/confirmation`), POST вместо GET для чтения, суффикс `/list` на коллекциях, аббревиатуры в путях.
 
-Особые случаи — state machine transitions — решаются через sub-resource: `POST /payments/{id}/confirmation` — это создание ресурса-подтверждения, не просто вызов метода.
+**3. Какие типичные проблемы в дизайне response?**
 
-Хороший REST API самодокументируется: клиент, видя `GET /users/123/orders?status=pending`, понимает его без документации.
-
-> **Какие типичные проблемы в дизайне response?**
-
-Три главных: **даты как unix timestamp** вместо ISO 8601 (клиент не знает, секунды или миллисекунды, какой timezone), **деньги как float** вместо minor units + currency (float precision даёт баги в платёжном коде), **internal статусы в API** вместо user-facing (клиент получает `BookingFinishedWithError` и не знает, что показать пользователю).
-
-Остальные: отсутствие пагинации на коллекциях (бомба замедленного действия), непоследовательная структура ответов (где-то `list`, где-то `orders`, где-то голый массив), `object`/`any` поля без схемы (TypeScript-типизация невозможна), userId в теле авторизованных запросов (security smell и дублирование source of truth).
+- Три главных: даты как unix timestamp вместо ISO 8601 (секунды или миллисекунды? какой timezone?), деньги как float вместо minor units + currency, internal-статусы наружу (`BookingFinishedWithError` — клиент не знает, что показать). Плюс: отсутствие пагинации на коллекциях, непоследовательная структура ответов (где-то `list`, где-то `orders`, где-то голый массив), `object`/`any` без схемы, userId в теле авторизованных запросов (source of truth — токен).

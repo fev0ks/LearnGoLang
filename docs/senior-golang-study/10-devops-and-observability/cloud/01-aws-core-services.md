@@ -108,12 +108,12 @@ EBS (Elastic Block Store) — block storage attach'ивающийся к EC2. Н
 
 ## VPC — сетевая изоляция
 
-**VPC (Virtual Private Cloud)** — изолированная виртуальная сеть в AWS. Здесь живут твои EC2, RDS, и другие ресурсы.
+**VPC (Virtual Private Cloud)** — изолированная виртуальная сеть в AWS. Здесь живут EC2, RDS и другие ресурсы.
 
 ### Структура
 
 ```
-VPC: 10.0.0.0/16  (твоя приватная сеть)
+VPC: 10.0.0.0/16  (приватная сеть)
 ├── Public subnet:  10.0.1.0/24 (AZ: a)    ← с интернетом
 ├── Public subnet:  10.0.2.0/24 (AZ: b)
 ├── Private subnet: 10.0.10.0/24 (AZ: a)   ← без прямого интернета

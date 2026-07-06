@@ -199,4 +199,10 @@ results, err := lo.MapErr(items, func(item Item, _ int) (Result, error) {
 
 ## Interview-ready answer
 
-`samber/lo` — generics-утилиты для коллекций: Map, Filter, GroupBy, Chunk, Uniq, Reduce и другие. До Go 1.18 каждый проект писал эти хелперы сам. `lo` даёт type-safe реализации без reflection. Особенно полезны `GroupBy` для группировки и `Chunk` для батч-обработки. `lo.Must` — только для инициализации, не в бизнес-логике.
+**1. Что такое samber/lo и зачем он?**
+
+- Generics-утилиты для коллекций (Map, Filter, GroupBy, Chunk, Uniq, Reduce): type-safe без reflection — то, что до Go 1.18 каждый проект писал сам. Самые ходовые — `GroupBy` для группировок и `Chunk` для батч-обработки.
+
+**2. Какие ограничения по использованию?**
+
+- `lo.Must` (паника при ошибке) — только для инициализации на старте, не в бизнес-логике. И не превращать код в цепочки хелперов там, где простой цикл читается лучше — lo дополняет stdlib, а не заменяет её.

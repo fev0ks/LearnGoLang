@@ -30,7 +30,7 @@ grpc-gateway генерирует Go-код который:
 grpc-gateway (сгенерированный reverse-proxy)
     │ gRPC + protobuf (HTTP/2)
     ▼
-твой gRPC сервер
+gRPC-сервер
 ```
 
 Два варианта деплоя:

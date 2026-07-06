@@ -389,4 +389,14 @@ cat /proc/sys/fs/file-nr
 
 ## Interview-ready answer
 
-File descriptor — целое число, ссылка на ресурс в ядре (файл, сокет, pipe). Три таблицы: fd-таблица (per-process) → open file table (kernel, shared при fork/dup) → inode. Лимит `ulimit -n` (soft/hard): при 10k соединений нужно ≥ 10k fd плюс запас. I/O модели: blocking (один поток на соединение, не масштабируется), select/poll (O(n) сканирование, select ≤ 1024 fd), epoll (O(готовых), red-black tree для регистрации, только готовые fd возвращаются). Go netpoller: горутина паркуется при EAGAIN, M (OS thread) свободен, epoll уведомляет при готовности fd — горутина снова runnable. Поэтому Go обрабатывает 100k соединений с небольшим числом OS-потоков. Edge-triggered epoll: уведомляет только при изменении состояния (новые данные), требует читать до EAGAIN.
+**1. Что такое file descriptor?**
+
+- Целое число — ссылка процесса на ресурс в ядре (файл, сокет, pipe). Три таблицы: per-process fd-таблица → open file table ядра (shared при fork/dup) → inode. Лимит `ulimit -n` (soft/hard): при 10k соединений нужно ≥10k fd с запасом — иначе «too many open files».
+
+**2. Чем epoll лучше select/poll?**
+
+- select/poll сканируют весь набор fd за O(n), select ещё и ограничен 1024. epoll хранит регистрации в red-black tree и возвращает только готовые fd — O(готовых), поэтому масштабируется на сотни тысяч соединений.
+
+**3. Как это использует Go?**
+
+- Netpoller: при EAGAIN горутина паркуется, OS-поток (M) освобождается; epoll уведомляет о готовности fd — горутина снова runnable. Так Go держит 100k соединений на небольшом числе потоков. Нюанс edge-triggered режима: уведомление только при изменении состояния, поэтому читать нужно до EAGAIN.

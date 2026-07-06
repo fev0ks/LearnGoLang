@@ -127,7 +127,7 @@ svc := service.NewOrderService(fakeRepo, fakeEvents, fakeLog)
 
 **2. Видимость зависимостей.**
 
-Прочитав сигнатуру `NewOrderService(orders, events, log)`, ты знаешь **что нужно** этому сервису. Без DI приходится читать весь implementation чтобы понять что он использует внутри.
+По сигнатуре `NewOrderService(orders, events, log)` видно, **что нужно** этому сервису. Без DI пришлось бы читать всю реализацию, чтобы понять, что он использует внутри.
 
 **3. Lifecycle management.**
 

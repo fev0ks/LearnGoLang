@@ -17,7 +17,7 @@ PostgreSQL — open-source relational database, основной выбор дл
 - [10 Мониторинг и Диагностика](./10-monitoring-and-diagnostics.md) — pg_stat_* представления, bloat, production checklist
 - [11 Паттерны в Go](./11-go-patterns.md) — pgx v5, транзакции, batch, COPY, обработка ошибок
 - [12 Шардирование](./12-sharding.md) — партиционирование vs шардирование, application-level sharding, Citus, FDW, resharding
-- [Хайлоад-сценарии](./highload-scenarios/README.md) — write-heavy практики: массовая вставка, bulk UPDATE/DELETE, upsert под нагрузкой, горячие строки и счётчики
+- [Хайлоад-сценарии](./highload-scenarios/README.md) — write-heavy практики: массовая вставка, bulk UPDATE/DELETE, upsert под нагрузкой, горячие строки и счётчики, онлайн-миграция колонки, 15 кейсов zero-downtime изменений схемы
 - [SQL-задачи](./sql-tasks/README.md) — задачи на SQL с разбором (LeetCode по сложности + кастомные: MVCC/локи/дедлоки, дубли, latest-per-group)
 
 ## Официальная документация

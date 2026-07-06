@@ -233,4 +233,14 @@ func isUniqueViolation(err error) bool {
 
 ## Interview-ready answer
 
-`database/sql` — стандартный abstraction layer, который предоставляет общий API и connection pooling, не привязывая к конкретной БД. Сам по себе не является драйвером — нужен `lib/pq`, `pgx/stdlib` и т.д. Для production важно: задать pool limits (`SetMaxOpenConns`, `ConnMaxLifetime`), всегда передавать context с timeout, закрывать `rows.Close()`, проверять `rows.Err()` после цикла и использовать `defer tx.Rollback()` в транзакциях. Сейчас для PostgreSQL-проектов чаще выбирают pgxpool напрямую, потому что он предоставляет нативный PostgreSQL API с поддержкой batch queries и pgtype.
+**1. Что такое `database/sql` и что он даёт?**
+
+- Стандартный abstraction layer: общий API и connection pooling без привязки к конкретной БД. Сам по себе не драйвер — нужен `lib/pq`, `pgx/stdlib` и т.п.
+
+**2. Что обязательно в production-коде на `database/sql`?**
+
+- Pool limits (`SetMaxOpenConns`, `ConnMaxLifetime`), context с timeout на каждый запрос, `rows.Close()` + проверка `rows.Err()` после цикла, `defer tx.Rollback()` в транзакциях (после commit он no-op).
+
+**3. Почему для PostgreSQL чаще берут pgxpool напрямую?**
+
+- Нативный PostgreSQL API: batch-запросы одним round-trip, COPY, pgtype, типизированные ошибки — то, что через generic-интерфейс `database/sql` недоступно.

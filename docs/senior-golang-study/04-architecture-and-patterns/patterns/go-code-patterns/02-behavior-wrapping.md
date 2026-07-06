@@ -202,7 +202,7 @@ func mapStripeError(err error) error {
 
 **3. Изолирует изменения внешнего API в одном месте.**
 
-Если Stripe выпустит v2 SDK или ты решишь сменить на PayPal — изменения только в адаптере. Domain и use cases не знают.
+Если Stripe выпустит v2 SDK или понадобится смена на PayPal — изменения только в адаптере. Domain и use cases не знают.
 
 ### Когда adapter оправдан
 

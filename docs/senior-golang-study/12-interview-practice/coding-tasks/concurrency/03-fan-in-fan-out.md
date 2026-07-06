@@ -511,7 +511,7 @@ for r := range out {
 
 ### 3. Slow consumer = slow producers
 
-Если worker'ы быстрые, а consumer медленный — workers блокируются на `out <-`. Возможно ты хочешь:
+Если worker'ы быстрые, а consumer медленный — workers блокируются на `out <-`. Возможные решения:
 - Buffered out — сглаживает spike'и
 - Drop on full — для metrics и telemetry где старое не важно
 - Backpressure до producer'а — propagate slowness назад

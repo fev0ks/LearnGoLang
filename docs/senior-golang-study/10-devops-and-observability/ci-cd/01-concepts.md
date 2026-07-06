@@ -237,4 +237,14 @@ gcloud run services update-traffic my-service \
 
 ## Interview-ready answer
 
-CI/CD — автоматизация сборки, тестирования и деплоя. CI: каждый коммит проходит lint, test, build — быстро найти регрессию. CD: собранный артефакт автоматически или по approve деплоится в среды. Ключевые концепции: job dependency graph (параллелизм + needs), кеш (ускорение, инвалидируется по хешу зависимостей), артефакты (передача данных между jobs), environments с approval gates. Secrets: OIDC вместо long-lived keys — runner получает краткоживущий JWT, обменивает у cloud provider на access token. Стратегии деплоя: rolling (постепенная замена инстансов), blue-green (переключение всего трафика, мгновенный rollback), canary (процент трафика на новую версию). Антипаттерны: deploy by `latest` tag, отсутствие concurrency groups, secrets в коде.
+**1. Что такое CI и CD?**
+
+- CI: каждый коммит проходит lint, test, build — регрессия ловится быстро. CD: собранный артефакт автоматически или по approve деплоится в среды. Ключевые механики: job dependency graph (параллелизм + needs), кеш (инвалидация по хешу зависимостей), артефакты для передачи между jobs, environments с approval gates.
+
+**2. Как правильно работать с секретами в CI?**
+
+- OIDC вместо long-lived ключей: runner получает краткоживущий JWT и обменивает его у cloud provider на access token — утечка секрета из CI перестаёт быть катастрофой.
+
+**3. Какие стратегии деплоя и антипаттерны?**
+
+- Rolling (постепенная замена), blue-green (переключение всего трафика, мгновенный rollback), canary (процент трафика на новую версию). Антипаттерны: deploy по `latest` tag, отсутствие concurrency groups (параллельные деплои затирают друг друга), secrets в коде.

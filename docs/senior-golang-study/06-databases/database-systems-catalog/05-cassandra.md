@@ -117,7 +117,7 @@ PRIMARY KEY ((user_id, bucket), event_time)
 
 ## Когда выбирать
 
-Выбирай Cassandra, если:
+Cassandra подходит, если:
 - нужен huge write scale (миллионы записей в секунду);
 - данные можно партиционировать хорошим partition key;
 - queries заранее известны и стабильны;
@@ -142,7 +142,17 @@ PRIMARY KEY ((user_id, bucket), event_time)
 
 ## Interview-ready answer
 
-Cassandra — distributed wide-column DB, оптимизированная для write-heavy workloads. Архитектура: token ring (consistent hashing), данные распределяются по нодам по partition key, replication factor определяет количество копий. Strong consistency достигается через `QUORUM` write + `QUORUM` read при RF=3. Главное архитектурное решение — partition key: он должен равномерно распределять нагрузку и ограничивать размер партиции (особенно для time-series используй time buckets). Tombstones — маркеры удаления, которые зачищаются при compaction; их много → медленные reads. Cassandra не подходит для ad-hoc queries, joins и транзакционных инвариантов.
+**1. Что такое Cassandra и как она устроена?**
+
+- Distributed wide-column DB для write-heavy workloads: token ring на consistent hashing, данные распределяются по нодам по partition key, replication factor задаёт число копий. Не подходит для ad-hoc запросов, joins и транзакционных инвариантов — модель данных проектируется от запросов.
+
+**2. Как получить strong consistency?**
+
+- Кворумами: `QUORUM` write + `QUORUM` read при RF=3 — читающий кворум гарантированно пересекается с писавшим. Ослабление уровня (ONE) обменивает консистентность на latency и availability.
+
+**3. Почему partition key — главное решение и чем опасны tombstones?**
+
+- Partition key должен равномерно распределять нагрузку и ограничивать размер партиции (для time-series — time buckets, иначе партиция растёт бесконечно). Tombstones — маркеры удаления, зачищаются только при compaction: их накопление замедляет чтения, поэтому массовые delete-паттерны для Cassandra токсичны.
 
 ## Query examples
 

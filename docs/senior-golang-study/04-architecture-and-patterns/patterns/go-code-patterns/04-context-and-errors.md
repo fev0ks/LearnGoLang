@@ -497,13 +497,17 @@ return fmt.Errorf("OrderService.CreateOrder: validation: input.Items.Length: inv
 
 ## Interview-ready answer
 
-> "Context в Go — это граница времени жизни запроса. Я всегда передаю его первым аргументом, не храню в struct, не использую для бизнес-данных. Особенно важно пробрасывать context в DB queries, HTTP calls и broker operations — без этого cancellation не работает, и при timeout запросы продолжают висеть, забивая connection pool.
->
-> Ошибки — это слоистая работа. На уровне storage оборачиваю с контекстом через `fmt.Errorf("...: %w", err)` и мапю на domain errors типа `ErrNotFound`. На уровне service передаю или wrap по необходимости. На transport — маппинг на HTTP status в одном helper'е или middleware. Главное правило: одна ошибка логируется один раз, обычно в middleware на boundary, не в каждом слое.
->
-> Sentinel errors предпочитаю для common cases — `domain.ErrNotFound`, `domain.ErrForbidden`. Custom error types — когда нужны structured данные для logging или API response. `log.Fatal` — только в `main.go` при критичных startup ошибках, никогда в библиотечном коде."
+**1. Как правильно работать с context?**
 
----
+- Context — граница времени жизни запроса: первым аргументом, не хранить в struct, не использовать для бизнес-данных. Критично пробрасывать в DB queries, HTTP calls и broker operations — иначе cancellation не работает, и при timeout запросы продолжают висеть, забивая connection pool.
+
+**2. Как устроена слоистая работа с ошибками?**
+
+- Storage: оборачивание с контекстом `fmt.Errorf("...: %w", err)` + маппинг на domain errors (`ErrNotFound`). Service: передать или обернуть по необходимости. Transport: маппинг на HTTP-статусы в одном helper/middleware. Главное правило: одна ошибка логируется один раз — обычно в middleware на границе, а не в каждом слое.
+
+**3. Sentinel errors или custom types?**
+
+- Sentinel (`domain.ErrNotFound`, `domain.ErrForbidden`) — для типовых случаев; custom error types — когда нужны structured-данные для логов или API-ответа. `log.Fatal` — только в `main.go` на критичных startup-ошибках, никогда в библиотечном коде.
 
 ## Что почитать
 

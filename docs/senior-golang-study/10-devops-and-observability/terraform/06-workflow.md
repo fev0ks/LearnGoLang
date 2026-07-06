@@ -107,7 +107,7 @@ terraform show tfplan
 terraform show -json tfplan | jq .
 ```
 
-Сохранённый план гарантирует что apply применит именно то что ты видел в plan. В CI/CD: сохранить plan на шаге `plan`, применить на шаге `apply`.
+Сохранённый план гарантирует, что apply применит именно то, что было в plan. В CI/CD: сохранить plan на шаге `plan`, применить на шаге `apply`.
 
 ---
 

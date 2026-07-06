@@ -178,15 +178,16 @@ Go runtime не знает о cgroup лимитах по умолчанию. Э�
 
 ### GOMAXPROCS
 
-Go по умолчанию ставит `GOMAXPROCS = число CPU на хосте`. Если контейнер ограничен 0.25 CPU на ноде с 32 CPU — Go создаст 32 OS-потока. Планировщик будет перекладывать горутины между потоками, cgroup будет троттлить CPU — latency спайки.
+До Go 1.25 runtime ставил `GOMAXPROCS = число CPU на хосте`. Если контейнер ограничен 0.25 CPU на ноде с 32 CPU — Go создавал 32 OS-потока, планировщик перекладывал горутины между ними, cgroup троттлил CPU — latency-спайки.
 
-Решение: `automaxprocs` — автоматически читает cgroup и ставит GOMAXPROCS:
+**Go 1.25 сделал runtime container-aware**: GOMAXPROCS выставляется по cgroup CPU quota автоматически и периодически пересчитывается при изменении лимита. Для Go < 1.25 — библиотека `automaxprocs`:
 ```go
 import _ "go.uber.org/automaxprocs"
 
 func main() {
     // automaxprocs запустился в init(), GOMAXPROCS = ceil(CPU limit)
     // При --cpus=0.5 → GOMAXPROCS=1, при --cpus=2 → GOMAXPROCS=2
+    // На Go 1.25+ не нужна — runtime делает это сам
 }
 ```
 
@@ -212,7 +213,7 @@ func main() {
 }
 ```
 
-С Go 1.21+ `GOMEMLIMIT` автоматически учитывается в некоторых инструментах, но явно лучше.
+`GOMEMLIMIT` — мягкий лимит (Go 1.19+): GC не даст куче его превысить, но это не жёсткий потолок, поэтому ставится ниже cgroup limit с запасом (~10%). В отличие от GOMAXPROCS, автоматически из cgroup он не читается — задаётся явно (env или `debug.SetMemoryLimit`).
 
 ## .dockerignore
 
@@ -330,7 +331,7 @@ docker compose down -v        # остановить и удалить volumes
 **Live reload** в контейнере с `air`:
 ```bash
 # В Dockerfile builder стадии или отдельном dev Dockerfile
-RUN go install github.com/cosmtrek/air@latest
+RUN go install github.com/air-verse/air@latest  # репозиторий переехал с cosmtrek/air
 ENTRYPOINT ["air"]
 ```
 
@@ -432,4 +433,18 @@ mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
 
 ## Interview-ready answer
 
-Go статически компилируется, поэтому production image — multi-stage: builder с go toolchain, runtime со `scratch` или `distroless` (2–20 MB). Порядок слоёв: `go.mod`/`go.sum` → `go mod download` → исходники → build — кэш зависимостей работает при изменении только кода. ENTRYPOINT обязан быть в exec form (`["/app/server"]`), иначе PID 1 = sh, SIGTERM не доходит до Go процесса. Без GOMEMLIMIT Go GC не знает о cgroup лимите → OOMKilled. Без automaxprocs GOMAXPROCS = число CPU хоста → CPU throttling. Секреты — только через runtime (env inject, Kubernetes Secret), никогда в Dockerfile.
+**1. Как выглядит production Dockerfile для Go?**
+
+- Multi-stage: builder с go toolchain компилирует статический бинарь (`CGO_ENABLED=0`), финальный runtime — `scratch` или `distroless` (2–20 MB вместо 200+). Порядок слоёв ради кэша: `go.mod`/`go.sum` → `go mod download` → исходники → build, тогда зависимости не пересобираются при изменении только кода.
+
+**2. Почему ENTRYPOINT должен быть в exec form?**
+
+- Shell form (`ENTRYPOINT /app/server`) запускает `sh -c`, и PID 1 = sh: при `docker stop` SIGTERM приходит шеллу, а не приложению — graceful shutdown не срабатывает. Exec form (`["/app/server"]`) делает бинарь PID 1, и он получает SIGTERM сам. Для форкающих процессов дополнительно нужен init (`tini`) для reaping зомби.
+
+**3. Как настроить Go runtime под контейнер?**
+
+- `GOMEMLIMIT` чуть ниже `limits.memory` — иначе GC не знает о cgroup-лимите и словит OOMKilled раньше сборки. GOMAXPROCS: до Go 1.25 нужен `automaxprocs` (иначе число потоков = ядрам ноды при дробном лимите → троттлинг), с 1.25 runtime container-aware сам.
+
+**4. Как передавать секреты в контейнер?**
+
+- Только в рантайме: env-инъекция, Kubernetes Secret, `--secret` mount в BuildKit. Никогда через `ENV`/`COPY` в Dockerfile — они остаются в истории слоёв и видны через `docker history` любому, кто скачал образ.

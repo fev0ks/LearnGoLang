@@ -16,7 +16,7 @@
 
 Контейнер — runtime unit: изолированный процесс с собственным filesystem view, env vars и resource limits.
 
-В Docker ты работаешь напрямую с контейнерами. В Kubernetes контейнер никогда не создается напрямую — только Pod, который их оборачивает.
+В Docker работа идёт напрямую с контейнерами. В Kubernetes контейнер никогда не создается напрямую — только Pod, который их оборачивает.
 
 ## Pod: единица оркестрации
 
@@ -128,4 +128,14 @@ Pending -> Running -> Succeeded / Failed
 
 ## Interview-ready answer
 
-Container — это runtime unit: изолированный процесс. Pod — это orchestration unit Kubernetes: он получает IP, является единицей планирования и заменяется целиком. Контейнеры в одном Pod делят network namespace, поэтому могут общаться через localhost — на этом работают sidecar-паттерны. Pod напрямую не создают: используют Deployment, который управляет Pod'ами через ReplicaSet. Если Pod умирает — Kubernetes пересоздает его по новому IP, и именно поэтому нужен Service как стабильная точка доступа.
+**1. Чем Pod отличается от контейнера?**
+
+- Container — runtime unit: изолированный процесс. Pod — orchestration unit Kubernetes: получает IP, является единицей планирования и заменяется целиком (нельзя перезапустить один контейнер Pod-а независимо). Pod напрямую не создают — им управляет Deployment через ReplicaSet.
+
+**2. Что делят контейнеры внутри одного Pod?**
+
+- Network namespace (один IP, общение через localhost — на этом работают sidecar-прокси вроде Envoy), UTS (hostname) и volumes. Не делят filesystem и по умолчанию process namespace.
+
+**3. Когда нужен multi-container Pod и init containers?**
+
+- Второй контейнер — только если его жизненный цикл жёстко связан с основным: sidecar (лог-форвардер, service-mesh прокси). Init containers выполняются последовательно до старта основных: дождаться зависимости, накатить миграцию, подготовить конфиг; при ошибке Pod не стартует.

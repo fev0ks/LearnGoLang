@@ -539,4 +539,14 @@ func (c *client) Evaluate(ctx context.Context, key string, sub Subject) Decision
 
 ## Interview-ready answer
 
-Я бы начал с interface — `Bool`, `Variant`, `Close` — чтобы handlers не зависели от конкретного типа и можно было мокировать в тестах без сетевых вызовов. Внутри: `atomic.Value` для in-memory snapshot, потому что на read-heavy path он дает zero-lock read — один pointer dereference против RLock/RUnlock. Background goroutine обновляет snapshot каждые N секунд через `time.Ticker`; shutdown сигнализируется через `context.CancelFunc`, goroutine завершается, `wg.Wait()` в `Close()` гарантирует что in-flight refresh доделается. Bucketing — FNV-32a по `flagKey:subjectID`; соль flagKey важна, иначе все flags дают одинаковые bucket'ы. Rules оцениваются по очереди: denylist, allowlist, атрибуты, percentage, default — с short-circuit и capture `reason` для логов. Targeting lists компилируются в `map[string]struct{}` при загрузке config, не при каждом вызове. При stale или отсутствующем snapshot возвращаем явный fallback, пишем warning/error в лог. Тесты: mock-реализация интерфейса для handler-тестов; table-driven тесты на rules evaluation; bucketing stability и distribution test; shutdown test через `Close` + timeout.
+**1. Как спроектировать feature-flag клиент на Go?**
+
+- Начать с интерфейса (`Bool`, `Variant`, `Close`), чтобы handlers не зависели от конкретного типа и мокались без сети. Внутри — `atomic.Value` для in-memory snapshot: на read-heavy path это zero-lock read (один pointer dereference против RLock/RUnlock). Background-горутина обновляет snapshot по `time.Ticker`; shutdown — `context.CancelFunc` + `wg.Wait()` в `Close()`, чтобы in-flight refresh доделался.
+
+**2. Как устроен bucketing и evaluation?**
+
+- FNV-32a по `flagKey:subjectID` — соль flagKey обязательна, иначе все флаги дают одинаковые бакеты. Rules оцениваются по порядку: denylist → allowlist → атрибуты → percentage → default, с short-circuit и записью `reason` для логов. Targeting lists компилируются в `map[string]struct{}` при загрузке config, не на каждый вызов.
+
+**3. Что с fallback и тестами?**
+
+- При stale/отсутствующем snapshot — явный fallback + warning в лог. Тесты: mock интерфейса для handler-тестов, table-driven на rules evaluation, стабильность и распределение bucketing, shutdown-тест через `Close` + timeout.

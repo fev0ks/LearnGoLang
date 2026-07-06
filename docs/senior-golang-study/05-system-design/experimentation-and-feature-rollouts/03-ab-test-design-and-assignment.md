@@ -339,4 +339,14 @@ sequenceDiagram
 
 ## Interview-ready answer
 
-Для A/B теста я сначала определяю гипотезу, аудиторию, unit of randomization, primary metric и guardrails. Потом делаю стабильный assignment, обычно через hash или assignment storage, и логирую отдельный exposure event только когда пользователь реально получил вариант. Важно не путать assignment и exposure, не менять метрики после запуска, контролировать конфликтующие эксперименты и иметь feature flag rollback, потому что эксперимент остается production change.
+**1. С чего начинается дизайн A/B теста?**
+
+- Гипотеза, аудитория, unit of randomization, primary metric и guardrails — до запуска. Метрики после старта не меняются.
+
+**2. Как устроены assignment и exposure?**
+
+- Assignment стабильный: hash или assignment storage — пользователь всегда в одной группе. Exposure — отдельное событие, логируется только когда пользователь реально получил вариант. Путать их нельзя: анализ по assignment вместо exposure размывает эффект.
+
+**3. Что ещё контролировать?**
+
+- Конфликтующие эксперименты (пересечение аудиторий) и наличие feature-flag rollback: эксперимент остаётся production-изменением и должен выключаться мгновенно.

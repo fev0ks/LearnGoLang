@@ -98,7 +98,7 @@ Hot partition throttling: если один partition key получает сл�
 
 ## Когда выбирать
 
-Выбирай DynamoDB, если:
+DynamoDB подходит, если:
 - проект AWS-native и нужен zero-ops storage;
 - access patterns хорошо известны и стабильны;
 - нужен high-scale key-value/document storage;
@@ -122,7 +122,17 @@ Hot partition throttling: если один partition key получает сл�
 
 ## Interview-ready answer
 
-DynamoDB — managed key-value/document storage для AWS-native workloads. Главное архитектурное решение — partition key и sort key: от них зависят все access patterns. Single-table design позволяет читать связанные items одним Query, но требует дисциплины. GSI добавляет дополнительные access patterns, но eventual consistency. На горизонт: hot partition throttling — если один PK получает непропорциональный трафик, DynamoDB ограничивает его даже при достаточной общей capacity. Vendor lock-in — реальная цена за zero-ops.
+**1. Что определяет дизайн таблицы в DynamoDB?**
+
+- Partition key + sort key: от них зависят все access patterns, и проектирование идёт от запросов, а не от нормализации. Single-table design позволяет читать связанные items одним Query, но требует дисциплины в именовании ключей.
+
+**2. Что дают GSI и в чём их цена?**
+
+- Global Secondary Index добавляет дополнительные access patterns по другим атрибутам, но читается eventually consistent и оплачивается отдельной write capacity на каждое обновление.
+
+**3. Какие главные операционные риски?**
+
+- Hot partition throttling: непропорциональный трафик в один PK ограничивается даже при достаточной общей capacity — ключ должен размазывать нагрузку. И vendor lock-in: модель данных и биллинг специфичны для AWS — реальная цена за zero-ops.
 
 ## Query examples
 

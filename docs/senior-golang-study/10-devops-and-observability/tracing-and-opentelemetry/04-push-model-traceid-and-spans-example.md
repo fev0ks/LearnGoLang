@@ -312,7 +312,7 @@ func (r *Repo) FindByShortCode(ctx context.Context, shortCode string) (*Link, er
 link, err := s.repo.FindByShortCode(context.Background(), shortCode)
 ```
 
-Так ты отрезаешь child span от parent span.
+Так child span отрезается от parent span.
 
 Хорошо:
 

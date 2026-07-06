@@ -1,6 +1,14 @@
 # Redis Streams
 
-Redis Streams — append-only лог встроенный в Redis. Уникальная позиция: проще и дешевле Kafka, надёжнее Redis Pub/Sub (есть persistence и consumer groups), часть существующего Redis инстанса.
+Redis Streams — append-only лог, встроенный в Redis. Уникальная позиция: проще и дешевле [Kafka](./01-kafka.md), надёжнее [Redis Pub/Sub](./04-redis-pubsub.md) (есть persistence и consumer groups), и это часть уже существующего Redis-инстанса (про сам Redis — [08-redis.md](../06-databases/database-systems-catalog/08-redis.md)).
+
+## Содержание
+
+- [Базовые команды: XADD, XREADGROUP, XACK](#базовые-команды-xadd-xreadgroup-xack)
+- [Consumer groups: механика](#consumer-groups-механика)
+- [Go код: producer и consumer](#go-код-producer-и-consumer)
+- [Когда Redis Streams vs Kafka vs RabbitMQ](#когда-redis-streams-vs-kafka-vs-rabbitmq)
+- [Interview-ready answer](#interview-ready-answer)
 
 ---
 
@@ -109,7 +117,7 @@ XAUTOCLAIM orders shipping-group worker-2 60000 0-0 COUNT 10
 
 ---
 
-## Go код: producer и consumer (из lrn-streams)
+## Go код: producer и consumer
 
 ### Producer
 
@@ -210,9 +218,10 @@ func (c *Consumer) readLoop(ctx context.Context) {
                     c.rdb.XAck(ctx, streamKey, c.group, msg.ID)
                     continue
                 }
-                c.ch <- []byte(data)
-                
-                // ACK после успешной обработки
+                c.ch <- []byte(data) // блокирует, пока потребитель не заберёт
+
+                // XACK после передачи потребителю; если обработка дальше по
+                // пайплайну может упасть — ack стоит переносить на её сторону
                 c.rdb.XAck(ctx, streamKey, c.group, msg.ID)
             }
         }
@@ -279,15 +288,15 @@ func (c *Consumer) claimStuck(ctx context.Context) {
 | Throughput | Умеренный | Очень высокий | Умеренный |
 | Операционная сложность | Низкая (уже есть Redis) | Высокая | Умеренная |
 | Ordering | Per-stream | Per-partition | Per-queue |
-| Дополнительные зависимости | ❌ (используй свой Redis) | ✅ Kafka cluster | ✅ RabbitMQ |
+| Дополнительные зависимости | ❌ (Redis уже есть) | ✅ Kafka cluster | ✅ RabbitMQ |
 
-**Выбирай Redis Streams когда:**
-- Redis уже в стеке
-- Нужны consumer groups + at-least-once, но без Kafka
-- Умеренный throughput (< 100k msg/s)
-- Нужна простота операции (один Redis, не отдельный кластер)
+**Redis Streams подходит, когда:**
+- Redis уже в стеке;
+- нужны consumer groups + at-least-once, но без Kafka;
+- умеренный throughput (< 100k msg/s);
+- важна простота эксплуатации (один Redis, а не отдельный кластер).
 
-**Важное ограничение**: Redis Streams — не true event log как Kafka. MAXLEN ограничивает историю. При больших объёмах и нужде в долгосрочном хранении — Kafka предпочтительнее.
+**Важное ограничение**: Redis Streams — не полноценный event log, как Kafka: MAXLEN ограничивает историю. При больших объёмах и долгосрочном хранении Kafka предпочтительнее. Сводное сравнение всех брокеров — [07-comparison.md](./07-comparison.md).
 
 ---
 

@@ -33,7 +33,7 @@
 
 **Какая алгоритмическая сложность доступа по ключу для map?**
 
-- Амортизированно O(1): хеш ключа → бакет → сравнение внутри бакета. Худший случай O(n) при массовых коллизиях, но рантайм рандомизирует seed и рехеширует, так что на практике константа. См. [map-internals](../01-go-core/map-internals/README.md).
+- Амортизированно O(1): хеш ключа → бакет → сравнение внутри бакета. Худший случай O(n) при массовых коллизиях, но на практике константа: hash seed у каждой map случайный (подобрать коллизии извне сложно), а при превышении load factor таблица растёт и записи перераспределяются. См. [map-internals](../01-go-core/map-internals/README.md).
 
 **Есть ли set в Go? Как сделать?**
 
@@ -89,7 +89,7 @@
 
 **В чём разница sync.Mutex и sync.RWMutex? Когда предпочесть RWMutex?**
 
-- `Mutex` даёт эксклюзивный доступ — один владелец и на чтение, и на запись. `RWMutex` различает `RLock` (много читателей одновременно) и `Lock` (один писатель, блокирует всех). RWMutex выгоден при **сильном перекосе в сторону чтения** и нетривиальной критической секции; при частой записи или очень коротких секциях он медленнее обычного `Mutex` из-за большего оверхеда и риска starvation писателя. См. [concurrency-and-performance/03-sync-primitives.md](../01-go-core/concurrency-and-performance/03-sync-primitives.md).
+- `Mutex` даёт эксклюзивный доступ — один владелец и на чтение, и на запись. `RWMutex` различает `RLock` (много читателей одновременно) и `Lock` (один писатель, блокирует всех). RWMutex выгоден при **сильном перекосе в сторону чтения** и нетривиальной критической секции; при частой записи или очень коротких секциях он медленнее обычного `Mutex` из-за большего оверхеда — прежде всего contention на счётчике читателей между ядрами. Starvation писателя в Go не грозит: `RWMutex` writer-preferring — пока писатель ждёт `Lock`, новые `RLock` блокируются. См. [concurrency-and-performance/03-sync-primitives.md](../01-go-core/concurrency-and-performance/03-sync-primitives.md).
 
 **Как работает сборщик мусора в Go? Какие фазы и как влияют на производительность?**
 
@@ -171,11 +171,11 @@
 
 - **AVL** — самобалансирующееся **бинарное** дерево поиска: у каждого узла максимум 2 ребёнка, для каждого узла высоты левого и правого поддеревьев отличаются не больше чем на 1 (балансировка вращениями при вставке/удалении). За счёт строгого баланса гарантирует O(log n) на поиск — но один узел хранит **один ключ**, поэтому дерево высокое.
 - **B-tree** — сбалансированное **многопутевое** дерево: у узла не 2, а сотни-тысячи детей и много ключей в узле, все листья на одной глубине. Тоже O(log n), но основание логарифма большое (fan-out), поэтому дерево очень низкое (2–4 уровня на миллионы строк).
-- **Почему B-tree лучше для БД:** узел B-tree совпадает по размеру со страницей диска (обычно 8 КБ), и за одну дисковую I/O-операцию читаются сразу сотни ключей. У БД узкое место — именно random-I/O к диску, а не сравнения в памяти. AVL с одним ключом на узел и большой высотой потребовал бы на порядки больше дисковых обращений. AVL хорош в RAM (например, in-memory индекс), B-tree — когда данные на диске. См. [relational-databases-and-sql/03-indexes-and-query-plans.md](../06-databases/relational-databases-and-sql/03-indexes-and-query-plans.md) и [16-.../05-trees-and-graphs.md](../16-algorithms-and-data-structures/05-trees-and-graphs.md).
+- **Почему B-tree лучше для БД:** узел B-tree совпадает по размеру со страницей диска (обычно 8 КБ), и за одну дисковую I/O-операцию читаются сразу сотни ключей. У БД узкое место — именно random-I/O к диску, а не сравнения в памяти. AVL с одним ключом на узел и большой высотой потребовал бы на порядки больше дисковых обращений. AVL хорош в RAM (например, in-memory индекс), B-tree — когда данные на диске (индексы БД, файловые системы). См. [relational-databases-and-sql/03-indexes-and-query-plans.md](../06-databases/relational-databases-and-sql/03-indexes-and-query-plans.md) и [16-.../05-trees-and-graphs.md](../16-algorithms-and-data-structures/05-trees-and-graphs.md).
 
 **Зачем нужны транзакции? Какие уровни изоляции?**
 
-- Транзакция объединяет операции в атомарную единицу с гарантиями ACID — либо всё применилось, либо ничего. Уровни изоляции (по нарастанию строгости): Read Uncommitted, Read Committed (дефолт PostgreSQL), Repeatable Read, Serializable — каждый отсекает свои аномалии (dirty/non-repeatable read, phantom). См. [relational-databases-and-sql/02-transactions-isolation-and-locks.md](../06-databases/relational-databases-and-sql/02-transactions-isolation-and-locks.md) и [database-fundamentals/01-acid.md](../06-databases/database-fundamentals/01-acid.md).
+- Транзакция объединяет операции в атомарную единицу с гарантиями ACID — либо всё применилось, либо ничего. Уровней изоляции четыре по стандарту SQL, по нарастанию строгости: **Read Uncommitted** (видны чужие незакоммиченные изменения — dirty read), **Read Committed** (видны только закоммиченные; дефолт в PostgreSQL), **Repeatable Read** (повторное чтение в транзакции стабильно; в PG реализован как snapshot, отсекает и фантомы), **Serializable** (результат эквивалентен последовательному выполнению транзакций). Каждый следующий отсекает больше аномалий: dirty read → non-repeatable read → phantom read → write skew. Строже = меньше параллелизма и больше откатов. См. [relational-databases-and-sql/02-transactions-isolation-and-locks.md](../06-databases/relational-databases-and-sql/02-transactions-isolation-and-locks.md) и [database-fundamentals/01-acid.md](../06-databases/database-fundamentals/01-acid.md).
 
 **В чём отличие WHERE и HAVING?**
 
@@ -251,13 +251,9 @@
 
 - На **статистике**, которую собирает `ANALYZE` (автоматически — autovacuum/autoanalyze) и хранит в системном каталоге `pg_statistic` (вид `pg_stats`): число строк и страниц таблицы, доля NULL, число уникальных значений (n_distinct), самые частые значения (MCV) и гистограммы распределения. По ним планировщик оценивает селективность условий и стоимость вариантов плана (модель cost) и выбирает дешевейший. Если статистика устарела — оценки врут, и план получается плохим (лечится `ANALYZE`). См. [postgresql/03-query-planning.md](../06-databases/database-systems-catalog/postgresql/03-query-planning.md).
 
-**Какие есть уровни изоляции?**
-
-- Четыре по стандарту SQL, по нарастанию строгости: **Read Uncommitted** (видны чужие незакоммиченные изменения — dirty read), **Read Committed** (видны только закоммиченные; дефолт в PostgreSQL), **Repeatable Read** (повторное чтение в транзакции стабильно; в PG реализован как snapshot, отсекает и фантомы), **Serializable** (результат эквивалентен последовательному выполнению транзакций). Каждый следующий отсекает больше аномалий: dirty read → non-repeatable read → phantom read → write skew. Строже = меньше параллелизма и больше откатов. См. [relational-databases-and-sql/02-transactions-isolation-and-locks.md](../06-databases/relational-databases-and-sql/02-transactions-isolation-and-locks.md).
-
 **На уровне Serializable две транзакции апдейтят одну строку — что произойдёт?**
 
-- Update берёт блокировку строки, поэтому вторая транзакция **ждёт** коммита первой. После этого: при простом конфликте записи (один и тот же row) обычно вторая допишется поверх. Но Serializable в PostgreSQL — это **SSI** (Serializable Snapshot Isolation): если СУБД обнаружит, что итог не эквивалентен ни одному последовательному порядку (опасное пересечение зависимостей), она **откатит** одну из транзакций с ошибкой `could not serialize access (40001)`, и приложение обязано её **повторить** (retry). То есть при чистом обновлении одной строки чаще просто сериализуются через блокировку; при сложных read-write зависимостях одна получит ошибку сериализации. См. [relational-databases-and-sql/02-transactions-isolation-and-locks.md](../06-databases/relational-databases-and-sql/02-transactions-isolation-and-locks.md).
+- Update берёт блокировку строки, поэтому вторая транзакция **ждёт** коммита первой. Дальше — ключевое отличие от Read Committed: если первая **закоммитила** изменение этой строки, вторая не допишет поверх, а сразу упадёт с ошибкой сериализации `could not serialize access due to concurrent update (40001)` — обе работают со snapshot на момент своего старта, и «перечитать и обновить новую версию» им нельзя (так PostgreSQL ведёт себя уже на Repeatable Read). Вторая продолжит работу, только если первая откатилась. Приложение обязано ловить `40001` и **повторять** транзакцию (retry). Serializable добавляет сверху **SSI** (Serializable Snapshot Isolation): помимо write-write конфликта на одной строке, откатываются и опасные read-write зависимости, когда итог не эквивалентен ни одному последовательному порядку. А «вторая дописывает поверх» — это поведение **Read Committed**: там после ожидания транзакция перечитывает актуальную версию строки и обновляет её. См. [relational-databases-and-sql/02-transactions-isolation-and-locks.md](../06-databases/relational-databases-and-sql/02-transactions-isolation-and-locks.md).
 
 **Как бы делал INSERT 100 000 000 строк?**
 
@@ -361,13 +357,9 @@
 
 - Стартовая строка (метод + URL/path + версия, напр. `GET /v1/items HTTP/1.1`), заголовки (`Host`, `Content-Type`, `Authorization`…), пустая строка-разделитель и опциональное тело (body, для POST/PUT). См. [protocols/02-http-server.md](../08-networking-and-api/protocols/02-http-server.md).
 
-**В чём отличия HTTP и HTTPS?**
+**В чём отличия HTTP и HTTPS? Для чего нужен HTTPS?**
 
-- HTTPS — это HTTP поверх TLS: трафик шифруется, проверяется подлинность сервера по сертификату и обеспечивается целостность. HTTP передаёт данные открытым текстом. См. [request-lifecycle/03-tcp-tls-and-http-request.md](../08-networking-and-api/request-lifecycle/03-tcp-tls-and-http-request.md).
-
-**Что такое HTTPS и для чего нужен?**
-
-- Защищённая версия HTTP: TLS-handshake устанавливает шифрованный канал, сервер подтверждает identity сертификатом (CA). Нужен для конфиденциальности, защиты от перехвата/MITM и подмены. См. [request-lifecycle/03-tcp-tls-and-http-request.md](../08-networking-and-api/request-lifecycle/03-tcp-tls-and-http-request.md).
+- HTTPS — это HTTP поверх TLS: handshake устанавливает шифрованный канал, сервер подтверждает подлинность сертификатом (цепочка до доверенного CA), обеспечивается целостность данных. HTTP передаёт всё открытым текстом. HTTPS нужен для конфиденциальности, защиты от перехвата/MITM и подмены. См. [request-lifecycle/03-tcp-tls-and-http-request.md](../08-networking-and-api/request-lifecycle/03-tcp-tls-and-http-request.md).
 
 **Зачем нужны таймауты в HTTP-запросах и как их подобрать?**
 
@@ -380,6 +372,14 @@
 **Что такое сокеты и какими они бывают?**
 
 - Сокет — конечная точка сетевого соединения (пара IP:порт) и API ОС для обмена данными. Бывают потоковые (`SOCK_STREAM`, TCP), датаграммные (`SOCK_DGRAM`, UDP) и Unix-domain (локальный IPC между процессами на одной машине). См. [linux/03-tcp-sockets.md](../10-devops-and-observability/linux/03-tcp-sockets.md).
+
+**Что такое WebSocket?**
+
+- Протокол **полнодуплексной** связи поверх одного TCP-соединения: клиент и сервер шлют сообщения в обе стороны в любой момент, без запроса-ответа на каждое. Соединение открывается через **HTTP Upgrade** (обычный GET с `Upgrade: websocket`), дальше это уже не HTTP, а постоянный двусторонний канал. Нужен для realtime — чаты, нотификации, лайв-обновления, игры; в отличие от HTTP-поллинга держит одно соединение. Альтернатива для однонаправленного сервер→клиент — **SSE** (проще, поверх HTTP). См. [protocols/05-websocket.md](../08-networking-and-api/protocols/05-websocket.md).
+
+**Какие протоколы работают поверх HTTP?**
+
+- REST (архитектурный стиль поверх HTTP), **gRPC** (поверх HTTP/2), **GraphQL** (обычно POST на один endpoint), **SOAP** (XML поверх HTTP), **WebSocket** (апгрейд с HTTP), **SSE** (server-sent events), WebDAV. То есть HTTP служит транспортом/фундаментом для более специализированных прикладных протоколов. (Не путать с «протоколы поверх TCP/UDP» — там уровнем ниже.) См. [protocols/11-protocol-comparison.md](../08-networking-and-api/protocols/11-protocol-comparison.md).
 
 **Что такое NAT?**
 
@@ -430,9 +430,9 @@
 
 - **gRPC** — RPC-фреймворк поверх **HTTP/2**: бинарный обмен сообщениями **Protobuf** (компактно и быстро, строгая схема `.proto` → кодогенерация `protoc`), мультиплексирование и **стриминг** из коробки. **4 типа вызовов:** unary (1→1), server-streaming (1→N), client-streaming (N→1), bidirectional (N↔N). Метаданные — через **headers** (авторизация, trace). **Плюсы против REST/JSON:** меньше payload и латентность, строгий контракт и кодоген, стриминг, удобно service-to-service. **Минусы:** не читается глазами, слабая поддержка в браузере (нужен **gRPC-Web**/**grpc-gateway** для REST-фасада), сложнее дебажить. **Versioning** — через эволюцию proto (не переиспользовать номера полей, только добавлять). См. [protocols/01-grpc.md](../08-networking-and-api/protocols/01-grpc.md).
 
-**Как проверить, открыт ли порт на сервере?**
+**Как проверить, открыт ли порт на сервере? Какой процесс его слушает?**
 
-- Снаружи: `nc -zv host port` (или `telnet host port`), `nmap -p 443 host` (скан портов), `curl -v host:port`. Изнутри — какие порты **слушаются**: `ss -tlnp` (современная замена `netstat -tlnp`), `lsof -i :443`. `ss`/`lsof` также покажут, **какой процесс** держит порт. См. [linux/03-tcp-sockets.md](../10-devops-and-observability/linux/03-tcp-sockets.md).
+- Снаружи: `nc -zv host port` (или `telnet host port`), `nmap -p 443 host` (скан портов), `curl -v host:port`. Изнутри — какие порты **слушаются** и **каким процессом**: `ss -tlnp` (современная замена `netstat -tlnp`) — TCP-сокеты в LISTEN с PID/именем процесса, `lsof -i :8080` — кто держит конкретный порт, `fuser 8080/tcp`; для UDP — `ss -ulnp`. См. [linux/03-tcp-sockets.md](../10-devops-and-observability/linux/03-tcp-sockets.md).
 
 ## ОС, процессы, память
 
@@ -476,17 +476,18 @@
 
 - Полное **программное воспроизведение** другой системы — CPU, инструкций, устройств — на хосте с иной архитектурой. Эмулятор интерпретирует каждую гостевую инструкцию (или JIT-транслирует), поэтому может запустить ПО для **чужой архитектуры** (ARM-бинарь на x86, ретро-консоль на ПК), но работает **медленно**. Отличие от виртуализации: виртуализация исполняет гостевой код **нативно** на том же CPU (та же архитектура, аппаратная поддержка) — быстро; эмуляция симулирует железо программно — гибко, но дорого (пример: QEMU умеет и то, и другое). См. [docker/01-container-vs-virtual-machine.md](../10-devops-and-observability/docker/01-container-vs-virtual-machine.md).
 
-**Какие знаешь syscalls?**
+**Какие знаешь syscalls? (и как с ними работает Go)**
 
-- Ввод-вывод: `read`, `write`, `open`, `close`, `lseek`. Процессы: `fork`, `execve`, `wait`, `exit`, `kill` (сигнал). Память: `mmap`, `munmap`, `brk`. Сеть: `socket`, `bind`, `listen`, `accept`, `connect`, `send`/`recv`. Мультиплексирование: `epoll_create`/`epoll_ctl`/`epoll_wait`, `select`, `poll`. Файлы/ФС: `stat`, `dup`, `pipe`. Это граница между user space и ядром; в Go рантайм оборачивает их (а сетевые — через netpoller/epoll). См. [linux/04-signals-and-processes.md](../10-devops-and-observability/linux/04-signals-and-processes.md).
+- Сисколл — граница между user space и ядром; по категориям: I/O (`read`, `write`, `open`, `close`), процессы (`fork`, `execve`, `wait`, `kill`), память (`mmap`, `brk`), сеть (`socket`, `accept`, `connect`), мультиплексирование (`epoll_*`, `select`, `poll`). Но в Go-интервью важнее **как рантайм с ними работает**, а не список:
+  - В Go редко зовут сисколлы напрямую — их оборачивает stdlib (`os`, `net`), а низкоуровнево — пакеты `syscall` (заморожен) и `golang.org/x/sys/unix` (актуальный).
+  - **Блокирующий сисколл** (например, чтение файла): рантайм отвязывает `P` от заблокированного `M` (handoff) и отдаёт `P` другому потоку, чтобы остальные горутины работали; заблокированная горутина висит со своим `M` до возврата. Отсюда эффект «GOMAXPROCS=1, но потоков больше».
+  - **Сетевые операции** не блокируют `M`: fd переводится в неблокирующий режим и регистрируется в **netpoller** (`epoll`/`kqueue`), горутина паркуется и будится по готовности — так тысячи соединений обслуживают немного потоков.
+  - Каждый вход в сисколл — переключение в kernel mode (недёшево), поэтому Go батчит I/O буферами (`bufio`) и мультиплексирует сеть.
+- См. [runtime-scheduler/02-syscall.md](../01-go-core/runtime-scheduler/02-syscall.md) и [runtime-scheduler/03-netpoller.md](../01-go-core/runtime-scheduler/03-netpoller.md).
 
 **Чем отличается hard link от soft link (symlink)?**
 
 - **Hard link** — ещё одно имя для того же **inode** (тех же данных): все хардлинки равноправны, данные живут, пока есть хоть один; нельзя ссылаться на другой раздел ФС и на директории. **Soft link (символическая ссылка)** — отдельный файл, хранящий **путь** к цели: может указывать куда угодно (другой раздел, директория), но «повисает» (dangling), если цель удалили/переместили. Коротко: hardlink — второе имя данных, symlink — указатель на путь. См. [linux/02-file-descriptors-and-io.md](../10-devops-and-observability/linux/02-file-descriptors-and-io.md).
-
-**Как посмотреть, какой процесс слушает порт?**
-
-- `ss -tlnp` (современная замена `netstat -tlnp`) — TCP-сокеты в LISTEN с PID/именем процесса; `lsof -i :8080` — кто держит конкретный порт; `fuser 8080/tcp`. Для UDP — `ss -ulnp`. См. [linux/03-tcp-sockets.md](../10-devops-and-observability/linux/03-tcp-sockets.md).
 
 **Что такое swap и зачем он нужен?**
 
@@ -796,10 +797,6 @@
 - OTLP (OpenTelemetry Protocol) — стандартный протокол экспорта телеметрии (gRPC или HTTP). Настраивается endpoint коллектора (`OTEL_EXPORTER_OTLP_ENDPOINT`), обычно шлют в **OpenTelemetry Collector**, а он уже маршрутизирует/обрабатывает и отправляет дальше в бэкенды: **Jaeger**, **Tempo** (трейсы), **Prometheus**/Mimir (метрики), Loki (логи), или облачные — Datadog, Honeycomb, AWS X-Ray. Плюс Collector-прослойки: батчинг, sampling, ретраи, ребрендинг атрибутов. См. [tracing-and-opentelemetry/02-opentelemetry-in-go-services.md](../10-devops-and-observability/tracing-and-opentelemetry/02-opentelemetry-in-go-services.md).
 
 ## Алгоритмы и структуры данных
-
-**Что такое B-tree, как работает и где применяется?**
-
-- Сбалансированное многопутевое дерево поиска: узел широкий (много ключей), все листья на одной глубине, поиск/вставка/удаление за O(log n). Узел = страница диска, поэтому минимум I/O — отсюда применение в индексах БД и файловых системах. Отличие от бинарных деревьев (AVL, RB) — высокий fan-out и низкая высота под дисковую модель. См. [relational-databases-and-sql/03-indexes-and-query-plans.md](../06-databases/relational-databases-and-sql/03-indexes-and-query-plans.md) и [16-.../05-trees-and-graphs.md](../16-algorithms-and-data-structures/05-trees-and-graphs.md).
 
 **Что такое хеш-таблицы, назначение и ограничения?**
 

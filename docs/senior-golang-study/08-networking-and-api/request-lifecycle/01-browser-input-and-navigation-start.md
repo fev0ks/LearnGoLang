@@ -89,7 +89,7 @@ Strict-Transport-Security: max-age=31536000; includeSubDomains; preload
 
 **HSTS Preload**: Chrome, Firefox, Safari, Edge имеют встроенный список доменов, которые всегда открываются по HTTPS — **до первого подключения**. Без preload HSTS действует только после первого успешного HTTPS-ответа (уязвимо к MITM на первом запросе).
 
-Удалить домен из preload list — долго (месяцы). Добавляй только если уверен в постоянной поддержке HTTPS.
+Удалить домен из preload list — долго (месяцы), поэтому добавлять его туда стоит только при уверенности в постоянной поддержке HTTPS.
 
 ## Service Worker: перехват запроса
 
@@ -123,7 +123,7 @@ self.addEventListener('fetch', event => {
 2. **Stale + ETag**: `max-age` истёк, но есть ETag → conditional GET с `If-None-Match` → `304 Not Modified` (тело из cache). Сеть = 1 RTT, без тела.
 3. **No cache**: нет записи или `no-store` → полный запрос.
 
-Для HTML-страниц обычно `Cache-Control: no-cache` (всегда проверяй). Для статики с hash в URL — `max-age=31536000, immutable` (кэшируй навсегда).
+Для HTML-страниц обычно `Cache-Control: no-cache` (всегда ревалидировать). Для статики с hash в URL — `max-age=31536000, immutable` (кэшируется навсегда). Полный разбор директив — [06-response-return-caching-and-browser-rendering.md](./06-response-return-caching-and-browser-rendering.md).
 
 ## Resource hints: preconnect и prefetch
 
@@ -145,6 +145,8 @@ self.addEventListener('fetch', event => {
 <!-- Prerender: полностью загрузить и отрисовать страницу в фоне -->
 <link rel="prerender" href="/likely-next-page">
 ```
+
+(`rel="prerender"` устарел — Chrome заменил его Speculation Rules API; остальные hints актуальны.)
 
 `preconnect` к API/CDN хостам — самая простая оптимизация. До первого запроса к `api.example.com` браузер уже имеет открытое соединение, TCP+TLS latency = 0.
 
@@ -174,4 +176,18 @@ console.log({
 
 ## Interview-ready answer
 
-Браузер принимает несколько решений до DNS: распознаёт URL vs поиск, нормализует к HTTPS, проверяет HSTS (если домен в HSTS-кэше — попытки HTTP нет), проверяет HTTP cache (fresh ответ = сеть не нужна), проверяет Service Worker (может ответить из SW cache). Fragment (`#`) не уходит на сервер. HSTS preload list — встроен в браузер, защищает даже от первого non-HTTPS запроса. Service Worker перехватывает запросы и может полностью обойти сеть — это и сила (offline), и риск (закэшированный баг). TTFB — главная server-side метрика latency, включает весь путь до первого байта ответа.
+**1. Что происходит в браузере до первого сетевого пакета?**
+
+- Распознавание URL vs поисковый запрос, нормализация к HTTPS, проверка HSTS-кэша (домен в HSTS — попытки HTTP не будет), проверка HTTP cache (fresh-ответ — сеть не нужна вообще), проверка Service Worker (может ответить из своего кэша), поиск уже открытого соединения к хосту. Fragment (`#`) на сервер не уходит.
+
+**2. Что такое HSTS и зачем preload?**
+
+- Заголовок `Strict-Transport-Security` заставляет браузер ходить на домен только по HTTPS в течение max-age. Без preload защита начинается только после первого успешного HTTPS-ответа — первый запрос уязвим к MITM. Preload list встроен в браузер и защищает с самого первого подключения.
+
+**3. Чем Service Worker опасен для backend-деплоя?**
+
+- SW перехватывает запросы и может отвечать из кэша без сети: новый деплой не дойдёт до пользователей, пока SW не обновится, а закэшированная сломанная страница показывает ошибку при рабочем backend. Это сила (offline) и риск одновременно.
+
+**4. Что такое TTFB и что в него входит?**
+
+- Time To First Byte — время до первого байта ответа: DNS + TCP + TLS + очередь в LB + middleware + handler + БД + сериализация. Главная server-side метрика latency; > 500–800 мс — сигнал оптимизировать backend или выносить контент на CDN.

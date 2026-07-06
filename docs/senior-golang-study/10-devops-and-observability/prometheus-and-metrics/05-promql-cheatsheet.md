@@ -330,7 +330,7 @@ histogram_quantile(
 
 ### 3. Делать queries по high-cardinality labels
 
-Если ты засунул в labels `user_id`, `trace_id`, `request_id`, то `PromQL` уже не спасет.  
+Если в labels попали `user_id`, `trace_id`, `request_id`, то `PromQL` уже не спасёт.  
 Проблема в metric design, не в query syntax.
 
 ### 4. Слишком маленькое окно для rate()

@@ -334,4 +334,4 @@ w.Header().Set("X-RateLimit-Reset", fmt.Sprintf("%d", resetTime.Unix()))
 
 **Одинаковый лимит для всех клиентов** — внутренние сервисы и внешние пользователи должны иметь разные квоты.
 
-**Fail closed при недоступном Redis** — если Redis упал и ты блокируешь все запросы, сам Redis стал single point of failure. Обычно лучше fail open (пропустить) с алертом.
+**Fail closed при недоступном Redis** — если Redis упал и все запросы блокируются, сам Redis становится single point of failure. Обычно лучше fail open (пропустить) с алертом.

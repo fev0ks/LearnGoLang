@@ -1,6 +1,19 @@
 # gRPC Bidirectional Streaming как Message Transport
 
-gRPC streaming — альтернатива message broker для real-time связи сервис-сервис. Постоянное HTTP/2 соединение вместо poll/push очереди.
+gRPC streaming — альтернатива message broker для real-time связи сервис-сервис: постоянное HTTP/2-соединение вместо poll/push через очередь. Основы gRPC — [01-grpc.md](../08-networking-and-api/protocols/01-grpc.md), механика HTTP/2 streams и flow control — [14-http2-and-http3.md](../08-networking-and-api/protocols/14-http2-and-http3.md).
+
+## Содержание
+
+- [Когда gRPC streaming как замена message broker](#когда-grpc-streaming-как-замена-message-broker)
+- [4 типа gRPC (напоминание)](#4-типа-grpc-напоминание)
+- [Protobuf: определение сервиса](#protobuf-определение-сервиса)
+- [Архитектура: single broker](#архитектура-single-broker)
+- [Сервер (Broker): fan-out через registry](#сервер-broker-fan-out-через-registry)
+- [Клиент (Gateway): отправка и получение](#клиент-gateway-отправка-и-получение)
+- [Multi-broker: Redis backplane](#multi-broker-redis-backplane)
+- [Backpressure в gRPC streams](#backpressure-в-grpc-streams)
+- [gRPC Streaming vs Message Broker](#grpc-streaming-vs-message-broker)
+- [Interview-ready answer](#interview-ready-answer)
 
 ---
 
@@ -18,11 +31,11 @@ gRPC Streaming модель:
   - Нет persistence, нет replay, нет fan-out из коробки
 ```
 
-**Используй gRPC streaming когда:**
-- Real-time двусторонняя связь (чат, collaboration, live updates)
-- Нет нужды в persistence / replay
-- Уже используешь gRPC для других сервисов
-- Нужна типобезопасность через Protobuf
+**gRPC streaming уместен, когда:**
+- нужна real-time двусторонняя связь (чат, collaboration, live updates);
+- persistence и replay не требуются;
+- gRPC уже используется между сервисами;
+- важна типобезопасность через Protobuf.
 
 ---
 
@@ -81,8 +94,6 @@ Broker — gRPC сервер. Каждый gateway открывает один �
 ## Сервер (Broker): fan-out через registry
 
 ```go
-// Из lrn-streams/internal/transport/grpcstream/server.go
-
 type Server struct {
     pb.UnimplementedChatServiceServer
     
@@ -157,8 +168,6 @@ func (s *Server) Start(addr string) error {
 ## Клиент (Gateway): отправка и получение
 
 ```go
-// Из lrn-streams/internal/transport/grpcstream/client.go
-
 type ClientTransport struct {
     conn   *grpc.ClientConn
     stream grpc.BidiStreamingClient[pb.ChatMessage, pb.ChatMessage]
@@ -281,7 +290,7 @@ func (s *Server) subscribeBackplane() {
 
 ## Backpressure в gRPC streams
 
-HTTP/2 имеет встроенный flow control (window-based). Если получатель не успевает читать — отправитель замедляется.
+HTTP/2 имеет встроенный flow control (window-based): если получатель не успевает читать, отправитель замедляется. Механика окон — [14-http2-and-http3.md](../08-networking-and-api/protocols/14-http2-and-http3.md).
 
 ```go
 // Сервер: медленный клиент не должен блокировать broadcast
@@ -304,6 +313,8 @@ func (s *Server) broadcastExcept(sender stream, msg *pb.ChatMessage) {
 // Лучший подход: буферизованные каналы per-client + отдельные write goroutines
 // Как в WebSocket Hub паттерне
 ```
+
+Hub-паттерн с per-client буферами и write-горутинами разобран в [05-websocket.md](../08-networking-and-api/protocols/05-websocket.md); Redis backplane — в [04-redis-pubsub.md](./04-redis-pubsub.md).
 
 ---
 

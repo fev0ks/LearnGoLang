@@ -361,13 +361,13 @@ celebrity_follows:{user_id} → Redis Set (только celebrity подписк
 
 Решение: Redis INCR + async flush
   INCR like_count:{tweet_id}
-  SADD liked_by:{tweet_id} {user_id}  // для проверки "лайкнул ли ты"
+  SADD liked_by:{tweet_id} {user_id}  // для проверки "лайкнул ли пользователь"
   
   Batch flush каждые 30 сек:
     Читать all like_count из Redis
     UPDATE tweets SET like_count = ? WHERE tweet_id = ?
     
-  Проверка "лайкнул ли ты":
+  Проверка "лайкнул ли пользователь":
     SISMEMBER liked_by:{tweet_id} {user_id}  // O(1)
 
 Альтернатива — Cassandra COUNTER:
@@ -424,7 +424,7 @@ INSERT в Cassandra → Fan-out Worker видит флаг `>1M followers` → *
 *Итог:* 3–5 round-trips в Redis ≈ 5 мс, укладываемся в 200 мс p99; гибрид закрывает обе проблемы.
 
 **4. Лайк вирусного твита.**
-`INCR like_count:{tweet}` + `SADD liked_by:{tweet} {user}` → batch-flush в Cassandra раз в 30 сек; «лайкнул ли ты» — `SISMEMBER` O(1).
+`INCR like_count:{tweet}` + `SADD liked_by:{tweet} {user}` → batch-flush в Cassandra раз в 30 сек; «лайкнул ли пользователь» — `SISMEMBER` O(1).
 *Итог:* 100K лайков/мин не создают write-hotspot в БД; точность счётчика eventual.
 
 ---
@@ -490,6 +490,6 @@ Cassandra нода упала:
 >
 > Storage: Cassandra, партиционированная по user_id. Snowflake IDs для time-ordering без ORDER BY. Feed в Redis Lists (LPUSH + LTRIM до 1000 записей).
 >
-> Likes: Redis INCR + async flush в Cassandra каждые 30 сек. SISMEMBER для 'лайкнул ли ты'.
+> Likes: Redis INCR + async flush в Cassandra каждые 30 сек. SISMEMBER для 'лайкнул ли пользователь'.
 >
 > При чтении ленты: 1 Redis LRANGE + N LRANGE для celebrity + 1 MGET для content = 3-5 round trips ≈ 5ms. Укладываемся в 200ms p99."

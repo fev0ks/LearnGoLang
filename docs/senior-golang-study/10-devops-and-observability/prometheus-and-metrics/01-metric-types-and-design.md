@@ -138,7 +138,7 @@ histogram_quantile(
 
 Когда `Summary` может быть ок:
 - single-process local metric;
-- тебе не нужна агрегация across replicas;
+- не нужна агрегация across replicas;
 - нужна простая app-local статистика.
 
 Когда лучше `Histogram`:

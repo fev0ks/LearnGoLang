@@ -680,7 +680,7 @@ Cross-region same continent: 30-80 ms
 Cross-continent: 100-300 ms
 ```
 
-**Implication:** для интерактивного UX (< 100ms response) у тебя есть **один cross-continent round-trip максимум**.
+**Implication:** для интерактивного UX (< 100ms response) допустим **один cross-continent round-trip максимум**.
 
 ### Patterns
 
@@ -760,7 +760,7 @@ DB partitioning: month-based partitions, dropping old ones.
 
 ## Operational scale
 
-Когда у тебя 1000+ services, миллионы pods — **operations** становится отдельным walls.
+При 1000+ services и миллионах pods **operations** становится отдельной стеной сложности.
 
 ### Observability at scale
 
@@ -1094,7 +1094,7 @@ Total fleet:
 
 ---
 
-## Что точно показать что ты понимаешь highload
+## Что показать, чтобы продемонстрировать понимание highload
 
 1. **Walls thinking** — не "поставлю больше pod'ов", а "что именно станет bottleneck'ом"
 2. **Eventual consistency mindset** — strong consistency дорого, design системы вокруг "когда-нибудь правда"

@@ -210,8 +210,14 @@ Distributed tracing отсутствует  OpenTelemetry + Jaeger/Tempo
 
 ## Interview-ready answer
 
-> "Каждая topology несёт предсказуемые проблемы. В монолите — coupling и общий blast radius, лечится модульными границами и feature flags. В modular monolith — нужна дисциплина: без enforcement границы ломаются, общая схема БД создаёт неявный coupling, лечится архитектурными тестами и PostgreSQL schemas по модулям.
->
-> В микросервисах самые опасные проблемы — cascade failures и data consistency. Для cascade: circuit breaker с fallback и правильные timeout'ы (не 30 секунд, а 500ms). Для consistency: outbox pattern и idempotent consumers, потому что exactly-once в distributed системе практически недостижимо.
->
-> Главный anti-pattern — распределённый монолит: сервисы с shared DB, синхронные цепочки вызовов и coupled deployment. Это все минусы обоих подходов без плюсов."
+**1. Какие предсказуемые проблемы у каждой топологии?**
+
+- Монолит: coupling и общий blast radius — лечится модульными границами и feature flags. Modular monolith: без enforcement границы ломаются, общая схема БД создаёт неявный coupling — лечится архитектурными тестами и PostgreSQL schemas по модулям.
+
+**2. Что самое опасное в микросервисах и как защищаться?**
+
+- Cascade failures и data consistency. Против каскадов: circuit breaker с fallback и правильные timeouts (не 30 секунд, а сотни миллисекунд). Против рассинхрона: outbox pattern и идемпотентные consumers — exactly-once в распределённой системе практически недостижим.
+
+**3. Главный anti-pattern?**
+
+- Распределённый монолит: сервисы с shared DB, синхронные цепочки вызовов и coupled deployment — все минусы обоих подходов без плюсов.

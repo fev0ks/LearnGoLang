@@ -147,4 +147,10 @@ sentry.CaptureException(err)
 
 ## Interview-ready answer
 
-`pkg/errors` добавляет stacktrace к ошибкам — то, чего нет в stdlib. `Wrap` и `Wrapf` совместимы с `errors.Is`/`errors.As`. Правило использования: sentinel errors через `errors.New` из stdlib, оборачивание с контекстом через `pkgErrors.Wrap`. В новых проектах на Go 1.21+ можно обойтись `fmt.Errorf("%w")` + structured logging, но `pkg/errors` незаменим когда нужен читаемый stacktrace в тексте ошибки или интеграция с Sentry.
+**1. Что даёт pkg/errors сверх stdlib?**
+
+- Stacktrace в ошибке: `Wrap`/`Wrapf` фиксируют стек в точке оборачивания и при этом совместимы с `errors.Is`/`errors.As`. Правило: sentinel-ошибки — stdlib `errors.New`, оборачивание с контекстом — `Wrap`.
+
+**2. Нужен ли pkg/errors в новых проектах?**
+
+- Часто нет: `fmt.Errorf("%w")` + structured logging (slog с источником) закрывают большинство случаев. pkg/errors остаётся полезен, когда нужен читаемый stacktrace прямо в тексте ошибки или интеграция с Sentry, которая его умеет разбирать.

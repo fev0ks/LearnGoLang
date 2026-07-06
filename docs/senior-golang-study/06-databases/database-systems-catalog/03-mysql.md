@@ -66,7 +66,7 @@ Replication lag — отставание реплики от primary. Монит
 
 ## Когда выбирать
 
-Выбирай MySQL, если:
+MySQL подходит, если:
 - команда и инфраструктура уже вокруг MySQL;
 - workload простой OLTP;
 - нужен stable relational storage с managed offering;
@@ -89,7 +89,17 @@ Replication lag — отставание реплики от primary. Монит
 
 ## Interview-ready answer
 
-MySQL это зрелая SQL база для OLTP и web workloads. InnoDB — единственный production engine: MVCC, transactions, FK. Default isolation `REPEATABLE READ` + gap locks могут вызвать неожиданные дедлоки при concurrent writes — иногда снижают до `READ COMMITTED`. Репликация row-based + GTID — стандартная рекомендация. Основные проблемы те же, что у PostgreSQL: индексы, долгие транзакции, replication lag при чтении с реплик.
+**1. Когда MySQL и что такое InnoDB?**
+
+- MySQL — зрелая SQL-база для OLTP и web workloads. InnoDB — единственный production-движок: MVCC, транзакции, foreign keys. Основные эксплуатационные проблемы те же, что у PostgreSQL: индексы, долгие транзакции, replication lag при чтении с реплик.
+
+**2. Чем изоляция MySQL отличается от PostgreSQL?**
+
+- Default — `REPEATABLE READ`, и вместе с gap locks он может давать неожиданные дедлоки при конкурентных записях в соседние диапазоны. Поэтому на write-heavy сервисах изоляцию иногда осознанно снижают до `READ COMMITTED`.
+
+**3. Как настраивать репликацию?**
+
+- Row-based binlog + GTID — стандартная рекомендация: устойчивее statement-based к недетерминированным запросам и упрощает failover и переключение реплик.
 
 ## Query examples
 

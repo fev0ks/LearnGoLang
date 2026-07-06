@@ -124,7 +124,7 @@ RUN apt-get update && apt-get install -y ca-certificates
 
 Что важно:
 - `RUN` создает новый layer;
-- все, что ты делаешь через `RUN`, влияет на итоговый image;
+- всё, что выполняется через `RUN`, влияет на итоговый image;
 - плохой порядок `RUN` может сделать image тяжелым и build медленным.
 
 Практическое правило:
@@ -265,7 +265,7 @@ RUN go mod download
 
 ## Build context
 
-Когда ты делаешь:
+Например:
 
 ```bash
 docker build -f Dockerfile .

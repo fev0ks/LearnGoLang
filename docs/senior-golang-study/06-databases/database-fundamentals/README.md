@@ -9,10 +9,10 @@
 - связывать выбор БД с access patterns, consistency requirements, latency и operational complexity.
 
 Материалы:
-- [01 ACID](./01-acid.md)
-- [02 CAP And BASE](./02-cap-and-base.md)
+- [01 ACID: транзакции и инварианты](./01-acid.md)
+- [02 CAP, BASE и распределённая консистентность](./02-cap-and-base.md)
 - [03 OLTP vs OLAP](./03-oltp-vs-olap.md)
-- [04 Interview Cases](./04-interview-cases.md)
+- [04 Interview-кейсы](./04-interview-cases.md)
 
 Как читать:
 - сначала разобраться с `ACID`, потому что это основа транзакций и инвариантов;

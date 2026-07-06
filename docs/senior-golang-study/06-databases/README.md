@@ -2,14 +2,12 @@
 
 Сюда складывай материалы по SQL и storage design.
 
-Отдельные заметки:
-- `migrations-in-go.md` - чем отличаются `goose`, `golang-migrate`, `Atlas`, `gormigrate`, `dbmate` и что выбирать на практике
-
 Подпакеты:
 - [Relational Databases And SQL](./relational-databases-and-sql/README.md)
 - [Go Database Libraries](./go-database-libraries/README.md)
 - [Database Systems Catalog](./database-systems-catalog/README.md)
 - [Database Fundamentals](./database-fundamentals/README.md)
+- [Migrations](./migrations/README.md) — выбор инструмента (goose/golang-migrate/Atlas), где запускать миграции, forward-only откаты, zero-downtime, DDL-safety
 - [Caching](./caching/) — Redis как кэш, cache-aside, TTL, инвалидация, cache stampede
 - [SQL Tasks](./database-systems-catalog/postgresql/sql-tasks/README.md) — задачи на SQL с разбором (LeetCode по сложности: JOIN, оконные функции, gaps-and-islands); лежат внутри PostgreSQL-раздела
 
@@ -50,4 +48,4 @@
 - чем опасен долгий transaction scope в Go-сервисе;
 - когда Redis оправдан как cache, а когда превращается в источник неконсистентности;
 - чем keyset pagination лучше offset pagination;
-- как бы ты расследовал deadlock или pool exhaustion.
+- как расследовать deadlock или pool exhaustion.

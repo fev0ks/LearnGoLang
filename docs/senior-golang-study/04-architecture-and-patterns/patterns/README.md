@@ -56,4 +56,6 @@ Go-specific паттерны на уровне кода и архитектур�
 
 ## Interview-ready answer
 
-Паттерны в Go я воспринимаю не как список классов из GoF, а как набор практик для управления зависимостями, изменениями и отказами. На уровне кода — small interfaces, constructor injection, functional options, middleware, adapter, decorator, strategy, repository. На уровне архитектуры — layered или hexagonal в зависимости от сложности домена, outbox для надёжного publish, saga для распределённых процессов, idempotency для retries, reconciliation для устойчивости к потере событий. Выбор всегда от проблемы: что меняется часто, где граница ответственности, где нужна удобная замена в тестах.
+**1. Как относиться к паттернам в Go?**
+
+- Не как к списку классов из GoF, а как к практикам управления зависимостями, изменениями и отказами. На уровне кода — small interfaces, constructor injection, functional options, middleware, adapter, decorator, strategy, repository. На уровне архитектуры — layered/hexagonal по сложности домена, outbox для надёжного publish, saga для распределённых процессов, idempotency для retries, reconciliation для устойчивости к потере событий. Выбор всегда от проблемы: что меняется часто, где граница ответственности, где нужна замена в тестах.

@@ -459,4 +459,14 @@ Segments полезны, но опасны.
 
 ## Interview-ready answer
 
-Для A/B теста я заранее выбираю primary metric и guardrails. Product effect считаю в analytics warehouse по exposure events и outcome events, а Prometheus использую для operational health: latency, error rate, config refresh, evaluator latency. Важно проверять sample ratio mismatch, не останавливать тест при первом красивом результате, не менять метрики после старта и не делать выводы по случайно найденным сегментам. Decision должен учитывать не только uplift, но и guardrails, data quality и стоимость rollout.
+**1. Как разделить продуктовые и операционные метрики эксперимента?**
+
+- Product effect считается в analytics warehouse по exposure events и outcome events; Prometheus — для operational health (latency, error rate, config refresh, evaluator latency). Primary metric и guardrails выбираются заранее.
+
+**2. Какие главные ловушки анализа?**
+
+- Sample ratio mismatch (проверять!), остановка теста при первом «красивом» результате (peeking), смена метрик после старта, выводы по случайно найденным сегментам (HARKing).
+
+**3. Как принимается решение по итогам?**
+
+- Не только по uplift: guardrails, data quality и стоимость rollout входят в решение наравне с основной метрикой.

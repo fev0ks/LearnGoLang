@@ -167,7 +167,7 @@ application -> stdout -> Fluent Bit / OTel Collector -> Elasticsearch or Loki
 
 ## Что важно объяснить на интервью
 
-- как бы ты собрал дешёвый и надёжный pipeline в `AWS`;
+- как собрать дешёвый и надёжный pipeline в `AWS`;
 - зачем `CloudWatch` часто комбинируют с `OpenSearch` или `S3`;
 - почему `Google Cloud` не равно `GCS`, и почему `GCS` не равно `Loki` или `Elasticsearch`;
 - как разделить searchable retention и archive retention.

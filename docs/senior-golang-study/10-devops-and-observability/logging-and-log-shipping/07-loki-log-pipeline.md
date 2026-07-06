@@ -39,7 +39,7 @@ application -> stdout/file -> Promtail/Fluent Bit/Vector/Otel Collector -> Loki 
 - `Promtail` часто встретится в существующих кластерах и старых гайдах;
 - для новых установок стоит знать про `Grafana Alloy` как более современный collector в экосистеме `Grafana`.
 
-Поэтому в реальной жизни сегодня ты увидишь и такие варианты:
+Поэтому на практике сегодня встречаются и такие варианты:
 
 ```text
 application -> stdout/file -> Grafana Alloy -> Loki -> Grafana

@@ -342,10 +342,14 @@ func (h *Handler) CreateOrder(w http.ResponseWriter, r *http.Request) {
 
 ## Interview-ready answer
 
-> "Структура зависит от архитектуры. Для простого сервиса — layered: `cmd/`, `internal/handler`, `internal/service`, `internal/repository`. Для сложного домена — hexagonal: `domain/` ни от кого не зависит, `usecase/` использует domain interfaces, `transport/` и `infra/` реализуют их.
->
-> Для modular monolith — каждый модуль в `internal/orders/`, `internal/payments/` с публичным `module.go` как единственной точкой входа. Другие модули видят только этот файл.
->
-> Главные ошибки: God package `pkg/models/` куда тянут все типы, бизнес-логика в handlers, и infrastructure-зависимости в domain слое (SQL-пакеты в domain = сломанные тесты и coupling).
->
-> `internal/` — это не просто конвенция, это compiler enforcement: Go не позволяет импортировать `internal/` пакеты снаружи модуля."
+**1. Как выбирать структуру Go-проекта?**
+
+- От архитектуры: простой сервис — layered (`cmd/`, `internal/handler`, `internal/service`, `internal/repository`); сложный домен — hexagonal (`domain/` ни от кого не зависит, `usecase/` использует domain-интерфейсы, `transport/` и `infra/` их реализуют); modular monolith — модуль в `internal/orders/` с публичным `module.go` как единственной точкой входа.
+
+**2. Какие главные ошибки layout?**
+
+- God package `pkg/models/`, куда стягивают все типы; бизнес-логика в handlers; infrastructure-зависимости в domain-слое (SQL-пакеты в domain = coupling и несобираемые тесты).
+
+**3. Что особенного в `internal/`?**
+
+- Это не конвенция, а compiler enforcement: Go не позволяет импортировать `internal/`-пакеты снаружи модуля — границы реально защищены.

@@ -302,4 +302,4 @@ func main() {
 - Удобный binding + validation из коробки
 - Много built-in middleware (rate limiting, CORS, compression)
 
-**Ключевой вопрос**: если тебе нужно только "настроить маршруты и middleware" — stdlib 1.22 справится. Если нужна экосистема готовых middleware и удобный binding — смотри на chi или gin.
+**Ключевой вопрос**: если нужно только "настроить маршруты и middleware" — stdlib 1.22 справится. Если нужна экосистема готовых middleware и удобный binding — подойдут chi или gin.

@@ -360,10 +360,14 @@ func TestOrderServiceContract(t *testing.T) {
 
 ## Interview-ready answer
 
-> "API versioning — это баланс между стабильностью для клиентов и скоростью развития. Для REST я использую URL path versioning (`/v1/`, `/v2/`) — явно и хорошо кешируется. Ключевое правило: backward-compatible изменения (новые опциональные поля, новые endpoints) не требуют новой версии — просто добавляй. Новая версия нужна только при breaking changes.
->
-> Для Protobuf: номера полей неизменны навсегда, удалённые номера → `reserved`. При соблюдении этих правил backward compatibility встроена в формат.
->
-> Для событий в Kafka: версия в payload + multi-version handler на стороне consumer. Schema Registry если нужна централизованная валидация.
->
-> Deprecation: объявить, добавить header с датой sunset, мониторить использование deprecated endpoints, дать клиентам достаточно времени для миграции."
+**1. Как версионировать REST API?**
+
+- URL path versioning (`/v1/`, `/v2/`) — явно и хорошо кешируется. Ключевое правило: backward-compatible изменения (новые опциональные поля, новые endpoints) не требуют новой версии; новая версия — только при breaking changes.
+
+**2. Как обеспечивается совместимость в Protobuf и событиях?**
+
+- Protobuf: номера полей неизменны навсегда, удалённые номера — в `reserved`; при соблюдении этих правил backward compatibility встроена в формат. События в Kafka: версия в payload + multi-version handler на consumer-стороне; Schema Registry — если нужна централизованная валидация схем.
+
+**3. Как правильно выводить API из эксплуатации?**
+
+- Deprecation-процесс: объявить, добавить заголовок с датой sunset, мониторить использование deprecated endpoints и дать клиентам достаточно времени на миграцию — версию нельзя просто выключить.

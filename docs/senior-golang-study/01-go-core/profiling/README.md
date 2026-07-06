@@ -25,7 +25,7 @@
 
 - Чем pprof отличается от runtime/trace? Когда каждый из них нужен?
 - Что такое flat vs cum в pprof? Какой из них смотреть при высоком CPU?
-- Как бы ты нашёл goroutine leak на production сервисе?
+- Как найти goroutine leak на production-сервисе?
 - Как найти источник GC pressure? Какой профиль для этого?
 - Почему CPU профиль может не показывать проблему при latency spikes?
 - Что такое block profile и зачем он нужен, если уже есть mutex profile?

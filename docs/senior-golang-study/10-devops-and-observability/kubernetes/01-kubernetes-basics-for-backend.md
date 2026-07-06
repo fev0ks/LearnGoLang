@@ -82,4 +82,14 @@ Cluster admin знать необязательно, но нужно увере�
 
 ## Interview-ready answer
 
-Docker решает упаковку и запуск одного контейнера. Kubernetes решает orchestration: следит за желаемым состоянием — нужным числом реплик, корректным rolling update, service discovery, управлением конфигами и секретами. При падении Pod или ноды Deployment controller пересоздает Pod'ы на живых нодах. Service дает стабильный DNS для балансировки трафика между репликами. Для backend-разработчика принципиально понимать probes, graceful shutdown и работу с ConfigMap/Secret — без этого deploy в Kubernetes будет ломать запросы при каждом обновлении.
+**1. Зачем Kubernetes, если есть Docker?**
+
+- Docker решает упаковку и запуск одного контейнера. Kubernetes решает orchestration: следит за желаемым состоянием — нужным числом реплик, rolling update без даунтайма, service discovery, конфигами и секретами. При падении Pod или ноды controller пересоздаёт Pod-ы на живых нодах; Service даёт стабильный DNS для балансировки между репликами.
+
+**2. Когда Kubernetes избыточен?**
+
+- Один-два сервиса в маленькой команде, прототипы/MVP, задачи, где хватает managed PaaS (Cloud Run, Fly.io). Kubernetes — это overhead: кластер, networking, RBAC, storage; он окупается на десятках сервисов, требованиях zero-downtime и унифицированных deploy-процессах.
+
+**3. Что из Kubernetes обязан понимать backend-разработчик?**
+
+- Не администрирование кластера, а поведение своего сервиса: как деплой не ломает пользователей (rolling update + readiness probe), как сервис переживает падение Pod/ноды, graceful shutdown по SIGTERM, проброс конфигов через ConfigMap/Secret и влияние requests/limits на Go runtime (GOMEMLIMIT, GOMAXPROCS).

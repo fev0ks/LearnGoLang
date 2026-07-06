@@ -49,7 +49,7 @@ service discovery
 - `__meta_kubernetes_pod_annotation_prometheus_io_scrape`
 - `__meta_kubernetes_pod_container_port_number`
 
-Это еще не те labels, которые ты потом хочешь видеть на dashboard.
+Это ещё не те labels, которые нужны на dashboard.
 
 ## Что делает relabeling
 
@@ -71,7 +71,7 @@ relabel_configs:
 
 ### 2. Меняют scrape address
 
-Например discovery нашел pod IP и port, а ты хочешь собрать из них итоговый `__address__`:
+Например, discovery нашёл pod IP и port, а из них нужно собрать итоговый `__address__`:
 
 ```yaml
 relabel_configs:
@@ -207,7 +207,7 @@ rate(http_requests_total{job="shortener"}[5m])
 http_requests_total{route="/api/v1/links",status_code="201"}
 ```
 
-После scrape и relabeling ты можешь получить:
+После scrape и relabeling можно получить:
 
 ```text
 http_requests_total{

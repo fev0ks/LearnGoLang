@@ -345,4 +345,14 @@ db.Debug().Find(&users)
 
 ## Interview-ready answer
 
-ORM не плох сам по себе. GORM ускоряет CRUD и снижает boilerplate, но добавляет abstraction cost и риск N+1. Для production важно: включить query logging, знать про `Preload` vs `Joins`, понимать когда GORM обновляет все поля, а когда только изменённые. Squirrel решает конкретную задачу — dynamic WHERE без ручной конкатенации строк — и хорошо дополняет sqlc. Ent и Bun — хорошие альтернативы когда нужен typed query API без полного GORM-style magic.
+**1. Когда ORM оправдан и в чём его цена?**
+
+- ORM не плох сам по себе: GORM ускоряет типовой CRUD и убирает boilerplate. Цена — abstraction cost и риск N+1: обязательны query logging и понимание `Preload` vs `Joins`, а также когда GORM обновляет все поля, а когда только изменённые.
+
+**2. Зачем query builder рядом с sqlc?**
+
+- Squirrel решает одну конкретную задачу — динамический WHERE (фильтры из UI) без ручной конкатенации строк — и хорошо дополняет статические запросы sqlc.
+
+**3. Какие альтернативы GORM?**
+
+- Ent и Bun — typed query API без полного GORM-style magic: строже контракты, меньше «магии» в поведении, но выше порог входа, чем у GORM.

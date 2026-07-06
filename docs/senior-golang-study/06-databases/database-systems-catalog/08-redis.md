@@ -129,7 +129,7 @@ end
 
 ## Когда выбирать
 
-Выбирай Redis, если:
+Redis подходит, если:
 - нужен быстрый cache с TTL;
 - нужны counters и rate limiting;
 - надо хранить ephemeral state (сессии, временные lock'и);
@@ -195,7 +195,21 @@ rdb := redis.NewFailoverClient(&redis.FailoverOptions{
 
 ## Interview-ready answer
 
-Redis — in-memory store для cache, счётчиков, rate limiting и ephemeral state. Для senior уровня важно понимать persistence: RDB теряет данные с момента последнего snapshot, AOF с `everysec` теряет максимум секунду. Eviction policy определяет поведение при заполнении памяти — для pure cache `allkeys-lru`; для mixed storage `volatile-lru`. Sentinel дает HA, Cluster — горизонтальное шардирование, но multi-key операции работают только в рамках одного shard. Distributed lock через `SET NX PX` работает для advisory lock, но Redlock спорен при строгих гарантиях. Hot keys — single point of bottleneck, Redis однопоточен для команд.
+**1. Что Redis гарантирует по durability?**
+
+- RDB-снапшоты теряют всё с момента последнего snapshot; AOF с `everysec` — максимум секунду. Redis — in-memory store для cache, счётчиков, rate limiting и ephemeral state; как единственное хранилище критичных данных его durability-профиль не подходит.
+
+**2. Как настроить eviction и что происходит при заполнении памяти?**
+
+- Eviction policy: для pure cache — `allkeys-lru`, для mixed storage (часть ключей без TTL важна) — `volatile-lru`. Без policy при заполнении памяти записи начнут падать с ошибкой.
+
+**3. Sentinel vs Cluster?**
+
+- Sentinel — HA для одного шарда (failover primary); Cluster — горизонтальное шардирование по hash slots, но multi-key операции работают только в пределах одного слота (hash tags).
+
+**4. Можно ли строить distributed lock на Redis?**
+
+- `SET NX PX` + Lua-release годится как advisory lock (cron, дедупликация работ). Redlock для строгих гарантий спорен (критика Kleppmann): при паузах GC/сетевых задержках корректность не доказуема — финансовые инварианты защищаются в БД, не в Redis. Отдельная ловушка: hot key упирается в один поток команд Redis.
 
 ## Query examples
 

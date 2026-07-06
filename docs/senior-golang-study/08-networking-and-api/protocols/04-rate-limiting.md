@@ -56,11 +56,11 @@ type Limiter interface {
 - алгоритмы можно менять без переписывания HTTP слоя.
 
 Локальные примеры лежат рядом с этой заметкой:
-- [Limiter Interface](./rate-limiting-examples/limiter.go)
-- [Fixed Window](./rate-limiting-examples/fixed_window_memory.go)
-- [Sliding Window](./rate-limiting-examples/sliding_window_memory.go)
-- [Token Bucket](./rate-limiting-examples/token_bucket_memory.go)
-- [Tests](./rate-limiting-examples/implementations_test.go)
+- [Limiter Interface](../rate-limiting-examples/limiter.go)
+- [Fixed Window](../rate-limiting-examples/fixed_window_memory.go)
+- [Sliding Window](../rate-limiting-examples/sliding_window_memory.go)
+- [Token Bucket](../rate-limiting-examples/token_bucket_memory.go)
+- [Tests](../rate-limiting-examples/implementations_test.go)
 
 ## 1. Fixed Window
 
@@ -79,9 +79,9 @@ type Limiter interface {
 - легко реализовать в памяти;
 - легко положить в Redis через счетчик и TTL.
 
-### Пример из твоего кода
+### Пример реализации
 
-У тебя in-memory fixed window устроен через:
+In-memory fixed window устроен через:
 - `bucket = now.UnixNano() / window`;
 - `count` на ключ внутри bucket;
 - `RetryAfter` до конца окна.
@@ -144,7 +144,7 @@ if st.count > limit {
 - сколько событий было за последние 60 секунд;
 - когда старейшее из них выйдет из окна.
 
-### Пример из твоего кода
+### Пример реализации
 
 Твой in-memory вариант хранит список timestamps на ключ:
 - старые hits вычищаются;
@@ -217,7 +217,7 @@ hits = append(hits, now)
 - блокируется, если токенов нет;
 - `RetryAfter` равен времени до следующего токена.
 
-### Пример из твоего кода
+### Пример реализации
 
 Твой in-memory token bucket хранит:
 - текущее число токенов;
@@ -362,5 +362,5 @@ if st.tokens >= 1 {
 
 ## Связанные темы
 
-- [Networking And API README](./README.md)
+- [Networking And API README](../README.md)
 - [Redis Docs](https://redis.io/docs/latest/)

@@ -68,6 +68,7 @@ import (
     "context"
     "net/http"
     "sync/atomic"
+    "time"
 )
 
 type HealthHandler struct {
@@ -296,17 +297,17 @@ env:
 
 `GOMEMLIMIT` (Go 1.19+) заставляет GC работать агрессивнее до достижения лимита — это снижает риск OOMKill при memory spike.
 
-**CPU**: `limits.cpu` — это throttle, не изоляция. Go runtime видит все ядра ноды через `runtime.NumCPU()`. При жестком CPU throttle (e.g., `limits.cpu: 100m` на 4-ядерной ноде) горутины планировщика не получают достаточно времени, что приводит к latency spikes.
+**CPU**: `limits.cpu` — это throttle, не изоляция. До Go 1.25 runtime ставил `GOMAXPROCS = число ядер ноды`: при `limits.cpu: 100m` на 4-ядерной ноде получалось 4 OS-потока на четверть ядра — cgroup троттлил CPU, и latency прыгала.
 
-Решение:
+**С Go 1.25 runtime container-aware**: GOMAXPROCS автоматически выставляется по cgroup CPU quota. Для более старых Go — явный env или `go.uber.org/automaxprocs`:
 
 ```yaml
 env:
   - name: GOMAXPROCS
-    value: "1"  # явно ограничить
+    value: "1"  # явно ограничить (для Go < 1.25)
 ```
 
-Или использовать библиотеку `go.uber.org/automaxprocs`, которая автоматически устанавливает `GOMAXPROCS` на основе CPU quota.
+Детали контейнерной настройки Go runtime — [02-docker-for-go-services.md](../docker/02-docker-for-go-services.md).
 
 Рекомендации:
 - `requests.cpu` = нормальная нагрузка;
@@ -316,4 +317,14 @@ env:
 
 ## Interview-ready answer
 
-Readiness probe отвечает за то, готов ли Pod принимать трафик: при провале Pod убирается из Service endpoints без перезапуска. Liveness probe отвечает за жизнеспособность процесса: при провале контейнер перезапускается. Нельзя проверять в liveness то же, что в readiness — иначе временная недоступность зависимости вызовет CrashLoopBackOff. В Go реализую два HTTP endpoint на отдельном admin-порту: `/healthz` для liveness просто возвращает 200, `/readyz` проверяет DB ping и флаг готовности. При SIGTERM сначала сбрасываю readiness, жду ~5 секунд пока kube-proxy обновит endpoints, потом вызываю `server.Shutdown` с контекстом — это позволяет дообработать in-flight запросы. Для Go нужно настроить `GOMEMLIMIT` чуть ниже `limits.memory` и проверить `GOMAXPROCS` при CPU throttling — иначе scheduler Go runtime будет видеть все ядра ноды при реально выделенных 200m CPU.
+**1. Чем readiness probe отличается от liveness?**
+
+- Readiness — «готов ли Pod принимать трафик»: при провале Pod убирается из Service endpoints, контейнер не трогается. Liveness — «жив ли процесс»: при провале контейнер перезапускается. Проверять в liveness то же, что в readiness (например, доступность БД), нельзя — временная недоступность зависимости превратится в CrashLoopBackOff вместо ожидания восстановления.
+
+**2. Как выглядит правильный graceful shutdown в Go под Kubernetes?**
+
+- По SIGTERM: сбросить readiness-флаг (Pod уходит из endpoints) → подождать ~5 секунд, пока kube-proxy обновит правила (endpoints обновляются асинхронно, иначе новые запросы получат connection refused) → `server.Shutdown(ctx)` дообрабатывает in-flight запросы → закрыть пулы и брокеры. `terminationGracePeriodSeconds` должен покрывать паузу + таймаут Shutdown; альтернатива паузе в коде — preStop hook со sleep.
+
+**3. Как requests/limits влияют на Go runtime?**
+
+- Превышение `limits.memory` — OOMKilled; защита — `GOMEMLIMIT` чуть ниже лимита, GC становится агрессивнее у потолка. `limits.cpu` — троттлинг: до Go 1.25 runtime видел все ядра ноды и создавал лишние потоки (лечится automaxprocs/env), с 1.25 GOMAXPROCS выставляется по cgroup quota автоматически.

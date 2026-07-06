@@ -88,7 +88,7 @@ type Ordered interface {
 }
 ```
 
-Его используют `slices.Sort`, `slices.Min/Max`, `slices.BinarySearch` и т.п. — и ты сам, когда пишешь дженерик-функцию, которой нужно сравнивать значения:
+Его используют `slices.Sort`, `slices.Min/Max`, `slices.BinarySearch` и т.п. — и в собственных дженерик-функциях, которым нужно сравнивать значения:
 
 ```go
 func clamp[T cmp.Ordered](v, lo, hi T) T {

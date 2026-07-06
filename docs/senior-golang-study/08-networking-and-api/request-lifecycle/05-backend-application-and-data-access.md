@@ -52,9 +52,9 @@ srv := &http.Server{
 }
 ```
 
-`ReadTimeout` vs `ReadHeaderTimeout`: если выставить только `ReadTimeout`, загрузка больших файлов упрётся в него. Для streaming используй `ReadHeaderTimeout` + отдельный timeout на уровне handler.
+`ReadTimeout` vs `ReadHeaderTimeout`: если выставить только `ReadTimeout`, загрузка больших файлов упрётся в него. Для streaming — `ReadHeaderTimeout` + отдельный таймаут на уровне handler.
 
-Graceful shutdown (обязателен в Kubernetes — детали в [kubernetes/04-probes-and-graceful-shutdown.md](../../../10-devops-and-observability/kubernetes/04-probes-and-graceful-shutdown.md)):
+Graceful shutdown (обязателен в Kubernetes — детали в [06-probes-and-graceful-shutdown.md](../../10-devops-and-observability/kubernetes/06-probes-and-graceful-shutdown.md)):
 
 ```go
 ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
@@ -174,7 +174,7 @@ Scenario: 25 max connections, каждый запрос держит соеди�
 → 504 Gateway Timeout для клиентов
 ```
 
-Мониторить: `db.Stats().WaitCount` (запросы, ждавшие свободного соединения), `db.Stats().WaitDuration`.
+Мониторить: `db.Stats().WaitCount` (запросы, ждавшие свободного соединения), `db.Stats().WaitDuration`. Подробный разбор пулов и их производственных проблем — [05-connection-pooling-and-production-issues.md](../../06-databases/relational-databases-and-sql/05-connection-pooling-and-production-issues.md).
 
 ### Redis и другие клиенты
 
@@ -202,7 +202,7 @@ go func() { defer wg.Done(); /* fetch prefs */ }()
 wg.Wait()
 ```
 
-При параллельном fan-out: если один upstream медленный, он держит весь запрос. Используй `context.WithTimeout` с разумным deadline на каждый downstream call.
+При параллельном fan-out медленный upstream держит весь запрос — каждому downstream-вызову нужен свой `context.WithTimeout` с разумным deadline (как выбирать бюджеты — [01-timeouts-and-deadlines.md](../../05-system-design/reliability-patterns/01-timeouts-and-deadlines.md)).
 
 Паттерн для partial failure — не падать, если некритичные данные не пришли:
 
@@ -240,8 +240,26 @@ Cache headers для CDN — важны: `Cache-Control: public, max-age=60` п�
 - **context not propagated**: DB/downstream query продолжает работу после timeout.
 - **downstream timeout misconfiguration**: timeout в proxy меньше, чем в handler — прокси разрывает соединение раньше, backend тратит ресурсы зря.
 - **panic без recover**: без `recoverMiddleware` один panic убивает горутину обработки запроса, Go logss stack trace, клиент получает разрыв соединения (не 500).
-- **serialization overhead**: глубокая JSON-сериализация больших объектов может быть CPU-bound. Profile с `pprof`.
+- **serialization overhead**: глубокая JSON-сериализация больших объектов может быть CPU-bound — проверяется профилированием через `pprof`.
 
 ## Interview-ready answer
 
-Go `net/http` создаёт одну горутину на TCP-соединение (HTTP/1.1) или на stream (HTTP/2). Middleware chain — последовательные обёртки над `http.Handler`; порядок важен: recover снаружи, auth внутри. Context с deadline из входящего запроса должен пробрасываться во все downstream вызовы — это единственный способ гарантировать отмену операций при timeout. Connection pool exhaustion — частая причина роста latency: `db.Stats().WaitCount` показывает проблему. Fan-out к нескольким сервисам нужно делать параллельно через горутины с общим context deadline, с graceful degradation для некритичных данных.
+**1. Как Go `net/http` обрабатывает соединения?**
+
+- Одна горутина на TCP-соединение (HTTP/1.1) или на stream (HTTP/2, плюс горутина на само соединение). Горутины дешёвые (~2 КБ), 10k конкурентных соединений — норма; но число горутин растёт пропорционально in-flight запросам, а блокирующие вызовы держат их живыми.
+
+**2. Зачем пробрасывать context во все вызовы?**
+
+- Deadline из входящего запроса должен дойти до БД и downstream — это единственный способ отменить работу при таймауте или уходе клиента. Без проброса запрос в БД продолжится после отмены, тратя пул и CPU на никому не нужный результат.
+
+**3. Как проявляется connection pool exhaustion?**
+
+- Пропускная способность упирается в `max_connections / среднее время удержания`; сверх неё горутины встают в очередь за соединением, latency растёт до таймаутов, клиенты получают 504. Диагностика: `db.Stats().WaitCount` и `WaitDuration` растут.
+
+**4. Как правильно делать fan-out к нескольким сервисам?**
+
+- Параллельно в горутинах с общим context deadline: latency = max, а не сумма. Некритичным зависимостям — свой короткий таймаут и graceful degradation (default-значение вместо ошибки), чтобы один медленный сервис не ронял весь запрос.
+
+**5. В каком порядке ставить middleware?**
+
+- recover — внешним (ловит panic из всех слоёв), затем tracing (trace ID появляется до логирования), logging, timeout, auth — внутри timeout, чтобы медленный auth-сервис не обходил ограничение.

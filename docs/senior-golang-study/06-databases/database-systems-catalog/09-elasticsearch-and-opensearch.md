@@ -123,7 +123,7 @@ Primary DB (PostgreSQL/MongoDB) -> CDC / event stream -> ES index
 
 ## Как данные попадают в индекс (Indexer)
 
-ES **сам ничего не «забирает»** из БД или Kafka — он лишь принимает запросы на индексацию (`POST /index/_doc`). Данные в индекс кладёт **внешний процесс** (его называют indexer / sync worker). Это не компонент Elasticsearch, а отдельный код/инструмент, который ты разворачиваешь сам. Два подхода:
+ES **сам ничего не «забирает»** из БД или Kafka — он лишь принимает запросы на индексацию (`POST /index/_doc`). Данные в индекс кладёт **внешний процесс** (его называют indexer / sync worker). Это не компонент Elasticsearch, а отдельный код/инструмент, разворачиваемый отдельно. Два подхода:
 
 ### 1. Самописный consumer (свой сервис)
 
@@ -184,7 +184,7 @@ for msg := range consumer.Messages() {       // consumer group по топику
 
 ## Когда выбирать
 
-Выбирай Elasticsearch/OpenSearch, если:
+Elasticsearch/OpenSearch подходит, если:
 - нужен full-text search с relevance;
 - нужны фильтры, facets, поиск по логам;
 - PostgreSQL full-text search уже не справляется;
@@ -207,7 +207,17 @@ for msg := range consumer.Messages() {       // consumer group по топику
 
 ## Interview-ready answer
 
-Elasticsearch/OpenSearch — поисковые движки на инвертированном индексе: для каждого слова хранится список документов. Их правильная роль — derived read model: primary DB является source of truth, ES/OS — дешевый индекс для поиска. Mapping критичен: `text` для full-text search, `keyword` для exact match и aggregation. Eventual consistency при индексировании (refresh ~1s). Для logs: обязателен ILM для retention, иначе диск закончится.
+**1. Что такое Elasticsearch/OpenSearch и какова их правильная роль?**
+
+- Поисковые движки на инвертированном индексе (для каждого слова — список документов). Правильная роль — derived read model: source of truth остаётся в primary DB, ES/OS — перестраиваемый индекс для поиска, синхронизируемый асинхронно (events/CDC).
+
+**2. Почему mapping критичен?**
+
+- `text` анализируется для full-text поиска, `keyword` хранится как есть — для exact match, сортировок и агрегаций. Перепутать — получить либо неработающий точный фильтр, либо бессмысленный полнотекст; менять mapping задним числом — реиндекс.
+
+**3. Какие эксплуатационные нюансы?**
+
+- Индексирование eventually consistent (refresh ~1 c) — документ виден в поиске не сразу. Для логов обязателен ILM (index lifecycle management) с retention — иначе диск закончится.
 
 ## Query examples
 

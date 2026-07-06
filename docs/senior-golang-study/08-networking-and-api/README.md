@@ -16,7 +16,10 @@
 - [08. GraphQL](./protocols/08-graphql.md) — schema/query/mutation/subscription, N+1 + DataLoader, gqlgen, introspection, GraphQL vs REST
 - [09. WebRTC](./protocols/09-webrtc.md) — signaling, ICE/STUN/TURN, SDP offer/answer, Pion в Go, P2P vs SFU
 - [10. SOAP](./protocols/10-soap.md) — WSDL, конверт, заголовки, Fault, SOAP из Go (ручной + gowsdl), почему проиграл
-- [11. Protocol Comparison](./protocols/11-protocol-comparison.md) — большая таблица REST/gRPC/GraphQL/WebSocket/Webhooks/WebRTC/SOAP, decision tree
+- [11. Protocol Comparison](./protocols/11-protocol-comparison.md) — большая таблица REST/gRPC/GraphQL/WebSocket/SSE/Webhooks/WebRTC/SOAP, Mermaid decision tree, смешанные архитектуры (Gateway/BFF)
+- [12. SSE и Realtime](./protocols/12-sse-and-realtime.md) — server-sent events, сравнение с WebSocket/polling
+- [13. OpenAPI и Swagger](./protocols/13-openapi-and-swagger.md) — спецификация, кодогенерация, документирование REST API
+- [14. HTTP/1.1, HTTP/2 и HTTP/3](./protocols/14-http2-and-http3.md) — head-of-line blocking на разных уровнях, streams/frames/HPACK, h2c и ALPN, QUIC, как gRPC ложится на HTTP/2, HTTP/2 в Go
 
 ### [API Design](./api-design/)
 

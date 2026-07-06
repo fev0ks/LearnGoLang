@@ -10,7 +10,8 @@
 - [04. Redis Pub/Sub](./04-redis-pubsub.md) — PUBLISH/SUBSCRIBE/PSUBSCRIBE, at-most-once, backplane паттерн, Go publisher/subscriber
 - [05. Cloud Pub/Sub](./05-cloud-pubsub.md) — Google Cloud Pub/Sub (topics/subscriptions/ack deadline/DLT), AWS SNS+SQS (fan-out), cloud vs self-hosted
 - [06. gRPC Streaming](./06-grpc-streaming.md) — bidirectional stream как transport, server registry, multi-broker Redis backplane, backpressure
-- [07. Comparison](./07-comparison.md) — большая таблица, decision tree, типичные ошибки выбора
+- [07. Comparison](./07-comparison.md) — большая таблица (включая NATS и cloud), decision tree, типичные ошибки выбора
+- [08. NATS](./08-nats.md) — Core NATS (subjects/wildcards, request-reply, queue groups, at-most-once) vs JetStream (streams/consumers, ack/redelivery, dedup window, KV store), nats.go, когда NATS vs Kafka/RabbitMQ
 
 ## Темы
 - RabbitMQ, Kafka, NATS, Redis Streams, SQS/SNS;

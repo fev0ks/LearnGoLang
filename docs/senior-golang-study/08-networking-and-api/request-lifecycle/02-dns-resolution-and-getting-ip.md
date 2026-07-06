@@ -21,7 +21,7 @@
 DNS-lookup проходит несколько уровней кэша, каждый с разным TTL:
 
 ```text
-1. Browser DNS cache        — TTL из записи, но мин. ~1 мин в Chrome
+1. Browser DNS cache        — Chrome держит ~60 с независимо от TTL записи
 2. OS resolver cache        — nscd / systemd-resolved / mDNSResponder
 3. Router DNS cache         — часто 5–60 мин
 4. ISP / corporate resolver — держит popular records часами
@@ -37,7 +37,7 @@ DNS-lookup проходит несколько уровней кэша, кажд
 
 TTL в DNS-записи определяет, сколько времени запись можно кэшировать. Изменения DNS вступают в силу только после истечения TTL всех кэшей — это важно при миграции.
 
-**Практика**: перед DNS-миграцией понижай TTL до 300s (5 мин) за 48 часов. После успешной смены — поднимай обратно до 3600+.
+**Практика**: перед DNS-миграцией TTL понижается до 300s (5 мин) за 48 часов, после успешной смены — поднимается обратно до 3600+.
 
 ## Recursive resolution
 
@@ -85,11 +85,11 @@ d1234.cloudfront.net → A → 13.32.x.x
 
 Каждый CNAME — потенциально дополнительный lookup, если нет в кэше. Длинные CNAME-цепочки (3+) заметно увеличивают DNS latency.
 
-Правило: CDN и managed сервисы часто требуют CNAME. Выбирай провайдеров с коротким TTL у итогового A-record и локальными anycast PoP.
+Правило: CDN и managed-сервисы часто требуют CNAME; предпочтительны провайдеры с коротким TTL у итогового A-record и локальными anycast PoP.
 
 ## Negative caching
 
-NXDOMAIN (домен не существует) тоже кэшируется. Время кэширования берётся из `NCACHE` записи в SOA.
+NXDOMAIN (домен не существует) тоже кэшируется. Время кэширования — negative TTL из поля `MINIMUM` SOA-записи зоны (RFC 2308).
 
 ```bash
 # запись не существует — кэшируется на SOA MINIMUM TTL
@@ -112,7 +112,7 @@ t=310ms:  SYN-ACK от 142.250.x.x    ← побеждает IPv4
            → continue with IPv4
 ```
 
-Для backend инженера: если IPv6 плохо работает в корпоративной сети — включи логирование DNS для диагностики. `Happy Eyeballs` скроет проблему от пользователя, но создаст лишние DNS queries.
+Для backend-инженера: если IPv6 плохо работает в корпоративной сети, стоит включить логирование DNS для диагностики — Happy Eyeballs скроет проблему от пользователя, но создаст лишние DNS-запросы.
 
 ## DNS over HTTPS и DNS over TLS
 
@@ -140,9 +140,9 @@ search my-namespace.svc.cluster.local svc.cluster.local cluster.local
 nameserver 10.96.0.10  # CoreDNS ClusterIP
 ```
 
-Проблема: каждый DNS-запрос на короткое имя пробует несколько search domains. Для `my-service` делается 4 запроса: `my-service.my-namespace.svc.cluster.local` → `my-service.svc.cluster.local` → `my-service.cluster.local` → `my-service.`. Реши добавлением точки: `my-service.my-namespace.svc.cluster.local.` — это FQDN, без перебора.
+Проблема: каждый DNS-запрос на короткое имя пробует несколько search domains. Для `my-service` делается 4 запроса: `my-service.my-namespace.svc.cluster.local` → `my-service.svc.cluster.local` → `my-service.cluster.local` → `my-service.`. Решение — FQDN с точкой на конце: `my-service.my-namespace.svc.cluster.local.` резолвится без перебора.
 
-CoreDNS — bottleneck при высокой нагрузке. Настраивай кэширование через `cache` плагин и `ndots` в Pod spec.
+CoreDNS — bottleneck при высокой нагрузке; лечится `cache`-плагином и настройкой `ndots` в Pod spec.
 
 ## Где здесь бывает latency и failure
 
@@ -188,4 +188,18 @@ dig AAAA google.com
 
 ## Interview-ready answer
 
-DNS — кэширующая иерархия: browser → OS → router → recursive resolver → authoritative. Каждый уровень имеет свой TTL. Full recursive lookup занимает 20–120 ms; cache hit — <10 ms. CNAME — псевдоним на другой hostname, требует дополнительного lookup. Negative caching: NXDOMAIN кэшируется — даже после исправления DNS-ошибки клиенты некоторое время получают ошибку. Happy Eyeballs — параллельный race между IPv4 и IPv6. В Kubernetes CoreDNS обслуживает service discovery, короткие имена генерируют несколько DNS-запросов из-за search domains — FQDN (с точкой на конце) избегает этого. Перед DNS-миграцией: снижай TTL до 300s за 48 часов.
+**1. Как устроен DNS lookup?**
+
+- Кэширующая иерархия: browser → OS → router → recursive resolver → authoritative, у каждого уровня свой TTL. Cache hit — < 10 мс, full recursive lookup — 20–120 мс. CNAME — псевдоним на другой hostname, каждый шаг цепочки — потенциальный дополнительный lookup.
+
+**2. Что такое negative caching и чем он опасен?**
+
+- NXDOMAIN кэшируется на negative TTL (поле MINIMUM SOA-записи): даже после исправления DNS-ошибки клиенты продолжают получать её ещё несколько минут. Поэтому «поправили запись, а не работает» — это часто просто кэш отрицательного ответа.
+
+**3. Почему в Kubernetes короткие DNS-имена дорогие?**
+
+- Из-за search domains в `/etc/resolv.conf` короткое имя раскрывается перебором: до 4 запросов на один резолв. FQDN с точкой на конце (`svc.ns.svc.cluster.local.`) резолвится одним запросом. CoreDNS при высокой нагрузке — bottleneck: intermittent-ошибки резолва выглядят как спорадические 5xx.
+
+**4. Как мигрировать DNS без потери трафика?**
+
+- За 48 часов до смены понизить TTL до ~300s, дождаться истечения старого TTL во всех кэшах, переключить запись, убедиться по `dig @resolver` с разных резолверов, затем поднять TTL обратно. Помнить, что часть резолверов игнорирует TTL и держит записи дольше.

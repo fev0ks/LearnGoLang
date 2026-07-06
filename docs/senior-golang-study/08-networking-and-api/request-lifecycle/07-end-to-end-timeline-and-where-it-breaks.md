@@ -41,7 +41,7 @@ flowchart TD
 | Browser cache check | 0 ms | — | — |
 | DNS (cache hit, resolver) | 1–10 ms | 50–200 ms | cold cache, медленный resolver |
 | DNS (full recursive) | 20–120 ms | 200+ ms | медленный authoritative DNS |
-| TCP handshake | RTT × 0.5 | — | ≈ физическое расстояние |
+| TCP handshake | 1 × RTT | — | ≈ физическое расстояние |
 | TLS 1.3 handshake | 1 × RTT | — | — |
 | TLS 1.2 handshake | 2 × RTT | — | устаревший конфиг |
 | CDN cache hit | 5–20 ms | — | PoP рядом |
@@ -101,7 +101,7 @@ flowchart TD
 
 ## Как диагностировать по слоям
 
-Диагностика всегда идёт снаружи внутрь. Не открывай pgAdmin, пока не проверил DNS.
+Диагностика всегда идёт снаружи внутрь: база данных проверяется последней, а не первой.
 
 ```
 1. DNS: dig резолвится? IP правильный?
@@ -209,8 +209,8 @@ Content Download: загрузка тела
 ```
 
 `Waiting (TTFB)` — это то, за что отвечает backend. Если он большой:
-1. Открой Lighthouse → Time to First Byte.
-2. Смотри traces в Jaeger/Tempo.
+1. Lighthouse → Time to First Byte.
+2. Трейсы в Jaeger/Tempo — где тратится время внутри.
 3. `EXPLAIN ANALYZE` медленных запросов.
 
 **Performance tab → Main thread**:
@@ -222,14 +222,14 @@ Content Download: загрузка тела
 
 ## Практическое правило
 
-Когда пользователь говорит "сайт тормозит" — не открывай pgAdmin первым.
+Когда пользователь говорит «сайт тормозит», начинать нужно не с базы данных, а с внешних слоёв.
 
 **Шаги**:
 1. `curl -w timing` → где время: DNS, TLS, TTFB?
-2. Если TTFB > 500ms → смотри backend traces.
-3. Если TTFB ок, но страница медленная → DevTools Performance tab.
-4. Если первая загрузка медленная, повторная — ок → не используется connection reuse или CDN.
-5. Если проблема только у части пользователей → geo-routing, CDN PoP, DNS TTL.
+2. TTFB > 500 мс → backend-трейсы.
+3. TTFB в норме, но страница медленная → DevTools Performance tab.
+4. Первая загрузка медленная, повторная — быстрая → не работает connection reuse или CDN.
+5. Проблема только у части пользователей → geo-routing, CDN PoP, DNS TTL.
 
 **Инварианты**:
 - Проблема до backend → его код не поможет.
@@ -238,4 +238,14 @@ Content Download: загрузка тела
 
 ## Interview-ready answer
 
-Полный путь запроса: Browser (parse URL, HSTS, SW, cache check) → DNS (hierarchy с TTL) → TCP (1 RTT) → TLS (1 RTT для 1.3, 2 RTT для 1.2) → CDN/LB/Proxy → Backend (middleware, handler, DB) → Response back → Browser parse & render. Реальные числа: DNS cold 20–120ms, TCP = 1 RTT (≈ 40ms regional), TLS 1.3 = 1 RTT, handler 10–100ms. Диагностика идёт снаружи внутрь: `curl -w` даёт DNS/TCP/TLS/TTFB раздельно, `dig +trace` показывает DNS путь, Chrome DevTools Timing tab — browser-side разбивку. TTFB > 200ms → проблема в backend или origin. Быстрый TTFB, медленный рендер → JS/CSS/render.
+**1. Из каких фаз складывается путь запроса и какие цифры типичны?**
+
+- Browser (parse URL, HSTS, SW, cache) → DNS (иерархия кэшей с TTL) → TCP (1 RTT) → TLS (1 RTT в 1.3, 2 RTT в 1.2) → CDN/LB/Proxy → Backend (middleware, handler, БД) → ответ обратно → parse и render. Ориентиры: DNS cold 20–120 мс, TCP = 1 RTT (~40 мс в регионе), TLS 1.3 = 1 RTT, handler 10–100 мс; повторный запрос по живому соединению — только handler.
+
+**2. Как диагностировать «сайт тормозит»?**
+
+- Снаружи внутрь, база — последней. `curl -w` раскладывает время на DNS/TCP/TLS/TTFB; `dig +trace` — путь DNS; DevTools Timing — browser-side разбивку. TTFB > 500 мс → backend (трейсы, EXPLAIN ANALYZE); TTFB в норме, но медленно → JS/CSS/render; первая загрузка медленная, повторная быстрая → нет connection reuse/CDN; тормозит у части пользователей → geo/DNS/CDN PoP.
+
+**3. Какие типовые точки отказа на маршруте?**
+
+- Browser: SW закэшировал баг, mixed content. DNS: NXDOMAIN в negative cache, stale TTL, перегруженный CoreDNS. TLS: истёкший сертификат (hard error до handler-а). Edge: stale CDN, несогласованные таймауты proxy/backend, лимит на размер заголовков. App: context не пробрасывается, pool exhaustion, N+1, panic без recover. Render: блокирующие JS/CSS.

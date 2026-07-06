@@ -481,4 +481,18 @@ for {
 
 ## Interview-ready answer
 
-Redis уместен в нескольких production-сценариях. Cache-aside: кэшируем дорогие запросы к БД с TTL, инвалидируем при обновлении — основная сложность в thundering herd и инвалидации. Session storage: session token → JSON с TTL, sliding expiration через Expire при каждом запросе. Idempotency keys: сохраняем результат операции по ключу клиента на 24 часа — защита от дублирования при retry. Distributed lock: SetNX + Lua release script — для advisory lock (cron-задачи), но не для финансовых инвариантов. Sorted Set для leaderboard: O(log N) обновление, O(log N + K) выборка топ-K. Pub/Sub для fan-out уведомлений — без гарантий доставки; для надёжности нужны Redis Streams. Во всех сценариях Redis — дополнительный слой поверх primary storage, не замена ему.
+**1. Какие production-сценарии для Redis типичны?**
+
+- Cache-aside (дорогие запросы к БД с TTL и инвалидацией), session storage (token → JSON, sliding expiration через `EXPIRE`), idempotency keys (результат операции по ключу клиента на ~24 часа против дублей при retry), advisory-локи, leaderboard на Sorted Set, Pub/Sub для fan-out. Во всех случаях Redis — слой поверх primary storage, не замена ему.
+
+**2. Что самое сложное в cache-aside?**
+
+- Инвалидация и thundering herd: при протухании горячего ключа сотни запросов одновременно идут в БД. Лечится джиттером TTL, ранним обновлением или локом на пересчёт (singleflight).
+
+**3. Где границы применимости lock и Pub/Sub?**
+
+- SetNX + Lua-release — только advisory lock (cron-задачи, дедупликация): для финансовых инвариантов — констрейнты в БД. Pub/Sub — без гарантий доставки (подписчик оффлайн — сообщение потеряно); для надёжной доставки — Redis Streams.
+
+**4. Почему Sorted Set хорош для leaderboard?**
+
+- O(log N) обновление score и O(log N + K) выборка топ-K из коробки (`ZINCRBY`/`ZREVRANGE`) — то, что в SQL требует индексов и оконных функций, здесь нативные операции структуры.

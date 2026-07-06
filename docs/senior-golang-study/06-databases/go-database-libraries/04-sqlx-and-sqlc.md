@@ -321,4 +321,10 @@ func (m *mockQuerier) GetUser(_ context.Context, id int64) (User, error) {
 
 ## Interview-ready answer
 
-`sqlx` делает `database/sql` удобнее в runtime: `SelectContext` в slice, `NamedExec` со struct-параметрами, `sqlx.In` для IN-clause — без codegen, но ошибки остаются runtime. `sqlc` генерирует типобезопасный Go-код из SQL-файлов: ошибки запросов ловятся при генерации, а не при выполнении. Оба подхода оставляют SQL читаемым и явным — в отличие от ORM. Для нового PostgreSQL-проекта `sqlc + pgx/v5` даёт лучшую type-safety и производительность.
+**1. Чем sqlx отличается от sqlc?**
+
+- `sqlx` — удобство поверх `database/sql` в runtime: `SelectContext` в slice, `NamedExec` со struct-параметрами, `sqlx.In` для IN-clause; без codegen, но ошибки запросов остаются runtime. `sqlc` — кодогенерация типобезопасного Go из SQL-файлов: ошибки ловятся на этапе генерации.
+
+**2. Что выбирать для нового проекта?**
+
+- Для нового PostgreSQL-проекта — `sqlc + pgx/v5`: лучшая type-safety и производительность при полностью явном SQL. Оба подхода, в отличие от ORM, оставляют SQL читаемым — план запроса предсказуем.

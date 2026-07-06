@@ -98,6 +98,8 @@ Client                          Server
 
 ## HTTP/1.1 vs HTTP/2 vs HTTP/3
 
+Здесь — сжатое сравнение в контексте пути запроса; полный разбор версий (фреймы, streams, HPACK, flow control, QUIC) — [14-http2-and-http3.md](../protocols/14-http2-and-http3.md).
+
 ### HTTP/1.1
 
 - Одно TCP-соединение = один запрос за раз (HOL blocking на application уровне).
@@ -142,7 +144,7 @@ HTTP/3:    [Req1][Req2][Req3]────►  (QUIC streams over UDP)
 
 **HTTP/2 multiplexing** делает reuse ещё ценнее: все параллельные запросы к хосту идут по одному соединению.
 
-На backend стороне Go `net/http` поддерживает keep-alive по умолчанию. Для outgoing клиентов важно reuse `http.Client` (не создавать новый на каждый запрос) — иначе каждый запрос платит handshake.
+На backend-стороне Go `net/http` поддерживает keep-alive по умолчанию. Для исходящих вызовов важно переиспользовать `http.Client` (не создавать новый на каждый запрос) — иначе каждый запрос платит handshake. Пул соединений и его настройки — [03-http-client.md](../protocols/03-http-client.md).
 
 ```go
 // правильно: один клиент на весь процесс
@@ -173,4 +175,18 @@ func badCall() {
 
 ## Interview-ready answer
 
-TCP требует 1 RTT handshake. TLS 1.2 добавляет 2 RTT, итого 3 RTT до данных. TLS 1.3 сократил до 1 RTT (key share в ClientHello), итого 2 RTT. 0-RTT session resumption позволяет послать данные без RTT overhead, но уязвим к replay — только для идемпотентных запросов. HTTP/2 решает HOL blocking на application уровне через multiplexing, но TCP HOL blocking остаётся при потере пакетов. HTTP/3/QUIC работает поверх UDP со своим stream-multiplexing, потеря пакета блокирует только один stream. SNI нужен, чтобы сервер знал какой сертификат отдать при shared IP; ALPN — чтобы согласовать h2 vs http/1.1 в TLS handshake.
+**1. Сколько RTT стоит новое HTTPS-соединение?**
+
+- TCP handshake — 1 RTT. TLS 1.2 добавляет 2 RTT (итого 3), TLS 1.3 — 1 RTT (итого 2): key share едет уже в ClientHello. С session resumption TLS 1.3 — 1 RTT, HTTP/3/QUIC совмещает транспорт и TLS в 1 RTT (0 при resumption).
+
+**2. Что такое 0-RTT и чем он опасен?**
+
+- Early data: при повторном подключении клиент шлёт application data вместе с ClientHello, не дожидаясь handshake. Уязвим к replay-атаке — перехваченный 0-RTT пакет можно послать повторно, поэтому допустим только для идемпотентных запросов (GET), никогда для мутаций.
+
+**3. Зачем нужны SNI и ALPN?**
+
+- SNI — hostname в ClientHello, чтобы сервер с одним IP и многими доменами отдал правильный сертификат. ALPN — согласование протокола приложения (`h2` vs `http/1.1`) внутри TLS handshake, без дополнительного round-trip.
+
+**4. Как HTTP/2 и HTTP/3 решают head-of-line blocking?**
+
+- HTTP/2 убирает HoL на уровне приложения (multiplexing независимых streams в одном соединении), но потеря TCP-сегмента блокирует все streams — на сетях с потерями h2 может проигрывать HTTP/1.1 с шестью соединениями. HTTP/3/QUIC переносит streams в транспорт поверх UDP: потеря пакета блокирует только затронутый stream.

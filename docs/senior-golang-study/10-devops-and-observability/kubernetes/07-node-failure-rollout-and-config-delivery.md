@@ -109,7 +109,7 @@ Kubernetes использует три типа probe:
 
 Без readiness probe — трафик идет в Pod сразу после старта контейнера, до того как приложение реально готово принимать запросы. Результат: 502/503 в начале каждого deploy.
 
-Подробно про реализацию probes в Go и graceful shutdown — в [04-probes-and-graceful-shutdown.md](./04-probes-and-graceful-shutdown.md).
+Подробно про реализацию probes в Go и graceful shutdown — в [06-probes-and-graceful-shutdown.md](./06-probes-and-graceful-shutdown.md).
 
 ## Config delivery
 
@@ -132,4 +132,14 @@ Kubernetes использует три типа probe:
 
 ## Interview-ready answer
 
-При падении ноды kubelet перестает слать heartbeat, control plane переводит ноду в `NotReady`, Deployment controller пересоздает Pod'ы на других нодах. Суммарно это занимает несколько минут, поэтому критично иметь минимум 2 реплики на разных нодах — Service тогда немедленно переключает трафик на живые Pod'ы. При rolling update `maxUnavailable: 0` гарантирует zero-downtime: новый Pod обязан пройти readiness probe до удаления старого. Конфиг хранится в ConfigMap и Secret, не в image. Graceful shutdown и корректные probes — обязательные условия для deploy без потери запросов.
+**1. Что происходит при падении ноды?**
+
+- Kubelet перестаёт слать heartbeat → нода переходит в `NotReady` (~40 c) → Pod-ы эвакуируются и пересоздаются на других нодах (суммарно до ~5 минут в дефолтной конфигурации). Поэтому критичны минимум 2 реплики на **разных** нодах (podAntiAffinity) — тогда Service немедленно переключает трафик на живую реплику, пока новая поднимается в фоне.
+
+**2. Какая стратегия rolling update самая безопасная?**
+
+- `maxUnavailable: 0` + `maxSurge: 1`: новый Pod поднимается и обязан пройти readiness probe до удаления старого — zero-downtime ценой более медленного rollout. Без readiness probe трафик идёт в неготовый Pod — 502/503 в начале каждого deploy.
+
+**3. Как конфигурация должна попадать в Pod?**
+
+- Image immutable: никаких env-specific значений в Dockerfile. Конфиг — ConfigMap, секреты — Secret (env vars или volume mount; mount обновляется без rollout). Для production-секретов — внешние менеджеры (Vault, Secrets Manager) с CSI-драйвером, чтобы секрет не лежал в etcd открытым.

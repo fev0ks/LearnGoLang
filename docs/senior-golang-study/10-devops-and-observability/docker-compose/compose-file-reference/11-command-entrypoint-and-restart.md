@@ -47,7 +47,7 @@ command: ["./app", "--config", "/etc/app/config.yaml"]
 
 Нюанс:
 - `command` не запускается автоматически через shell image;
-- если тебе нужна shell semantics, пиши ее явно.
+- если нужна shell semantics, её задают явно.
 
 Пример:
 
@@ -80,7 +80,7 @@ entrypoint: ["/docker-entrypoint.sh"]
 - очистить entrypoint image.
 
 Практический эффект:
-- если `entrypoint` задан не `null`, Compose игнорирует default `CMD` image, пока ты явно не задашь `command`.
+- если `entrypoint` задан не `null`, Compose игнорирует default `CMD` image, пока `command` не задан явно.
 
 ## Когда менять `command`, а когда `entrypoint`
 
@@ -248,4 +248,4 @@ restart: "no"
 - сначала старайся зафиксировать sane `ENTRYPOINT` и `CMD` в Dockerfile;
 - в compose переопределяй только то, что реально меняется между ролями;
 - one-shot jobs не стоит крутить с `always`;
-- для Go-сервисов не забывай про `stop_grace_period`, если graceful shutdown тебе важен.
+- для Go-сервисов важен `stop_grace_period`, если нужен graceful shutdown.

@@ -1,6 +1,6 @@
 # Where Latency And Failures Appear
 
-Сами схемы полезны только если ты умеешь на них показывать latency, failure domains и monitoring points.
+Сами схемы полезны только тогда, когда на них можно показать latency, failure domains и monitoring points.
 
 ## Содержание
 

@@ -340,7 +340,7 @@ Incremental, но накапливаются. Если делать snapshot к�
 - **Cross-AZ within region** — $0.01/GB (each direction!)
 - **VPC Peering same region** — $0.01/GB
 
-**Подводный камень:** RDS multi-AZ — replication между AZs **не идёт** в AWS counted egress (managed service). Но твой EC2 в AZ-a → RDS в AZ-b — это cross-AZ, считается.
+**Подводный камень:** RDS multi-AZ — replication между AZs **не идёт** в AWS counted egress (managed service). Но EC2 в AZ-a → RDS в AZ-b — это cross-AZ, считается.
 
 ### NAT Gateway
 

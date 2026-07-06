@@ -43,4 +43,10 @@ flowchart LR
 
 ## Interview-ready answer
 
-A/B testing - это не просто `if user in group A show old UI else show new UI`. В хорошей системе есть стабильное распределение пользователей по группам, контроль конфликтов между экспериментами, единое логирование exposure events, заранее выбранные primary/guardrail метрики и быстрый rollback через feature flag. Canary и gradual rollout больше про operational risk, а A/B test - про проверку продуктовой гипотезы статистически корректным способом.
+**1. Что отличает настоящую систему A/B тестирования от `if user in group A`?**
+
+- Стабильное распределение пользователей по группам, контроль конфликтов между экспериментами, единое логирование exposure events, заранее выбранные primary/guardrail метрики и быстрый rollback через feature flag.
+
+**2. Чем canary отличается от A/B теста?**
+
+- Canary и gradual rollout — про operational risk («не ломает ли новая версия сервис»); A/B тест — про проверку продуктовой гипотезы статистически корректным способом. Одно не заменяет другое.

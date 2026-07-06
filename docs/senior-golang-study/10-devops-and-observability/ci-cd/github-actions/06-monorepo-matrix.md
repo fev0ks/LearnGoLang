@@ -361,7 +361,7 @@ concurrency:
 
 ## Реальный пример: monorepo build pipeline
 
-Схема полного пайплайна из skibookers:
+Схема полного пайплайна из реального production-монорепозитория:
 
 ```
 push to main

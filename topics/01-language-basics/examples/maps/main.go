@@ -6,19 +6,21 @@ import (
 )
 
 func main() {
-	var m1 map[string]int
-	fmt.Println(m1["kek"])
-	delete(m1, "kek") //If m is nil or there is no such element, delete is a no-op.
-	m1["kek"] = 100   //panic: assignment to entry in nil map
 
-	//mapInit()
-	m := make(map[int]int, 1)
-	//fmt.Println(len(m))
-	l := &m
-	for i := 0; i < 1000000; i++ {
-		m[i] = i
-	}
-	fmt.Println(len(*l))
+	cunc()
+	//var m1 map[string]int
+	//fmt.Println(m1["kek"])
+	//delete(m1, "kek") //If m is nil or there is no such element, delete is a no-op.
+	//m1["kek"] = 100   //panic: assignment to entry in nil map
+	//
+	////mapInit()
+	//m := make(map[int]int, 1)
+	////fmt.Println(len(m))
+	//l := &m
+	//for i := 0; i < 1000000; i++ {
+	//	m[i] = i
+	//}
+	//fmt.Println(len(*l))
 
 	//testSlices1()
 
@@ -37,6 +39,27 @@ func main() {
 	//testAsyncMap()
 
 	//cuncMapAccess()
+}
+
+func cunc() {
+
+	var wg sync.WaitGroup
+	m := make(map[int]int)
+
+	for i := 0; i < 100; i++ {
+		wg.Add(1)
+		go func(key int) {
+			defer wg.Done()
+			m[1] = m[1] * key
+		}(i)
+	}
+
+	wg.Wait()
+
+	for key, val := range m {
+		fmt.Printf("Key: %d, Value: %d\n", key, val)
+	}
+
 }
 
 func mapInit() {

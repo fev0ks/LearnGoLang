@@ -4,7 +4,7 @@ import os, json
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 OUT  = os.path.join(ROOT, "viewer.html")
-SKIP = {'.claude', '.git', '__pycache__', 'node_modules', 'vendor'}
+SKIP = {'.claude', '.git', '__pycache__', 'node_modules', 'vendor', 'nda'}
 EXTS = ('.md', '.go', '.yaml', '.yml', '.example')
 
 def first_h1(path):

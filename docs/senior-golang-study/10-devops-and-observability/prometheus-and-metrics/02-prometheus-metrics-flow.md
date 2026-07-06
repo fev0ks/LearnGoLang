@@ -155,7 +155,7 @@ scrape_configs:
 
 ### 4. Query layer
 
-Дальше ты спрашиваешь уже не raw value, а time-based вопрос:
+Дальше запрос идёт уже не про raw value, а про time-based вопрос:
 
 ```promql
 rate(my_service_http_requests_total[5m])

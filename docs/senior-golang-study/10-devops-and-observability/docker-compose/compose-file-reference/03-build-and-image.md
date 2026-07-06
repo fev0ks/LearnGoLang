@@ -235,7 +235,7 @@ services:
 - любой dependency из публичного или внутреннего registry.
 
 `build`:
-- твои Go-сервисы в local dev;
+- Go-сервисы в local dev;
 - integration stack, который собирается прямо из репозитория.
 
 `image + build`:

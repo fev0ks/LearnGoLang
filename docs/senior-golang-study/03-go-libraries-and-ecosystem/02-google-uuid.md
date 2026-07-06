@@ -121,4 +121,10 @@ type User struct {
 
 ## Interview-ready answer
 
-`google/uuid` — стандарт для UUID в Go. UUID v4 — полностью random, UUID v7 содержит Unix timestamp в первых битах, что даёт хронологическую сортировку. Для primary keys в PostgreSQL v7 лучше: sequential insert снижает фрагментацию B-tree индекса. Тип хранить в PostgreSQL как `UUID`, не `VARCHAR`. pgx v5 поддерживает нативный скан в `uuid.UUID`.
+**1. UUID v4 vs v7 — в чём разница?**
+
+- v4 — полностью случайный; v7 несёт Unix timestamp в старших битах, что даёт хронологическую сортировку. Для primary keys в PostgreSQL v7 лучше: последовательные вставки не фрагментируют B-tree.
+
+**2. Как хранить UUID в PostgreSQL?**
+
+- Типом `UUID` (16 байт), не `VARCHAR(36)`: вдвое компактнее вместе с индексами и с валидацией на уровне типа. pgx v5 сканирует нативно в `uuid.UUID` без промежуточных строк.

@@ -1,6 +1,6 @@
 # OpenAPI и Swagger
 
-OpenAPI — это **формальное описание** твоего HTTP API в YAML/JSON. Один файл, который описывает: какие endpoint'ы есть, какие у них параметры, какие body, какие коды ответа, какие схемы данных. Из этого файла можно автоматически генерировать: документацию, клиентов на любых языках, серверные stub'ы, тесты, mock-серверы.
+OpenAPI — это **формальное описание** HTTP API в YAML/JSON. Один файл, который описывает: какие endpoint'ы есть, какие у них параметры, какие body, какие коды ответа, какие схемы данных. Из этого файла можно автоматически генерировать: документацию, клиентов на любых языках, серверные stub'ы, тесты, mock-серверы.
 
 **Swagger** — это исторически связанный набор инструментов (Swagger UI, Swagger Editor, Swagger Codegen). OpenAPI 3.0 — это **спецификация формата**, развивающаяся независимо. На практике слова "Swagger" и "OpenAPI" часто используются взаимозаменяемо.
 
@@ -31,7 +31,7 @@ OpenAPI — это **формальное описание** твоего HTTP A
 
 Без меню: официант помнит "из головы" что в супе. Повар — своё. Кассир — свою цену. Клиент получает не то что заказал.
 
-OpenAPI — это меню твоего API. Backend, frontend, mobile, тестировщики, AI-инструменты — все смотрят в один файл. Изменилось — изменилось у всех.
+OpenAPI — это меню API. Backend, frontend, mobile, тестировщики, AI-инструменты — все смотрят в один файл. Изменилось — изменилось у всех.
 
 ---
 
@@ -74,7 +74,7 @@ Backend и frontend часто работают параллельно. До Ope
 
 ### 5. Корм для AI-агентов
 
-В 2026 году LLM-агенты делают tool calls. OpenAPI spec — стандартный формат, на котором AI понимает "что может делать твой API". Включается в Function Calling API напрямую.
+В 2026 году LLM-агенты делают tool calls. OpenAPI spec — стандартный формат, на котором AI понимает "что может делать API". Включается в Function Calling API напрямую.
 
 ---
 
@@ -495,7 +495,7 @@ type CreateUserRequest struct {
     Name  string `json:"name"`
 }
 
-// Интерфейс который ты реализуешь:
+// Интерфейс, который нужно реализовать:
 type ServerInterface interface {
     ListUsers(w http.ResponseWriter, r *http.Request, params ListUsersParams)
     CreateUser(w http.ResponseWriter, r *http.Request)
@@ -694,7 +694,7 @@ Tools: [Schemathesis](https://schemathesis.io/), [Dredd](https://github.com/apia
 schemathesis run --base-url=http://localhost:8080 openapi.yaml
 ```
 
-Schemathesis генерирует **случайные** валидные запросы по spec'у и проверяет ответы. Находит крайние случаи которые ты не тестировал.
+Schemathesis генерирует **случайные** валидные запросы по spec'у и проверяет ответы. Находит крайние случаи, которые не покрыты тестами.
 
 ### Подход 2: проверка в integration tests
 
@@ -783,7 +783,7 @@ oasdiff breaking spec-v1.yaml spec-v2.yaml
 Swagger UI — интерактивная документация. Открываешь URL → видишь все endpoint'ы → можешь сделать запрос прямо из браузера.
 
 ```go
-// Раздать spec'у и UI с твоего сервера
+// Раздать spec и UI со своего сервера
 import _ "embed"
 
 //go:embed openapi.yaml
@@ -834,7 +834,7 @@ func swaggerUIHandler(w http.ResponseWriter, r *http.Request) {
 
 В 2026 OpenAI/Anthropic API поддерживают **function calling** с OpenAPI spec'ом.
 
-Идея: даёшь LLM описание твоего API → LLM понимает что может делать → может сам вызывать твои endpoint'ы.
+Идея: LLM получает описание API → понимает, что может делать → может сам вызывать его endpoint'ы.
 
 ```python
 import openai
@@ -851,11 +851,11 @@ response = openai.chat.completions.create(
 )
 
 # LLM решает: "нужно вызвать listUsers с фильтром name=Alice"
-# Возвращает tool call → ты его исполняешь → отдаёшь результат назад
+# Возвращает tool call → приложение его исполняет → отдаёт результат назад
 ```
 
 Это даёт огромное преимущество для AI-интеграций:
-- LLM сам понимает контракт твоего API
+- LLM сам понимает контракт API
 - Не нужно описывать каждый endpoint вручную
 - Updates spec'а → LLM автоматически знает новые возможности
 

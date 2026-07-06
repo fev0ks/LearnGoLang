@@ -39,7 +39,7 @@ Couchbase это distributed document database с key-value доступом и 
 
 ## Когда выбирать
 
-Выбирай Couchbase, если:
+Couchbase подходит, если:
 - данные document-like и нужен быстрый key-value access;
 - важна distributed document architecture;
 - есть mobile/offline sync use case (Couchbase Lite).
@@ -60,7 +60,13 @@ Couchbase это distributed document database с key-value доступом и 
 
 ## Interview-ready answer
 
-Couchbase занимает нишу document/key-value систем с акцентом на low-latency key-value access и mobile sync. Основное отличие от MongoDB — managed memory cache (данные частично в RAM) и Couchbase Lite для мобильных клиентов с offline-first sync. Для большинства document workloads без mobile sync MongoDB или PostgreSQL+JSONB будут проще в эксплуатации.
+**1. Какую нишу занимает Couchbase?**
+
+- Document/key-value система с акцентом на low-latency key-value доступ (managed memory cache — данные частично в RAM) и mobile sync: Couchbase Lite на клиентах с offline-first синхронизацией.
+
+**2. Когда выбирать Couchbase, а когда нет?**
+
+- При реальной потребности в mobile offline-first sync или сверхнизкой latency key-value доступа поверх документной модели. Для большинства document workloads без этих требований MongoDB или PostgreSQL+JSONB проще в эксплуатации.
 
 ## Query examples
 

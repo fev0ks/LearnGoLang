@@ -118,7 +118,7 @@ GROUP BY hour, event_type;
 
 ## Когда выбирать
 
-Выбирай ClickHouse, если:
+ClickHouse подходит, если:
 - надо считать агрегаты по большим объемам событий;
 - много append-only events;
 - PostgreSQL/MySQL уже не справляются с analytical scans;
@@ -142,7 +142,17 @@ GROUP BY hour, event_type;
 
 ## Interview-ready answer
 
-ClickHouse — column-oriented OLAP database. Данные хранятся по столбцам (а не строкам), что ускоряет aggregation: нужно читать только нужные колонки. Базовый движок — MergeTree: данные пишутся в immutable parts, сливаются в фоне. PARTITION BY для pruning по датам, ORDER BY определяет порядок хранения и sparse index — от него зависит эффективность range scans. ReplacingMergeTree дедуплицирует eventually, не мгновенно. Materialized views обновляются инкрементально при каждой вставке — основной инструмент для pre-aggregation. Для OLTP и транзакций ClickHouse не подходит.
+**1. Что такое ClickHouse и когда он уместен?**
+
+- Column-oriented OLAP-база: данные лежат по столбцам, агрегации читают только нужные колонки. Ниша — аналитика по большим объёмам (events, метрики, отчёты); для OLTP и транзакций не подходит.
+
+**2. Как устроен MergeTree?**
+
+- Данные пишутся в immutable parts и сливаются в фоне. `PARTITION BY` даёт pruning (обычно по датам), `ORDER BY` определяет физический порядок и sparse index — от него зависит эффективность range scans. `ReplacingMergeTree` дедуплицирует eventually (при слиянии), не мгновенно — без `FINAL` на это нельзя опираться в запросах.
+
+**3. Как делать pre-aggregation?**
+
+- Materialized views: обновляются инкрементально при каждой вставке — основной инструмент готовых агрегатов под dashboard-запросы вместо пересчёта сырых данных каждым запросом.
 
 ## Query examples
 

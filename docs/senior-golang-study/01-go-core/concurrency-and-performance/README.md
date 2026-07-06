@@ -50,5 +50,5 @@
 - почему race detector не находит все concurrency bugs;
 - как GC pressure влияет на tail latency;
 - как отличить CPU bottleneck от lock contention;
-- что именно ты посмотришь в pprof при росте latency;
+- что именно смотреть в pprof при росте latency;
 - почему microbenchmark может не отражать поведение production path.

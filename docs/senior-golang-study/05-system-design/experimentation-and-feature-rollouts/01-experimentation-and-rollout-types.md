@@ -351,4 +351,10 @@ flowchart LR
 
 ## Interview-ready answer
 
-Я бы разделял rollout и experimentation. Feature flag, canary, dark launch и shadow traffic помогают безопасно включать изменения и снижать operational risk. A/B, A/A, multivariate и holdout нужны для проверки гипотез и измерения эффекта. Canary может сказать "новая версия не ломает сервис", но не доказывает рост conversion. Для продуктового решения нужен стабильный random assignment, exposure logging, заранее выбранные метрики и достаточный объем данных.
+**1. Чем rollout отличается от experimentation?**
+
+- Rollout-механики (feature flag, canary, dark launch, shadow traffic) безопасно включают изменения и снижают operational risk. Experimentation (A/B, A/A, multivariate, holdout) проверяет гипотезы и измеряет эффект. Canary говорит «новая версия не ломает сервис», но не доказывает рост conversion.
+
+**2. Что нужно для валидного продуктового эксперимента?**
+
+- Стабильный random assignment, exposure logging, заранее выбранные метрики и достаточный объём данных — без этого результат нельзя интерпретировать статистически.

@@ -193,7 +193,7 @@ otelhttp.NewHandler(...)  // не применимо к fiber
 app.Use(adaptor.HTTPMiddleware(stdlibMiddleware))  // работает, но теряет часть fasthttp оптимизаций
 ```
 
-**Следствие**: если твой проект использует OpenTelemetry, Prometheus, любые auth библиотеки на net/http — переход на fiber требует либо адаптеров (и потеря смысла), либо замены всех этих библиотек на fasthttp-варианты.
+**Следствие**: если проект использует OpenTelemetry, Prometheus, любые auth-библиотеки на net/http — переход на fiber требует либо адаптеров (и потеря смысла), либо замены всех этих библиотек на fasthttp-варианты.
 
 ---
 
@@ -228,4 +228,4 @@ app.Use(adaptor.HTTPMiddleware(stdlibMiddleware))  // работает, но т�
 - Нельзя использовать стандартные OpenTelemetry, oauth2, prometheus instrumentation без адаптеров
 - Меньше production battle-tested историй чем у gin/chi
 
-**Главный вопрос перед выбором fiber**: ты *измерил* что HTTP-слой является bottleneck? Если нет — вероятно, fiber не нужен.
+**Главный вопрос перед выбором fiber**: *измерено* ли, что HTTP-слой является bottleneck? Если нет — вероятно, fiber не нужен.

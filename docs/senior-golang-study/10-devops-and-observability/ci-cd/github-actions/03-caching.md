@@ -182,7 +182,7 @@ key: go-${{ runner.os }}-${{ hashFiles('go.work', 'go.work.sum', '**/go.sum') }}
 
 Двойной источник: сначала пробуем GHA кеш (быстрее), потом registry (всегда актуален, не вытесняется).
 
-Из skibookers:
+Из production-конфигурации:
 ```yaml
 # Проверяем существует ли образ в registry перед использованием как кеш
 - id: registry-cache

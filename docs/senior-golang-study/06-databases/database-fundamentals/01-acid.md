@@ -1,6 +1,8 @@
-# ACID Transactions And Invariants
+# ACID: транзакции и инварианты
 
 `ACID` описывает свойства транзакций: что должна гарантировать база данных, когда несколько операций объединены в одно логическое изменение.
+
+Здесь — концепты и инварианты. Пошаговая механика уровней изоляции и блокировок разобрана в [02-transactions-isolation-and-locks.md](../relational-databases-and-sql/02-transactions-isolation-and-locks.md), внутренности PostgreSQL (MVCC, локи) — в [01-mvcc-and-vacuum.md](../database-systems-catalog/postgresql/01-mvcc-and-vacuum.md) и [04-transactions-and-locking.md](../database-systems-catalog/postgresql/04-transactions-and-locking.md).
 
 ## Содержание
 
@@ -8,18 +10,19 @@
 - [ACID коротко](#acid-коротко)
 - [Atomicity](#atomicity)
 - [Consistency](#consistency)
-- [Isolation](#isolation)
+- [Isolation: аномалии](#isolation-аномалии)
+- [Isolation: уровни в PostgreSQL](#isolation-уровни-в-postgresql)
 - [Durability](#durability)
 - [ACID не отменяет проектирование](#acid-не-отменяет-проектирование)
 - [Пример: перевод денег](#пример-перевод-денег)
 - [Пример: резервирование товара](#пример-резервирование-товара)
 - [Типичные ошибки](#типичные-ошибки)
-- [Что говорить на собеседовании](#что-говорить-на-собеседовании)
 - [Interview-ready answer](#interview-ready-answer)
 
 ## Зачем backend-разработчику ACID
 
 На практике `ACID` нужен не для академического определения, а чтобы ответить на вопросы:
+
 - какие данные нельзя частично записать;
 - какие инварианты должны сохраняться всегда;
 - где должны быть границы транзакции;
@@ -27,14 +30,7 @@
 - что будет после crash/restart;
 - где нужны constraints, locks, isolation level или idempotency.
 
-Инвариант - это правило, которое система обязана сохранять.
-
-Примеры:
-- баланс счета не должен уйти ниже нуля;
-- у заказа не может быть два успешных платежа;
-- username должен быть уникальным;
-- нельзя продать больше единиц товара, чем есть на складе;
-- событие в outbox должно появиться атомарно вместе с изменением заказа.
+Инвариант — это правило, которое система обязана сохранять. Примеры: баланс счёта не уходит ниже нуля; у заказа не может быть двух успешных платежей; username уникален; нельзя продать больше единиц товара, чем есть на складе; событие в outbox появляется атомарно вместе с изменением заказа.
 
 `ACID` помогает защищать такие правила внутри одной transactional boundary. Но он не решает все проблемы автоматически: границы транзакции, schema constraints и порядок операций проектирует разработчик.
 
@@ -47,18 +43,13 @@
 | `Isolation` | Параллельные транзакции не должны некорректно влиять друг на друга | Какие гонки возможны при одновременных запросах? |
 | `Durability` | После commit данные переживают обычный сбой | Что будет после crash процесса или рестарта БД? |
 
-Важно: `Consistency` в `ACID` - это не то же самое, что `Consistency` в `CAP`.
-
-В `ACID` речь про валидность данных после транзакции. В `CAP` речь про то, увидят ли разные узлы распределенной системы одно и то же актуальное значение.
+Важно: `Consistency` в `ACID` — это не то же самое, что `Consistency` в `CAP`. В `ACID` речь про валидность данных после транзакции. В `CAP` — про то, увидят ли разные узлы распределённой системы одно и то же актуальное значение (см. [02-cap-and-base.md](./02-cap-and-base.md)).
 
 ## Atomicity
 
 `Atomicity` означает: транзакция применяется как единое целое.
 
-Пример без atomicity:
-- списали деньги с покупателя;
-- сервис упал до создания платежной записи;
-- заказ остался в странном состоянии.
+Пример без atomicity: списали деньги с покупателя → сервис упал до создания платёжной записи → заказ остался в промежуточном состоянии, которого не должно существовать.
 
 Пример с atomicity:
 
@@ -79,50 +70,21 @@ VALUES (1, -100, 'transfer'), (2, 100, 'transfer');
 COMMIT;
 ```
 
-Если одна операция не прошла, транзакция откатывается:
+Если одна операция не прошла — `ROLLBACK`, и не применилось ничего.
 
-```sql
-ROLLBACK;
-```
+На интервью важно не просто сказать «all or nothing», а объяснить, **где проходит граница этого «all»**.
 
-На интервью важно не просто сказать "all or nothing", а объяснить, где проходит граница этого "all".
+Хорошая граница — только атомарные изменения в одной БД: изменить `orders.status`, создать `payments`, записать событие в `outbox` — всё в одной транзакции.
 
-Хорошая граница:
-- изменить `orders.status`;
-- создать `payments`;
-- записать событие в `outbox`;
-- сделать это в одной БД-транзакции.
-
-Плохая граница:
-- открыть транзакцию;
-- вызвать внешний payment provider;
-- ждать HTTP response;
-- потом закоммитить.
-
-Почему плохо:
-- долго держится connection;
-- могут держаться row locks;
-- растет шанс deadlock;
-- внешний вызов нельзя откатить через `ROLLBACK`.
+Плохая граница — внешний вызов внутри транзакции: открыть транзакцию → вызвать payment provider по HTTP → дождаться ответа → закоммитить. Пока транзакция ждёт сеть, она держит connection из пула и row locks, растёт шанс deadlock, а главное — внешний вызов нельзя откатить через `ROLLBACK`: HTTP-запрос уже ушёл.
 
 ## Consistency
 
 `Consistency` в `ACID` означает: транзакция переводит базу из одного валидного состояния в другое.
 
-Часть consistency обеспечивает сама БД:
-- `PRIMARY KEY`;
-- `UNIQUE`;
-- `FOREIGN KEY`;
-- `CHECK`;
-- `NOT NULL`;
-- transactional constraints.
+Часть consistency обеспечивает сама БД — декларативные ограничения схемы: `PRIMARY KEY`, `UNIQUE`, `FOREIGN KEY`, `CHECK`, `NOT NULL`.
 
-Часть consistency обязан обеспечить application code:
-- правильная state machine заказа;
-- idempotency key для повторных запросов;
-- запрет перехода `paid -> new`;
-- проверка доступного остатка;
-- outbox вместо "сначала commit, потом publish в Kafka".
+Часть consistency обязан обеспечить application code: корректная state machine заказа (запрет перехода `paid -> new`), idempotency key для повторных запросов, проверка доступного остатка, outbox вместо «сначала commit, потом publish в Kafka».
 
 Пример constraint:
 
@@ -137,191 +99,67 @@ CREATE TABLE payments (
 );
 ```
 
-`UNIQUE (order_id)` защищает от двух успешных payment rows на один order. Даже если два Go handler одновременно попытаются создать платеж, один insert проиграет.
+`UNIQUE (order_id)` защищает от двух успешных payment rows на один order. Даже если два Go-handler-а одновременно попытаются создать платёж, один insert проиграет.
 
-Практическая мысль: если инвариант критичен, лучше зафиксировать его на уровне БД, а не только в application code.
+Практическая мысль: если инвариант критичен, его стоит зафиксировать на уровне БД, а не только в application code — код обходится (второй сервис, миграция, ручной SQL), constraint — нет.
 
-## Isolation
+## Isolation: аномалии
 
-`Isolation` отвечает за поведение параллельных транзакций.
+`Isolation` отвечает за поведение параллельных транзакций. Без достаточной изоляции возможны аномалии:
 
-Без нормальной isolation можно получить:
-- lost update;
-- dirty read;
-- non-repeatable read;
-- phantom read;
-- write skew.
-
-Коротко про частую путаницу:
-
-| Аномалия | Что меняется | Пример |
+| Аномалия | Что происходит | Исчезает (в PostgreSQL) |
 | --- | --- | --- |
-| `non-repeatable read` | Значение уже прочитанной строки | В транзакции два раза читаем `orders.id = 42`: сначала `status = 'new'`, потом `status = 'paid'` |
-| `phantom read` | Набор строк, подходящих под условие | В транзакции два раза считаем `orders WHERE status = 'new'`: сначала `10`, потом `11`, потому что появилась новая строка |
+| `dirty read` | Транзакция видит незакоммиченные изменения другой | не воспроизводится ни на одном уровне: даже `READ UNCOMMITTED` в PG работает как `READ COMMITTED` |
+| `lost update` | Два «прочитал → посчитал → записал» затирают друг друга | уровнем не решается на `READ COMMITTED`; нужен атомарный `UPDATE`/`FOR UPDATE`/optimistic locking; на `REPEATABLE READ`+ конкурентный `UPDATE` даёт ошибку сериализации |
+| `non-repeatable read` | Повторное чтение той же строки даёт другое значение | `REPEATABLE READ` |
+| `phantom read` | Меняется набор строк, подходящих под условие (появились/исчезли строки) | в PG — уже `REPEATABLE READ` (сильнее, чем требует стандарт) |
+| `write skew` | Две транзакции читают пересекающееся условие и пишут в разные строки, вместе ломая инвариант | `SERIALIZABLE` |
 
-То есть `non-repeatable read` - про изменение конкретной строки, а `phantom read` - про появление или исчезновение строк в результате запроса по условию.
+`non-repeatable read` — про изменение конкретной строки, `phantom read` — про изменение набора строк по условию.
 
-Частые isolation levels:
+### Lost update
 
-| Level | Что примерно дает | Цена |
-| --- | --- | --- |
-| `READ UNCOMMITTED` | В SQL standard допускает dirty reads, но в PostgreSQL работает как `READ COMMITTED` | В PG почти не используют как отдельный режим |
-| `READ COMMITTED` | Запрос видит только committed данные на момент выполнения statement | Обычно быстрый default, но не защищает от всех гонок |
-| `REPEATABLE READ` | Транзакция видит стабильный snapshot | Меньше аномалий, но возможны конфликты и нюансы реализации |
-| `SERIALIZABLE` | Результат как будто транзакции выполнились последовательно | Сильнее, дороже, нужны retries при serialization failures |
-
-В PostgreSQL можно запросить все 4 стандартных уровня, но фактически реализовано 3 разных поведения: `READ UNCOMMITTED` работает как `READ COMMITTED`.
-
-### `READ UNCOMMITTED` в PostgreSQL
-
-В SQL standard этот уровень допускает dirty read: транзакция может увидеть данные, которые другая транзакция еще не закоммитила.
-
-В PostgreSQL dirty read не происходит:
-
-```sql
--- T1
-BEGIN;
-
-UPDATE accounts
-SET balance = 0
-WHERE id = 1;
-
--- COMMIT еще не было
+```text
+T1 читает balance = 100
+T2 читает balance = 100
+T1 пишет balance = 70   (списал 30)
+T2 пишет balance = 50   (списал 50)
 ```
 
+Ожидали `20`, получили `50`: update от T1 потерялся. Защита — не «поднять уровень изоляции», а убрать паттерн «прочитал в код → записал обратно»:
+
+Атомарный update (лучший вариант для простых случаев):
+
 ```sql
--- T2
-BEGIN ISOLATION LEVEL READ UNCOMMITTED;
+UPDATE accounts
+SET balance = balance - 30
+WHERE id = 1 AND balance >= 30;
+```
+
+Если `rows affected = 0` — денег недостаточно или запись не найдена.
+
+Row lock, когда между чтением и записью нужна логика:
+
+```sql
+BEGIN;
 
 SELECT balance
 FROM accounts
+WHERE id = 1
+FOR UPDATE;
+
+UPDATE accounts
+SET balance = balance - 30
 WHERE id = 1;
-```
-
-Что увидит `T2` в PostgreSQL:
-- не uncommitted `balance = 0`;
-- а последнюю committed версию строки.
-
-Практический вывод: если в PostgreSQL указать `READ UNCOMMITTED`, не стоит ожидать "грязных чтений"; PG поднимет поведение до `READ COMMITTED`.
-
-### `READ COMMITTED`
-
-`READ COMMITTED` - default в PostgreSQL. Каждый statement видит snapshot на начало этого statement.
-
-```sql
--- T1
-BEGIN ISOLATION LEVEL READ COMMITTED;
-
-SELECT status
-FROM orders
-WHERE id = 42;
--- result: 'new'
-```
-
-```sql
--- T2
-BEGIN;
-
-UPDATE orders
-SET status = 'paid'
-WHERE id = 42;
 
 COMMIT;
 ```
 
-```sql
--- T1, та же транзакция, но новый statement
-SELECT status
-FROM orders
-WHERE id = 42;
--- result: 'paid'
+Ещё варианты: optimistic locking через колонку `version` и `SERIALIZABLE` + retry.
 
-COMMIT;
-```
+### Write skew
 
-Что важно:
-- dirty read нет;
-- non-repeatable read возможен;
-- два `SELECT` внутри одной транзакции могут увидеть разные committed версии;
-- для многих backend-сервисов это нормальный default, если критичные инварианты защищены constraints/locks/atomic updates.
-
-### `REPEATABLE READ`
-
-`REPEATABLE READ` в PostgreSQL держит стабильный snapshot на всю транзакцию: повторные чтения видят состояние на момент старта транзакции.
-
-```sql
--- T1
-BEGIN ISOLATION LEVEL REPEATABLE READ;
-
-SELECT status
-FROM orders
-WHERE id = 42;
--- result: 'new'
-```
-
-```sql
--- T2
-BEGIN;
-
-UPDATE orders
-SET status = 'paid'
-WHERE id = 42;
-
-COMMIT;
-```
-
-```sql
--- T1, та же транзакция
-SELECT status
-FROM orders
-WHERE id = 42;
--- result: 'new'
-
-COMMIT;
-```
-
-Еще пример с phantom-like чтением:
-
-```sql
--- T1
-BEGIN ISOLATION LEVEL REPEATABLE READ;
-
-SELECT count(*)
-FROM orders
-WHERE status = 'new';
--- result: 10
-```
-
-```sql
--- T2
-INSERT INTO orders(status)
-VALUES ('new');
-
-COMMIT;
-```
-
-```sql
--- T1
-SELECT count(*)
-FROM orders
-WHERE status = 'new';
--- result в PostgreSQL: 10
-```
-
-Что важно:
-- non-repeatable read нет;
-- phantom reads в PostgreSQL `REPEATABLE READ` тоже не проявляются, потому что PG дает более сильное поведение, чем минимально требует SQL standard;
-- serialization anomalies все еще возможны, поэтому это не полная замена `SERIALIZABLE`.
-
-### `SERIALIZABLE`
-
-`SERIALIZABLE` пытается дать результат, эквивалентный последовательному выполнению транзакций. Если PostgreSQL видит опасный pattern, одна транзакция падает с `serialization_failure`, и приложение должно retry.
-
-Классический write skew:
-- в больнице всегда должен быть хотя бы один doctor on call;
-- два врача одновременно решают отключиться;
-- каждый видит, что второй еще on call;
-- оба обновляют разные строки.
+Классический пример: в больнице всегда должен быть хотя бы один дежурный врач. Два врача одновременно снимают с себя дежурство; каждый видит, что второй ещё on call, и оба обновляют **разные** строки — по отдельности каждая транзакция корректна, вместе они ломают инвариант.
 
 ```sql
 -- T1
@@ -361,104 +199,53 @@ COMMIT;
 -- ERROR: could not serialize access due to read/write dependencies among transactions
 ```
 
-Что важно:
-- `SERIALIZABLE` защищает от write skew и serialization anomalies;
-- это не значит "никогда нет ошибок" - наоборот, ошибки конфликтов становятся нормальной частью control flow;
-- в Go-коде такие транзакции нужно оборачивать в retry с backoff;
-- внешние side effects нельзя делать внутри retry-блока без idempotency.
+Ни `UNIQUE`, ни row lock здесь не помогут (строки разные) — это ровно тот случай, ради которого существует `SERIALIZABLE`.
 
-Пример lost update:
+## Isolation: уровни в PostgreSQL
 
-```text
-T1 читает balance = 100
-T2 читает balance = 100
-T1 пишет balance = 70
-T2 пишет balance = 50
-```
+| Level | Что даёт | Цена |
+| --- | --- | --- |
+| `READ UNCOMMITTED` | В SQL standard допускает dirty reads; в PostgreSQL фактически работает как `READ COMMITTED` | нет собственной цены — это алиас; «грязных чтений» в PG не бывает |
+| `READ COMMITTED` | Каждый statement видит snapshot на начало этого statement | default; быстрый, но non-repeatable read и lost update возможны |
+| `REPEATABLE READ` | Стабильный snapshot на всю транзакцию; в PG отсекает и фантомы | конкурентные `UPDATE` той же строки завершаются ошибкой сериализации — нужен retry |
+| `SERIALIZABLE` | Результат эквивалентен последовательному выполнению (SSI) | ловит и write skew; больше ошибок `40001`, retry обязателен |
 
-Ожидали `20`, получили `50`: update от T1 потерялся.
-
-Что помогает:
-- атомарный SQL update;
-- row lock через `SELECT ... FOR UPDATE`;
-- optimistic locking через `version`;
-- `SERIALIZABLE` и retry;
-- constraints.
-
-Атомарный update:
+Ключевой контраст `READ COMMITTED` vs `REPEATABLE READ` — что видит транзакция T1, если между двумя её `SELECT` другая транзакция закоммитила `UPDATE orders SET status = 'paid' WHERE id = 42`:
 
 ```sql
-UPDATE accounts
-SET balance = balance - 30
-WHERE id = 1 AND balance >= 30;
+-- T1, READ COMMITTED             -- T1, REPEATABLE READ
+SELECT status ...;  -- 'new'      SELECT status ...;  -- 'new'
+-- (T2 committed 'paid')          -- (T2 committed 'paid')
+SELECT status ...;  -- 'paid'     SELECT status ...;  -- 'new' (snapshot транзакции)
 ```
 
-Если `rows affected = 0`, денег недостаточно или запись не найдена.
+Что важно на практике:
 
-Row lock:
+- `READ COMMITTED` — нормальный default для большинства backend-сервисов, **если** критичные инварианты защищены constraints, атомарными update или locks;
+- `REPEATABLE READ` — для многошаговых чтений, которым нужна согласованная картина (отчёт в транзакции, read-modify-write с проверками);
+- `SERIALIZABLE` — когда инвариант завязан на *результат чтения* (write skew); ошибки сериализации становятся нормальной частью control flow: в Go такие транзакции оборачиваются в retry с backoff, а внешние side effects нельзя делать внутри retry-блока без idempotency.
 
-```sql
-BEGIN;
-
-SELECT balance
-FROM accounts
-WHERE id = 1
-FOR UPDATE;
-
-UPDATE accounts
-SET balance = balance - 30
-WHERE id = 1;
-
-COMMIT;
-```
+Пошаговые T1/T2-примеры всех уровней, локи и deadlock-и — в [02-transactions-isolation-and-locks.md](../relational-databases-and-sql/02-transactions-isolation-and-locks.md).
 
 ## Durability
 
-`Durability` означает: после успешного `COMMIT` база должна сохранить изменение при обычном сбое.
+`Durability` означает: после успешного `COMMIT` база сохраняет изменение при обычном сбое. Обеспечивается через write-ahead log (WAL), fsync/durable flush, репликацию и recovery-процесс после рестарта.
 
-Обычно это обеспечивается через:
-- write-ahead log;
-- fsync/durable flush;
-- replication;
-- recovery process после restart.
+Но durability тоже имеет trade-offs:
 
-Но durability тоже имеет trade-offs.
+- synchronous commit надёжнее, но увеличивает latency каждой записи;
+- asynchronous replication быстрее, но replica может отставать: если commit вернулся клиенту, а данные ещё не доехали до реплики, read-after-write с реплики увидит старое состояние (подробнее — [06-replication.md](../database-systems-catalog/postgresql/06-replication.md));
+- cache как источник истины без persistence даёт durability слабее, чем обычно ожидает бизнес.
 
-Примеры:
-- synchronous commit надежнее, но увеличивает latency;
-- asynchronous replication быстрее, но replica может отставать;
-- если commit вернулся клиенту, но данные еще не попали на replica, read-after-write с replica может увидеть старое состояние;
-- если использовать cache как источник истины без persistence, durability может быть слабее, чем ожидает бизнес.
-
-В backend-разговоре полезно уточнять: durable где именно?
-- на primary node;
-- на quorum узлов;
-- на replica в другом AZ;
-- в object storage backup;
-- в event log.
+В backend-разговоре полезно уточнять: durable **где именно** — на primary node, на кворуме узлов, на реплике в другом AZ, в бэкапе object storage?
 
 ## ACID не отменяет проектирование
 
-`ACID` не значит:
-- можно игнорировать idempotency;
-- можно держать транзакцию вокруг внешних API;
-- можно не думать об isolation level;
-- можно не ставить unique constraints;
-- можно читать с replica и всегда ожидать свежие данные;
-- можно решить distributed transaction между микросервисами обычным `BEGIN/COMMIT`.
+`ACID` не значит, что можно: игнорировать idempotency; держать транзакцию вокруг внешних API; не думать об isolation level; не ставить unique constraints; читать с реплики и ожидать свежие данные; решить distributed transaction между микросервисами обычным `BEGIN/COMMIT`.
 
-Транзакция защищает только то, что находится внутри ее границы и поддерживается конкретной БД.
+Транзакция защищает только то, что находится внутри её границы и поддерживается конкретной БД. Для микросервисов нужны дополнительные паттерны: outbox/inbox, saga, idempotency keys, retry с backoff, дедупликация событий, reconciliation jobs. Разбор outbox и payment flow — [06-outbox-idempotency-and-payment-flow.md](../relational-databases-and-sql/06-outbox-idempotency-and-payment-flow.md), идемпотентность — [06-idempotency.md](../../05-system-design/reliability-patterns/06-idempotency.md).
 
-Для микросервисов часто нужны дополнительные паттерны:
-- outbox;
-- inbox;
-- saga;
-- idempotency keys;
-- retry with backoff;
-- дедупликация events;
-- reconciliation jobs.
-
-Упрощенная схема payment flow:
+Упрощённая схема payment flow:
 
 ```mermaid
 sequenceDiagram
@@ -478,15 +265,11 @@ sequenceDiagram
     Worker->>Outbox: Mark as published
 ```
 
-Здесь атомарность нужна между order/payment/outbox. Публикация во внешний broker идет после commit, но событие не теряется, потому что оно уже durable в outbox.
+Атомарность нужна между order/payment/outbox. Публикация во внешний broker идёт после commit, но событие не теряется — оно уже durable в outbox.
 
 ## Пример: перевод денег
 
-Требования:
-- нельзя списать больше доступного баланса;
-- нельзя применить один transfer дважды;
-- ledger должен совпадать с балансами;
-- операция должна быть retry-safe.
+Требования: нельзя списать больше доступного баланса; нельзя применить один transfer дважды; ledger должен совпадать с балансами; операция должна быть retry-safe.
 
 Возможная модель:
 
@@ -500,17 +283,11 @@ CREATE TABLE transfers (
 );
 ```
 
-Flow:
-- принять `Idempotency-Key`;
-- в транзакции создать `transfers` или найти существующий;
-- атомарно списать деньги с `WHERE balance >= amount`;
-- зачислить деньги получателю;
-- записать ledger entries;
-- commit.
+Flow: принять `Idempotency-Key` → в транзакции создать `transfers` или найти существующий → атомарно списать с `WHERE balance >= amount` → зачислить получателю → записать ledger entries → commit.
 
 Ключевой момент для интервью: retry должен возвращать тот же результат, а не создавать второй transfer.
 
-Упрощенный псевдокод на Go:
+Упрощённый псевдокод на Go:
 
 ```go
 err := withTx(ctx, db, func(tx *sql.Tx) error {
@@ -539,13 +316,9 @@ err := withTx(ctx, db, func(tx *sql.Tx) error {
 
 ## Пример: резервирование товара
 
-Плохой вариант:
-- прочитать `stock = 1`;
-- в application code проверить `stock > 0`;
-- потом сделать `UPDATE stock = stock - 1`;
-- параллельный запрос делает то же самое.
+Плохой вариант — проверка в коде: прочитать `stock = 1` → проверить `stock > 0` в приложении → сделать `UPDATE stock = stock - 1`. Параллельный запрос между чтением и записью делает то же самое — классический lost update.
 
-Лучше:
+Лучше — атомарный условный update:
 
 ```sql
 UPDATE inventory
@@ -554,50 +327,23 @@ WHERE sku = $1
   AND available - reserved >= 1;
 ```
 
-Если `rows affected = 1`, резерв успешен. Если `0`, товара нет.
+Если `rows affected = 1` — резерв успешен, если `0` — товара нет.
 
-Trade-off:
-- такой update прост и хорошо работает для одного SKU;
-- если нужно резервировать много SKU в одном заказе, нужно думать о порядке locks, rollback и компенсациях;
-- если склад распределен по регионам, ACID одной БД уже не покрывает весь домен.
+Trade-off: такой update прост и хорошо работает для одного SKU. Если нужно резервировать много SKU в одном заказе — появляется порядок взятия локов, rollback и компенсации. Если склад распределён по регионам — ACID одной БД уже не покрывает весь домен, и начинаются trade-offs из `CAP` (см. [02-cap-and-base.md](./02-cap-and-base.md)).
 
 ## Типичные ошибки
 
-Ошибка: "У нас Postgres, значит double payment невозможен".
+**«У нас Postgres, значит double payment невозможен».** Если нет unique constraint/idempotency/lock, два handler-а создадут две записи: БД не знает бизнес-правило «один успешный payment на order», пока оно не выражено constraint-ом.
 
-Почему неверно:
-- если нет unique constraint/idempotency/lock, два handler могут создать две записи;
-- сама БД не знает бизнес-правило "один успешный payment на order", пока вы его не выразили.
+**«Serializable решит всё».** Поможет от concurrency-аномалий, но увеличит число retry, не откатит внешние side effects и не заменит idempotency и constraints.
 
-Ошибка: "Serializable решит все".
+**«Транзакция должна оборачивать весь use case».** Use case может включать HTTP-вызовы, очереди и долгие вычисления; транзакция должна быть короткой и покрывать только атомарные изменения в БД.
 
-Почему неполно:
-- поможет от многих concurrency anomalies;
-- но увеличит число retries;
-- не откатит внешние side effects;
-- не заменит idempotency и constraints.
+**«После commit можно сразу читать с реплики».** Replica lag вернёт старое состояние. Для read-after-write нужен primary read, session consistency или ожидание replication position — [06-replication.md](../database-systems-catalog/postgresql/06-replication.md).
 
-Ошибка: "Транзакция должна оборачивать весь use case".
+## Interview-ready answer
 
-Почему опасно:
-- use case может включать HTTP calls, очереди, long-running computation;
-- транзакция должна быть короткой и покрывать только атомарные изменения в БД.
-
-Ошибка: "После commit можно сразу читать с replica".
-
-Почему опасно:
-- replica lag может вернуть старое состояние;
-- для read-after-write нужен primary read, session consistency или механизм ожидания replication position.
-
-## Что говорить на собеседовании
-
-Хороший ответ обычно строится так:
-- назвать инвариант;
-- показать transactional boundary;
-- сказать, какие constraints/locks нужны;
-- объяснить, какие операции нельзя делать внутри транзакции;
-- упомянуть retries/idempotency для сетевых повторов;
-- отдельно сказать про distributed boundary, если участвуют другие сервисы.
+Структура хорошего ответа: назвать инвариант → показать transactional boundary → сказать, какие constraints/locks нужны → объяснить, что нельзя делать внутри транзакции → упомянуть retries/idempotency → отдельно отметить distributed boundary, если участвуют другие сервисы.
 
 Пример:
 
@@ -605,9 +351,17 @@ Trade-off:
 Для оплаты заказа я бы защищал инвариант "у заказа не больше одного успешного платежа".
 В одной транзакции обновил бы order, создал payment и записал outbox event.
 На payment поставил бы unique constraint по order_id или provider_payment_id.
-Внешний вызов payment provider не держал бы внутри долгой DB transaction; сделал бы flow retry-safe через idempotency key.
+Внешний вызов payment provider не держал бы внутри DB-транзакции; сделал бы flow retry-safe через idempotency key.
 ```
 
-## Interview-ready answer
+**1. Что такое ACID?**
 
-`ACID` - это набор гарантий транзакции: atomicity защищает от частичных изменений, consistency сохраняет инварианты, isolation управляет конкурирующими транзакциями, durability сохраняет committed данные после сбоя. На практике важно не просто сказать определение, а правильно выбрать границы транзакции, выразить критичные инварианты через constraints/locks и не держать транзакцию вокруг внешних API. Для распределенных side effects обычно нужны outbox, idempotency и retries.
+- Набор гарантий транзакции: atomicity защищает от частичных изменений, consistency сохраняет инварианты, isolation управляет конкурирующими транзакциями, durability сохраняет закоммиченные данные после сбоя. На практике важно не определение, а умение выбрать границы транзакции, выразить критичные инварианты через constraints/locks и не держать транзакцию вокруг внешних API.
+
+**2. Чем Consistency в ACID отличается от Consistency в CAP?**
+
+- В ACID — валидность данных после транзакции (constraints и бизнес-инварианты). В CAP — согласованность узлов распределённой системы: увидит ли чтение с другого узла последнюю запись.
+
+**3. Какой уровень изоляции выбирать по умолчанию?**
+
+- `READ COMMITTED` (default PostgreSQL) достаточен, если критичные инварианты защищены constraints, атомарными update или `FOR UPDATE`. `REPEATABLE READ` — для согласованных многошаговых чтений. `SERIALIZABLE` — когда инвариант зависит от результата чтения (write skew); тогда ошибки `40001` ретраятся, а внешние side effects выносятся за retry-блок.

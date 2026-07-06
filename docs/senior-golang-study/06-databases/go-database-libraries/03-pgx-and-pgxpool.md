@@ -308,4 +308,10 @@ db = stdlib.OpenDB(*connConfig)
 
 ## Interview-ready answer
 
-`pgxpool` — стандартный выбор для Go + PostgreSQL production сервисов. В отличие от `database/sql`, он предоставляет нативный PostgreSQL API: типизированные ошибки через `pgconn.PgError` с SQLSTATE-кодами, batch запросы за один round-trip, bulk insert через COPY protocol, `pgx.CollectRows` для удобного маппинга, `pgx.BeginFunc` для автоматического commit/rollback. Для мониторинга — `pool.Stat()`. Минус — жёсткая привязка к PostgreSQL. Если нужна совместимость с `database/sql` ecosystem, используют `stdlib.OpenDBFromPool`.
+**1. Почему pgxpool — стандартный выбор для Go + PostgreSQL?**
+
+- Нативный PostgreSQL API вместо generic-абстракции: типизированные ошибки `pgconn.PgError` с SQLSTATE-кодами, batch-запросы одним round-trip, bulk insert через COPY protocol, `pgx.CollectRows` для маппинга, `pgx.BeginFunc` с автоматическим commit/rollback.
+
+**2. Какая цена и как мониторить?**
+
+- Жёсткая привязка к PostgreSQL — смена СУБД потребует переписывания слоя доступа. Мониторинг пула — `pool.Stat()` (acquired/idle/wait). Если нужна совместимость с экосистемой `database/sql` (миграторы, ORM) — мост `stdlib.OpenDBFromPool` поверх того же пула.

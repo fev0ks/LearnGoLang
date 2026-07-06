@@ -425,4 +425,14 @@ ip link | grep veth
 
 ## Interview-ready answer
 
-Linux namespaces изолируют **видимость**: pid (дерево процессов), net (сетевой стек), mnt (файловая система), uts (hostname), ipc (IPC-объекты), user (UID/GID mapping), cgroup (видимость cgroup tree), time (монотонные часы). Каждый namespace создаётся через `clone()` с флагами `CLONE_NEW*`. cgroups ограничивают **потребление**: cpu.max (bandwidth), memory.max (hard limit + OOM), pids.max (fork bomb protection). cgroups v2 — unified hierarchy в `/sys/fs/cgroup/`, v1 — отдельная директория на контроллер. PSI (Pressure Stall Information) показывает % времени под давлением ресурса — диагностика без OOM. Контейнер = процесс в отдельных namespaces + cgroup limits + overlay filesystem. Docker/containerd используют runc для создания через `clone()` и настройки cgroups через filesystem interface.
+**1. Что изолируют namespaces?**
+
+- Видимость: pid (дерево процессов), net (сетевой стек), mnt (ФС), uts (hostname), ipc, user (UID/GID mapping), cgroup, time. Создаются через `clone()` с флагами `CLONE_NEW*`.
+
+**2. Что делают cgroups?**
+
+- Ограничивают потребление: `cpu.max` (bandwidth), `memory.max` (hard limit + OOM), `pids.max` (защита от fork bomb). cgroups v2 — unified hierarchy в `/sys/fs/cgroup/`; PSI (Pressure Stall Information) показывает % времени под давлением ресурса — диагностика деградации до OOM.
+
+**3. Из чего складывается контейнер?**
+
+- Процесс в отдельных namespaces + cgroup limits + overlay filesystem. Docker/containerd вызывают runc, который делает `clone()` с нужными флагами и настраивает cgroups через filesystem-интерфейс — никакой магии поверх примитивов ядра.

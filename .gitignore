@@ -1,3 +1,6 @@
 .DS_Store
 trace.out
 .idea/
+
+# Personal, do not commit (NDA: анонимизированный разбор архитектуры рабочего проекта)
+docs/senior-golang-study/05-system-design/nda/
