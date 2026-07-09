@@ -95,14 +95,29 @@ flowchart LR
 | `CP` | Лучше отказать, чем принять/показать некорректные данные | платежи, инвентарь, уникальные usernames, лидерство в кластере | выше latency и error rate при деградации |
 | `AP` | Лучше ответить, даже если данные временно расходятся | лайки, просмотры, feed, presence, telemetry | stale reads, conflicts, reconciliation |
 
-Примеры систем (условно):
+### Как это выглядит у конкретных БД
 
-- PostgreSQL primary с синхронной репликацией ближе к CP для конкретного write path ([06-replication.md](../database-systems-catalog/postgresql/06-replication.md));
-- [Cassandra](../database-systems-catalog/05-cassandra.md) обычно настраивают в сторону availability с tunable consistency (кворумы на чтение/запись);
-- Dynamo-style key-value stores выбирают availability и eventual consistency;
-- чтение с Redis-реплик быстрое, но может быть stale.
+Дальше — не ярлыки, а **механизм**: за счёт чего система на стороне partition, отрезанной от кворума, оказывается CP (отказывает) или AP (отвечает локально). Почти везде это следствие того, где живёт «истина» — в одном leader-е за кворумом или в любом узле.
 
-Осторожно: нельзя навсегда приклеить ярлык `CP` или `AP` к продукту без учёта конфигурации. Реальное поведение зависит от replication mode, quorum settings, consistency level на чтение/запись, топологии и client routing.
+| Система | Наклон при partition | За счёт чего именно | Чем настраивается |
+| --- | --- | --- | --- |
+| PostgreSQL / MySQL (один primary) | **CP** на write path | запись идёт только в primary; реплики read-only. Меньшая часть без primary писать не может | sync vs async replica; при sync — commit ждёт подтверждения реплики (латентность за согласованность) |
+| MongoDB (replica set) | **CP** по умолчанию | writes идут в primary; при потере кворума primary сам уходит в read-only (step-down), выборы нового требуют большинства | `writeConcern: majority` + `readConcern`; можно ослабить до `w:1` / читать со secondary (ближе к AP) |
+| etcd / ZooKeeper / Consul | **CP** жёстко | Raft/ZAB: любая запись — через leader и большинство. Меньшая часть партиции не обслуживает ни write, ни linearizable read | почти не ослабляется — это их назначение (service discovery, locks, leader election) |
+| CockroachDB / Spanner | **CP** | каждый диапазон реплицируется Raft/Paxos; коммит — через большинство. Партиция без большинства для диапазона недоступна на запись | consistency не отключается; настраивается размещение реплик и follower reads (свежесть чтения) |
+| Kafka (партиция топика) | **CP**-подобно на запись | `acks=all` + `min.insync.replicas`: если живых in-sync реплик меньше порога — producer получает ошибку, а не «тихую» запись | `acks`, `min.insync.replicas`; `acks=1` смещает в сторону availability ценой возможной потери |
+| Cassandra / ScyllaDB | **AP**, tunable | нет leader-а; пишем в любой узел, расходимся и сходимся через hinted handoff / read repair. Кворум задаётся **на каждый запрос** | `QUORUM` R+W>N → strong для этого ключа; `ONE`/`LOCAL_ONE` → сильнее AP |
+| DynamoDB | **AP** по умолчанию, CP по запросу | Dynamo-модель: доступность в приоритете, но read можно пометить strongly consistent | флаг `ConsistentRead` на чтение; транзакции для нескольких элементов |
+| Riak | **AP** | классический Dynamo-style: пишем всегда, конфликты решаем позже (vector clocks, siblings) | `r`/`w`/`n` кворумы, стратегия conflict resolution |
+| Redis (async-репликация) | ни строго CP, ни AP | primary подтверждает write **до** передачи реплике; при failover незареплицированные writes теряются — availability есть, но и потеря есть | `WAIT` для полусинхронной записи; Sentinel/Cluster для failover. Redis — кэш/эфемерное состояние, не source of truth для инвариантов |
+
+Как читать таблицу тремя вопросами:
+
+1. **Где принимается write?** Один leader за кворумом (Postgres, Mongo, etcd, Cockroach, Kafka-партиция) → отрезанная меньшая часть писать не может → CP. Любой узел (Cassandra, Dynamo, Riak) → пишем всегда → AP.
+2. **Кто решает конфликты?** Если конфликтующих writes в принципе не бывает (один leader) — reconciliation не нужен. Если бывают (multi-master, quorum-эвентуально) — нужны vector clocks, LWW, read repair, CRDT.
+3. **Что можно докрутить конфигом?** Кворумы и уровни согласованности сдвигают точку по шкале, но не отменяют CAP: Cassandra с `QUORUM` R+W>N даёт strong-чтение для ключа ценой доступности при недоборе кворума; Mongo с `w:majority` — CP, с `w:1` ближе к AP.
+
+Осторожно: нельзя навсегда приклеить ярлык `CP` или `AP` к продукту без учёта конфигурации. Одна и та же БД в разных настройках ведёт себя по-разному — Cassandra с `ONE` и с `QUORUM` это фактически две разные системы по CAP. Реальное поведение зависит от replication mode, quorum settings, consistency level на чтение/запись, топологии и client routing. Подробности по конкретным движкам — [Cassandra](../database-systems-catalog/05-cassandra.md) и [PostgreSQL: репликация](../database-systems-catalog/postgresql/06-replication.md).
 
 ## PACELC: что происходит без partition
 
@@ -162,11 +177,9 @@ sequenceDiagram
 
 ## Case: профиль пользователя
 
-Сценарий: пользователь меняет имя профиля; имя показывается в профиле, комментариях, поиске и feed.
-
-Решение: primary user record обновляется транзакционно; собственный профиль читает primary или strongly consistent read model; feed/search обновляются асинхронно.
-
-Trade-off: профиль должен показать новое имя сразу; старые комментарии и feed могут обновиться через секунды — это приемлемо, потому что не нарушает финансовый или security-инвариант.
+- **Сценарий:** пользователь меняет имя профиля; имя показывается в профиле, комментариях, поиске и feed.
+- **Решение:** primary user record обновляется транзакционно; собственный профиль читает primary или strongly consistent read model; feed/search обновляются асинхронно.
+- **Trade-off:** профиль должен показать новое имя сразу; старые комментарии и feed могут обновиться через секунды — это приемлемо, потому что не нарушает финансовый или security-инвариант.
 
 Interview answer:
 
@@ -178,11 +191,9 @@ Interview answer:
 
 Счётчик лайков обычно не требует строгой согласованности на каждый read.
 
-Подход: писать событие `user_liked_post`; защитить уникальность `(user_id, post_id)`; счётчик обновлять async или батчами; периодически сверять счётчик с фактическими лайками.
-
-Почему так: пользователю важнее быстро нажать like; счётчик `101` вместо `102` на пару секунд приемлем; строгий глобальный counter на горячем посте становится bottleneck-ом.
-
-Нюанс: если like влияет на выплату, награду или лимит — это уже не просто счётчик, нужен строгий источник истины и audit trail.
+- **Подход:** писать событие `user_liked_post`; защитить уникальность `(user_id, post_id)`; счётчик обновлять async или батчами; периодически сверять счётчик с фактическими лайками.
+- **Почему так:** пользователю важнее быстро нажать like; счётчик `101` вместо `102` на пару секунд приемлем; строгий глобальный counter на горячем посте становится bottleneck-ом.
+- **Нюанс:** если like влияет на выплату, награду или лимит — это уже не просто счётчик, нужен строгий источник истины и audit trail.
 
 ## Case: платежи и заказы
 
@@ -200,13 +211,10 @@ Interview answer:
 
 ## Типичные ошибки
 
-**«CAP говорит, что всегда можно выбрать только две буквы».** Точнее: trade-off проявляется при partition. Без partition система может давать и consistency, и availability (а платит latency — см. PACELC), но дизайн обязан определить поведение на случай partition.
-
-**«Eventual consistency значит, данные когда-нибудь сами исправятся».** Нет: нужны надёжная доставка событий, retries, идемпотентные consumers, reconciliation и стратегия conflict resolution. «Сами» данные не сходятся.
-
-**«AP всегда лучше для high availability».** Для денег, лимитов, уникальности и inventory AP может принять конфликтующие writes, и conflict resolution потом окажется бизнес-невозможным («кому из двоих продали последний билет?»).
-
-**«CP всегда безопаснее».** Если сценарий допускает stale data, CP даёт лишние отказы и ухудшает UX; для counters/feed/search обычно лучше eventual consistency.
+- **«CAP говорит, что всегда можно выбрать только две буквы».** Точнее: trade-off проявляется при partition. Без partition система может давать и consistency, и availability (а платит latency — см. PACELC), но дизайн обязан определить поведение на случай partition.
+- **«Eventual consistency значит, данные когда-нибудь сами исправятся».** Нет: нужны надёжная доставка событий, retries, идемпотентные consumers, reconciliation и стратегия conflict resolution. «Сами» данные не сходятся.
+- **«AP всегда лучше для high availability».** Для денег, лимитов, уникальности и inventory AP может принять конфликтующие writes, и conflict resolution потом окажется бизнес-невозможным («кому из двоих продали последний билет?»).
+- **«CP всегда безопаснее».** Если сценарий допускает stale data, CP даёт лишние отказы и ухудшает UX; для counters/feed/search обычно лучше eventual consistency.
 
 ## Interview-ready answer
 
