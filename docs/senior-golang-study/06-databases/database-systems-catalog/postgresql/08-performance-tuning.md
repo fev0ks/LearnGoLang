@@ -261,7 +261,7 @@ EXPLAIN (
     BUFFERS,      -- показать shared/local hits and reads
     VERBOSE,      -- дополнительные детали
     SETTINGS,     -- показать изменённые параметры
-    WAL,          -- WAL usage (PG 13+)
+    WAL,          -- WAL usage
     FORMAT JSON   -- машиночитаемый формат (удобно для pgMustard, explain.dalibo.com)
 )
 SELECT ...;

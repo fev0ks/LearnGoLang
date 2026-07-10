@@ -160,10 +160,10 @@ ALTER TABLE users ADD COLUMN normalized_email TEXT;
 ```go
 // 2. заполнить батчами (как updateInBatches выше), новые вставки заполняет приложение/DEFAULT
 // 3. когда всё заполнено — при необходимости навесить NOT NULL
-//    (PG12+: SET NOT NULL быстрый, если предварительно есть валидный CHECK)
+//    (SET NOT NULL быстрый, если предварительно есть валидный CHECK)
 ```
 
-Подвох: `ADD COLUMN ... NOT NULL DEFAULT <volatile>` на старых версиях переписывает всю таблицу под `ACCESS EXCLUSIVE`. Безопасная схема — nullable-колонка + батчевый бэкфилл + отдельный `SET NOT NULL` (см. [04-transactions-and-locking.md](../04-transactions-and-locking.md), раздел «DDL и locks»). Полный разбор именно этого кейса (константный vs волатильный DEFAULT, missing value на PG 11+, быстрый `SET NOT NULL`, `lock_timeout`) — в [05-online-schema-migration.md](./05-online-schema-migration.md).
+Подвох: `ADD COLUMN ... NOT NULL DEFAULT <volatile>` (`now()`, `gen_random_uuid()`) переписывает всю таблицу под `ACCESS EXCLUSIVE` — в отличие от константного дефолта, который мгновенный. Безопасная схема — nullable-колонка + батчевый бэкфилл + отдельный `SET NOT NULL` (см. [04-transactions-and-locking.md](../04-transactions-and-locking.md), раздел «DDL и locks»). Полный разбор именно этого кейса (константный vs волатильный DEFAULT, missing value, быстрый `SET NOT NULL`, `lock_timeout`) — в [05-online-schema-migration.md](./05-online-schema-migration.md).
 
 ---
 

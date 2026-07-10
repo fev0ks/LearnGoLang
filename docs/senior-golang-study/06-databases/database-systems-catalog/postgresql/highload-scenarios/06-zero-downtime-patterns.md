@@ -109,7 +109,7 @@ expand/contract ради косметики.
 
 Полный разбор — [05-online-schema-migration.md](./05-online-schema-migration.md). Скелет:
 
-1. PG 11+ и значение-константа: `ADD COLUMN ... NOT NULL DEFAULT 'free'` — мгновенно
+1. Значение-константа: `ADD COLUMN ... NOT NULL DEFAULT 'free'` — мгновенно
    (missing value в каталоге), готово.
 2. Значение per-row: `ADD COLUMN` nullable → backfill батчами →
    `CHECK (col IS NOT NULL) NOT VALID` → `VALIDATE CONSTRAINT` (без блокировки записи) →

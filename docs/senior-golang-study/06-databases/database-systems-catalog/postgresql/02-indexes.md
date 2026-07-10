@@ -10,6 +10,7 @@
 - [Expression index](#expression-index)
 - [Covering index (INCLUDE)](#covering-index-include)
 - [Multi-column индексы](#multi-column-индексы)
+- [Операторные классы (opclass)](#операторные-классы-opclass-тюнинг-индекса-под-задачу)
 - [Типы сканов: Index / Index Only / Bitmap / Seq](#типы-сканов-index--index-only--bitmap--seq)
 - [Когда индекс не используется](#когда-индекс-не-используется)
 - [Index bloat](#index-bloat)
@@ -237,7 +238,7 @@ SELECT * FROM sessions WHERE token = $1;   -- только '=', больше н�
 - **Не поддерживает** range (`<`, `>`, `BETWEEN`), `ORDER BY`, `LIKE`, prefix — вообще ничего, кроме `=`.
 - **Только один столбец** — multicolumn hash-индекса нет.
 - **Нельзя сделать `UNIQUE`** и нельзя использовать под unique-constraint / PK.
-- **До PostgreSQL 10 hash-индексы не писались в WAL** — не переживали краш и не реплицировались (после краша требовали `REINDEX`). Начиная с PG10 — полноценно WAL-logged и crash-safe. Если видишь совет «никогда не используй hash» — он родом из той эпохи.
+- **Совет «никогда не используй hash» устарел.** Hash-индексы полноценно WAL-logged и crash-safe (переживают краш, реплицируются); миф тянется из старой эпохи, когда это было не так.
 - На практике B-tree для equality настолько хорош (и при этом умеет range/sort/unique), что выигрыш hash почти всегда не стоит потери гибкости. Бери hash осознанно — под equality по длинному ключу, где размер индекса критичен.
 
 ### GIN (Generalized Inverted Index)
@@ -376,6 +377,7 @@ CREATE INDEX idx_places_geo ON places USING GiST (location);
 SELECT * FROM places ORDER BY location <-> point(30.5, 50.4) LIMIT 5;
 
 -- exclusion constraint: запретить пересекающиеся брони одной комнаты
+-- (room_id WITH = требует расширения btree_gist — см. «Операторные классы»)
 ALTER TABLE bookings ADD CONSTRAINT no_overlap
 EXCLUDE USING GiST (room_id WITH =, during WITH &&);
 
@@ -493,6 +495,86 @@ BRIN не подходит, если данные вставляются в сл
 ### SP-GiST (Space-Partitioned GiST)
 
 Для непересекающихся пространств: IP-адреса (`inet`), точки, телефонные номера. Нишевый.
+
+---
+
+## Операторные классы (opclass): тюнинг индекса под задачу
+
+Операторный класс — набор операторов и support-функций, объясняющий индексу, **как** работать с типом (см. [Что такое ключ индекса](#что-такое-ключ-индекса)). У каждого типа есть **дефолтный** opclass, но можно указать не-дефолтный — и разблокировать особое поведение. Синтаксис: `CREATE INDEX ... USING <метод> (столбец <opclass>)`. Это и есть «прикольные опции» индексов.
+
+Самые полезные не-дефолтные классы:
+
+| opclass | Индекс | Что разблокирует |
+|---|---|---|
+| `text_pattern_ops` / `varchar_pattern_ops` | B-tree | `LIKE 'foo%'` (prefix) независимо от коллации — побайтовое сравнение |
+| `gin_trgm_ops` | GIN | `LIKE '%foo%'`, `ILIKE`, regex `~`, similarity `%` (триграммы, `pg_trgm`) |
+| `gist_trgm_ops` | GiST | то же + **KNN** `ORDER BY col <-> 'foo'` (топ-N по похожести) |
+| `jsonb_path_ops` | GIN | компактнее и быстрее дефолтного `jsonb_ops`, но только `@>` |
+| `*_bloom_ops` | BRIN | equality по **неотсортированному** столбцу (bloom-фильтр на блок) |
+| `*_minmax_multi_ops` | BRIN | несколько min/max-интервалов на диапазон → устойчивость к выбросам/частичному беспорядку |
+| скалярные через `btree_gist` / `btree_gin` | GiST / GIN | добавить `=`/`<`/`>` обычных типов в GiST/GIN — нужно для exclusion-constraint и составных индексов |
+
+`text_pattern_ops` разобран в [Что такое ключ индекса](#что-такое-ключ-индекса), пара `jsonb_ops` vs `jsonb_path_ops` — в секции [GIN](#gin-generalized-inverted-index). Ниже — то, что заслуживает отдельного примера.
+
+### Триграммы: `gin_trgm_ops` vs `gist_trgm_ops`
+
+Оба (расширение `pg_trgm`) индексируют **триграммы** — тройки символов, из которых состоит строка. Это впервые делает индексируемыми `LIKE '%...%'`, `ILIKE`, regex и нечёткий поиск по похожести `%`.
+
+Как строка режется на триграммы (для границ слова спереди дописываются 2 пробела, сзади 1):
+
+```sql
+SELECT show_trgm('hello');
+-- {"  h"," he","ell","hel","llo","lo "}
+```
+
+Индекс хранит для каждой строки её **набор триграмм**. Запрос `WHERE name ILIKE '%ell%'` тоже раскладывается на триграммы (`ell`), и GIN по инвертированному списку находит строки, чей набор их содержит — поэтому «поиск подстроки посередине», который обычный B-tree не берёт, вдруг становится индексируемым. Тот же набор триграмм даёт и нечёткое сравнение — по доле общих троек:
+
+```sql
+SELECT similarity('hello', 'hallo');   -- доля общих триграмм, число 0..1
+SELECT 'hello' % 'hallo';              -- true, если similarity ≥ порога (по умолчанию 0.3)
+```
+
+А теперь то же под индексом:
+
+```sql
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+
+-- GIN: быстрый поиск подстроки/похожего
+CREATE INDEX idx_name_trgm_gin ON products USING GIN (name gin_trgm_ops);
+SELECT * FROM products WHERE name ILIKE '%postgres%';
+
+-- GiST: чуть медленнее и точнее по памяти, но умеет KNN — «топ-N похожих» прямо из индекса
+CREATE INDEX idx_name_trgm_gist ON products USING GiST (name gist_trgm_ops);
+SELECT * FROM products ORDER BY name <-> 'postgresql' LIMIT 5;
+```
+
+Выбор — как обычно между GIN и GiST: GIN быстрее на чтение, но крупнее и дороже на запись; GiST компактнее и умеет KNN.
+
+### BRIN `*_bloom_ops` — снимает главное ограничение BRIN
+
+Обычный BRIN (`minmax`) полезен только на **физически отсортированном** столбце. `*_bloom_ops` кладёт в каждый диапазон блоков bloom-фильтр → BRIN начинает помогать для **equality** даже по перемешанному столбцу, оставаясь при этом крошечным:
+
+```sql
+-- equality по случайному uuid, но индекс размером с BRIN, а не с B-tree
+CREATE INDEX idx_events_uuid_brin ON events USING BRIN (uuid uuid_bloom_ops);
+SELECT * FROM events WHERE uuid = '...';   -- bloom отсекает диапазоны без совпадений
+```
+
+Range-запросы (`<`, `>`, `BETWEEN`) он по-прежнему не ускоряет — только `=`. Родственный `*_minmax_multi_ops` хранит несколько интервалов на диапазон, что спасает minmax-BRIN, когда данные почти отсортированы, но с редкими выбросами.
+
+### `btree_gist` / `btree_gin` — подмешать скалярное сравнение
+
+Эти расширения добавляют opclass'ы обычных типов (`int`, `text`, ...) в GiST/GIN. Классический кейс — **exclusion constraint**, где в одном GiST-индексе нужны и `=` по скаляру, и `&&` по диапазону:
+
+```sql
+CREATE EXTENSION IF NOT EXISTS btree_gist;
+
+-- запрет пересекающихся броней ОДНОЙ комнаты: room_id по '=', period по '&&'
+ALTER TABLE bookings ADD CONSTRAINT no_overlap
+EXCLUDE USING GiST (room_id WITH =, during WITH &&);   -- room_id WITH = требует btree_gist
+```
+
+> Список доступных opclass'ов для типа и метода — в psql командой `\dAc`, или в системной таблице `pg_opclass`.
 
 ---
 
