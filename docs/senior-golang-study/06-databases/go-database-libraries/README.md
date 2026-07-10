@@ -10,7 +10,7 @@
 - [04. sqlx And sqlc](./04-sqlx-and-sqlc.md) — NamedExec, sqlx.In(), sqlc full example с pgx/v5 backend, testability
 - [05. ORM And Query Builder Options](./05-orm-and-query-builder-options.md) — squirrel (dynamic WHERE), GORM N+1, Ent, Bun
 - [06. Choosing A Library For A Go Service](./06-choosing-a-library-for-a-go-service.md) — decision guide, рецепты, production checklist
-- [Helper Types And Tools](../../../03-go-libraries-and-ecosystem/) — shopspring/decimal, google/uuid, samber/lo, pkg/errors → раздел 03
+- [Helper Types And Tools](../../03-go-libraries-and-ecosystem/) — shopspring/decimal, google/uuid, samber/lo, pkg/errors → раздел 03
 - [Migrations](../migrations/README.md) — инструменты миграций в Go (goose/golang-migrate/Atlas) и production-обвязка → соседний раздел
 
 ## Как читать
@@ -30,8 +30,8 @@
 - `sqlc` — SQL→Go codegen: type-safe методы, `Querier` interface для моков
 - `squirrel` — query builder для dynamic WHERE; дополняет, не заменяет sqlc/pgxpool
 - GORM N+1 и как его избежать через `Preload`
-- `shopspring/decimal` — для денег, никогда `float64` → [подробнее](../../../03-go-libraries-and-ecosystem/01-shopspring-decimal.md)
-- UUID v7 лучше v4 для primary keys → [подробнее](../../../03-go-libraries-and-ecosystem/02-google-uuid.md)
+- `shopspring/decimal` — для денег, никогда `float64` → [подробнее](../../03-go-libraries-and-ecosystem/01-shopspring-decimal.md)
+- UUID v7 лучше v4 для primary keys → [подробнее](../../03-go-libraries-and-ecosystem/02-google-uuid.md)
 
 ## Официальные ссылки
 
