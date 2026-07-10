@@ -174,7 +174,7 @@ Scenario: 25 max connections, каждый запрос держит соеди�
 → 504 Gateway Timeout для клиентов
 ```
 
-Мониторить: `db.Stats().WaitCount` (запросы, ждавшие свободного соединения), `db.Stats().WaitDuration`. Подробный разбор пулов и их производственных проблем — [05-connection-pooling-and-production-issues.md](../../06-databases/relational-databases-and-sql/05-connection-pooling-and-production-issues.md).
+Мониторить: `db.Stats().WaitCount` (запросы, ждавшие свободного соединения), `db.Stats().WaitDuration`. Подробный разбор пулов и их производственных проблем — [09-connection-pooling.md](../../06-databases/database-systems-catalog/postgresql/09-connection-pooling.md).
 
 ### Redis и другие клиенты
 

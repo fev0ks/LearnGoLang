@@ -55,7 +55,7 @@ VALUES ($2, 'created', $3);
 COMMIT;
 ```
 
-Что обычно определяет качество OLTP-эксплуатации: правильные индексы, короткие транзакции, connection pool sizing ([05-connection-pooling-and-production-issues.md](../relational-databases-and-sql/05-connection-pooling-and-production-issues.md)), lock contention, предсказуемая latency, backup/recovery и безопасные миграции ([migrations-in-go.md](../migrations/migrations-in-go.md)).
+Что обычно определяет качество OLTP-эксплуатации: правильные индексы, короткие транзакции, connection pool sizing ([09-connection-pooling.md](../database-systems-catalog/postgresql/09-connection-pooling.md)), lock contention, предсказуемая latency, backup/recovery и безопасные миграции ([migrations-in-go.md](../migrations/migrations-in-go.md)).
 
 ## OLAP
 
@@ -170,7 +170,7 @@ flowchart LR
     OLAP --> Reports[Reports API]
 ```
 
-Идея: OLTP остаётся source of truth для бизнес-операций; изменения уходят через outbox/CDC/events ([06-outbox-idempotency-and-payment-flow.md](../relational-databases-and-sql/06-outbox-idempotency-and-payment-flow.md)); OLAP получает денормализованные события или факты; dashboards и тяжёлые отчёты не нагружают production transaction DB.
+Идея: OLTP остаётся source of truth для бизнес-операций; изменения уходят через outbox/CDC/events ([14-outbox-and-idempotency.md](../database-systems-catalog/postgresql/14-outbox-and-idempotency.md)); OLAP получает денормализованные события или факты; dashboards и тяжёлые отчёты не нагружают production transaction DB.
 
 Trade-off: OLTP path остаётся быстрым и надёжным, но OLAP-данные обновляются с задержкой, появляется pipeline, который надо мониторить, и нужны схемы событий, backfill и reconciliation.
 

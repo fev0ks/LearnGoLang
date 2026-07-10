@@ -51,7 +51,7 @@ Read model/search/dashboard может быть eventually consistent, пото�
 
 Выбор: `ACID` внутри payment/order boundary; CP-like write path для финального состояния платежа; `BASE`/eventual consistency для доставки события в другие сервисы; `OLTP` для orders/payments; `OLAP` только для отчётов по revenue.
 
-Практическая защита: `UNIQUE (order_id)` для successful payment (или partial unique index), `UNIQUE (provider_payment_id)`, idempotency key, транзакция `order + payment + outbox`, идемпотентные consumers, reconciliation с provider API. Детальный разбор паттерна — [06-outbox-idempotency-and-payment-flow.md](../relational-databases-and-sql/06-outbox-idempotency-and-payment-flow.md) и [06-idempotency.md](../../05-system-design/reliability-patterns/06-idempotency.md).
+Практическая защита: `UNIQUE (order_id)` для successful payment (или partial unique index), `UNIQUE (provider_payment_id)`, idempotency key, транзакция `order + payment + outbox`, идемпотентные consumers, reconciliation с provider API. Детальный разбор паттерна — [14-outbox-and-idempotency.md](../database-systems-catalog/postgresql/14-outbox-and-idempotency.md) и [06-idempotency.md](../../05-system-design/reliability-patterns/06-idempotency.md).
 
 Упрощённая схема:
 

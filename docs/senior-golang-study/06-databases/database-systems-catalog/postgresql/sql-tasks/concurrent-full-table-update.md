@@ -195,5 +195,5 @@ EvalPlanQual, «последний коммит побеждает»), усло�
 порядок захвата, роль `synchronize_seqscans`, `deadlock_timeout` + `40P01`) и того, что
 массовый `UPDATE` — это в первую очередь проблема bloat/WAL, решаемая батчами.
 
-Смежное: [isolation levels и локи](../../../relational-databases-and-sql/02-transactions-isolation-and-locks.md),
+Смежное: [isolation levels и локи](../04-transactions-and-locking.md),
 [hot rows и счётчики](../highload-scenarios/04-hot-rows-and-counters.md).

@@ -166,19 +166,19 @@
 
 | Файл | Что внутри | Приоритет |
 |------|-----------|-----------|
-| [01-relational-model-and-sql-basics.md](../06-databases/relational-databases-and-sql/01-relational-model-and-sql-basics.md) | нормализация, joins, CTE, window functions | ★★ |
-| [02-transactions-isolation-and-locks.md](../06-databases/relational-databases-and-sql/02-transactions-isolation-and-locks.md) | isolation levels, MVCC, locks, deadlocks | ★★★ |
-| [03-indexes-and-query-plans.md](../06-databases/relational-databases-and-sql/03-indexes-and-query-plans.md) | B-tree, partial, composite, covering, EXPLAIN ANALYZE | ★★★ |
-| [04-pagination-and-query-patterns.md](../06-databases/relational-databases-and-sql/04-pagination-and-query-patterns.md) | keyset vs offset pagination, cursor-based | ★★ |
-| [05-connection-pooling-and-production-issues.md](../06-databases/relational-databases-and-sql/05-connection-pooling-and-production-issues.md) | pgxpool, pool exhaustion, production проблемы | ★★★ |
-| [06-outbox-idempotency-and-payment-flow.md](../06-databases/relational-databases-and-sql/06-outbox-idempotency-and-payment-flow.md) | outbox pattern, exactly-once, payment flow | ★★★ |
+| [00-sql-basics-and-syntax.md](../06-databases/database-systems-catalog/postgresql/00-sql-basics-and-syntax.md) | нормализация, joins, CTE, window functions | ★★ |
+| [04-transactions-and-locking.md](../06-databases/database-systems-catalog/postgresql/04-transactions-and-locking.md) | isolation levels, MVCC, locks, deadlocks | ★★★ |
+| [02-indexes.md](../06-databases/database-systems-catalog/postgresql/02-indexes.md) | B-tree, partial, composite, covering, EXPLAIN ANALYZE | ★★★ |
+| [13-pagination.md](../06-databases/database-systems-catalog/postgresql/13-pagination.md) | keyset vs offset pagination, cursor-based | ★★ |
+| [09-connection-pooling.md](../06-databases/database-systems-catalog/postgresql/09-connection-pooling.md) | pgxpool, pool exhaustion, production проблемы | ★★★ |
+| [14-outbox-and-idempotency.md](../06-databases/database-systems-catalog/postgresql/14-outbox-and-idempotency.md) | outbox pattern, exactly-once, payment flow | ★★★ |
 
 #### 06 Database Systems Catalog
 
 | Файл | Что внутри | Приоритет |
 |------|-----------|-----------|
 | [01-comparison-table.md](../06-databases/database-systems-catalog/01-comparison-table.md) | сравнение всех СУБД по use case | ★★★ |
-| [02-postgresql.md](../06-databases/database-systems-catalog/02-postgresql.md) | PostgreSQL internals, MVCC, WAL, partitioning | ★★★ |
+| [postgresql/README.md](../06-databases/database-systems-catalog/postgresql/README.md) | PostgreSQL internals, MVCC, WAL, partitioning | ★★★ |
 | [08-redis.md](../06-databases/database-systems-catalog/08-redis.md) | структуры данных, persistence, eviction, cluster | ★★★ |
 | [08a-redis-real-scenarios.md](../06-databases/database-systems-catalog/08a-redis-real-scenarios.md) | cache, session, pub/sub, distributed lock | ★★★ |
 | [08b-redis-rate-limiters.md](../06-databases/database-systems-catalog/08b-redis-rate-limiters.md) | token bucket, sliding window на Redis + Lua | ★★ |
@@ -201,7 +201,7 @@
 | [04-sqlx-and-sqlc.md](../06-databases/go-database-libraries/04-sqlx-and-sqlc.md) | sqlx, sqlc — type-safe queries без ORM | ★★ |
 | [05-orm-and-query-builder-options.md](../06-databases/go-database-libraries/05-orm-and-query-builder-options.md) | GORM, ent, sqlboiler — trade-offs | ★★ |
 | [06-choosing-a-library-for-a-go-service.md](../06-databases/go-database-libraries/06-choosing-a-library-for-a-go-service.md) | decision framework: что выбрать и почему | ★★★ |
-| [migrations-in-go.md](../06-databases/migrations-in-go.md) | goose vs golang-migrate vs Atlas vs dbmate | ★★ |
+| [migrations-in-go.md](../06-databases/migrations/migrations-in-go.md) | goose vs golang-migrate vs Atlas vs dbmate | ★★ |
 
 #### 07 Message Brokers (конспекты в разработке)
 
@@ -230,7 +230,7 @@
 
 | Файл | Что внутри | Приоритет |
 |------|-----------|-----------|
-| [01-rate-limiting.md](../08-networking-and-api/01-rate-limiting.md) | token bucket, leaky bucket, sliding window, fixed window | ★★★ |
+| [protocols/04-rate-limiting.md](../08-networking-and-api/protocols/04-rate-limiting.md) | token bucket, leaky bucket, sliding window, fixed window | ★★★ |
 
 ---
 
@@ -265,9 +265,9 @@
 | Файл | Что внутри | Приоритет |
 |------|-----------|-----------|
 | [01-kubernetes-basics-for-backend.md](../10-devops-and-observability/kubernetes/01-kubernetes-basics-for-backend.md) | Pod, Deployment, Service, ConfigMap, основы для backend | ★★★ |
-| [04-probes-and-graceful-shutdown.md](../10-devops-and-observability/kubernetes/04-probes-and-graceful-shutdown.md) | liveness, readiness, startup, SIGTERM grace period | ★★★ |
+| [06-probes-and-graceful-shutdown.md](../10-devops-and-observability/kubernetes/06-probes-and-graceful-shutdown.md) | liveness, readiness, startup, SIGTERM grace period | ★★★ |
 | [02-core-objects-and-deployment-flow.md](../10-devops-and-observability/kubernetes/02-core-objects-and-deployment-flow.md) | ReplicaSet, Deployment rollout, revision history | ★★★ |
-| [05-node-failure-rollout-and-config-delivery.md](../10-devops-and-observability/kubernetes/05-node-failure-rollout-and-config-delivery.md) | rollout strategy, node failure, ConfigMap/Secret delivery | ★★ |
+| [07-node-failure-rollout-and-config-delivery.md](../10-devops-and-observability/kubernetes/07-node-failure-rollout-and-config-delivery.md) | rollout strategy, node failure, ConfigMap/Secret delivery | ★★ |
 | [03-pod-vs-container.md](../10-devops-and-observability/kubernetes/03-pod-vs-container.md) | sidecar, init container, shared network namespace | ★★ |
 
 #### 10 Metrics: Prometheus
@@ -323,13 +323,12 @@
 
 | Файл | Что внутри | Приоритет |
 |------|-----------|-----------|
-| [01-automated-testing-strategy.md](../09-testing-and-quality/01-automated-testing-strategy.md) | пирамида тестов, trade-offs между уровнями | ★★★ |
+| [01-testing-strategy.md](../09-testing-and-quality/01-testing-strategy.md) | пирамида тестов, trade-offs между уровнями | ★★★ |
 | [02-unit-tests-in-go.md](../09-testing-and-quality/02-unit-tests-in-go.md) | table-driven, subtests, parallel, testable design | ★★★ |
 | [03-test-doubles-and-test-design.md](../09-testing-and-quality/03-test-doubles-and-test-design.md) | mock vs fake vs stub, когда что использовать | ★★★ |
-| [05-integration-contract-and-e2e-tests.md](../09-testing-and-quality/05-integration-contract-and-e2e-tests.md) | testcontainers, contract tests, e2e | ★★ |
-| [06-race-fuzz-and-benchmarks.md](../09-testing-and-quality/06-race-fuzz-and-benchmarks.md) | race detector, fuzzing, benchmarks — когда нужны | ★★ |
+| [10-integration-and-e2e.md](../09-testing-and-quality/10-integration-and-e2e.md) | testcontainers, contract tests, e2e | ★★ |
+| [11-race-fuzz-and-benchmarks.md](../09-testing-and-quality/11-race-fuzz-and-benchmarks.md) | race detector, fuzzing, benchmarks — когда нужны | ★★ |
 | [04-testing-libraries-in-go.md](../09-testing-and-quality/04-testing-libraries-in-go.md) | testify, gomock, go-cmp — сравнение | ★★ |
-| [07-testing-cheatsheet.md](../09-testing-and-quality/07-testing-cheatsheet.md) | быстрая шпаргалка | ★ |
 
 #### 11 Security
 

@@ -21,8 +21,8 @@
 - в конце разобрать кейсы и потренироваться формулировать короткие практические ответы.
 
 Связанные материалы:
-- [Transactions Isolation And Locks](../relational-databases-and-sql/02-transactions-isolation-and-locks.md)
-- [Indexes And Query Plans](../relational-databases-and-sql/03-indexes-and-query-plans.md)
+- [Transactions Isolation And Locks](../database-systems-catalog/postgresql/04-transactions-and-locking.md)
+- [Indexes And Query Plans](../database-systems-catalog/postgresql/02-indexes.md)
 - [Database Systems Catalog](../database-systems-catalog/README.md)
 
 Официальные ссылки:

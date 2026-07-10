@@ -2,7 +2,7 @@
 
 `ACID` описывает свойства транзакций: что должна гарантировать база данных, когда несколько операций объединены в одно логическое изменение.
 
-Здесь — концепты и инварианты. Пошаговая механика уровней изоляции и блокировок разобрана в [02-transactions-isolation-and-locks.md](../relational-databases-and-sql/02-transactions-isolation-and-locks.md), внутренности PostgreSQL (MVCC, локи) — в [01-mvcc-and-vacuum.md](../database-systems-catalog/postgresql/01-mvcc-and-vacuum.md) и [04-transactions-and-locking.md](../database-systems-catalog/postgresql/04-transactions-and-locking.md).
+Здесь — концепты и инварианты. Пошаговая механика уровней изоляции и блокировок разобрана в [04-transactions-and-locking.md](../database-systems-catalog/postgresql/04-transactions-and-locking.md), внутренности PostgreSQL (MVCC, локи) — в [01-mvcc-and-vacuum.md](../database-systems-catalog/postgresql/01-mvcc-and-vacuum.md) и [04-transactions-and-locking.md](../database-systems-catalog/postgresql/04-transactions-and-locking.md).
 
 ## Содержание
 
@@ -225,7 +225,7 @@ SELECT status ...;  -- 'paid'     SELECT status ...;  -- 'new' (snapshot тра�
 - `REPEATABLE READ` — для многошаговых чтений, которым нужна согласованная картина (отчёт в транзакции, read-modify-write с проверками);
 - `SERIALIZABLE` — когда инвариант завязан на *результат чтения* (write skew); ошибки сериализации становятся нормальной частью control flow: в Go такие транзакции оборачиваются в retry с backoff, а внешние side effects нельзя делать внутри retry-блока без idempotency.
 
-Пошаговые T1/T2-примеры всех уровней, локи и deadlock-и — в [02-transactions-isolation-and-locks.md](../relational-databases-and-sql/02-transactions-isolation-and-locks.md).
+Пошаговые T1/T2-примеры всех уровней, локи и deadlock-и — в [04-transactions-and-locking.md](../database-systems-catalog/postgresql/04-transactions-and-locking.md).
 
 ## Durability
 
@@ -243,7 +243,7 @@ SELECT status ...;  -- 'paid'     SELECT status ...;  -- 'new' (snapshot тра�
 
 `ACID` не значит, что можно: игнорировать idempotency; держать транзакцию вокруг внешних API; не думать об isolation level; не ставить unique constraints; читать с реплики и ожидать свежие данные; решить distributed transaction между микросервисами обычным `BEGIN/COMMIT`.
 
-Транзакция защищает только то, что находится внутри её границы и поддерживается конкретной БД. Для микросервисов нужны дополнительные паттерны: outbox/inbox, saga, idempotency keys, retry с backoff, дедупликация событий, reconciliation jobs. Разбор outbox и payment flow — [06-outbox-idempotency-and-payment-flow.md](../relational-databases-and-sql/06-outbox-idempotency-and-payment-flow.md), идемпотентность — [06-idempotency.md](../../05-system-design/reliability-patterns/06-idempotency.md).
+Транзакция защищает только то, что находится внутри её границы и поддерживается конкретной БД. Для микросервисов нужны дополнительные паттерны: outbox/inbox, saga, idempotency keys, retry с backoff, дедупликация событий, reconciliation jobs. Разбор outbox и payment flow — [14-outbox-and-idempotency.md](../database-systems-catalog/postgresql/14-outbox-and-idempotency.md), идемпотентность — [06-idempotency.md](../../05-system-design/reliability-patterns/06-idempotency.md).
 
 Упрощённая схема payment flow:
 

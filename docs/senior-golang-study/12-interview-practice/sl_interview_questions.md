@@ -75,7 +75,7 @@ GROUP BY user_id
 HAVING SUM(amount) > 100;
 ```
 
-- Группируем по юзеру, считаем сумму агрегатом и фильтруем уже **сгруппированный** результат через `HAVING` (в `WHERE` агрегат нельзя — он отрабатывает до группировки). См. [relational-databases-and-sql/01-relational-model-and-sql-basics.md](../06-databases/relational-databases-and-sql/01-relational-model-and-sql-basics.md).
+- Группируем по юзеру, считаем сумму агрегатом и фильтруем уже **сгруппированный** результат через `HAVING` (в `WHERE` агрегат нельзя — он отрабатывает до группировки). См. [postgresql/00-sql-basics-and-syntax.md](../06-databases/database-systems-catalog/postgresql/00-sql-basics-and-syntax.md).
 
 ## Go — рантайм и язык
 

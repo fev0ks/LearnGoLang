@@ -28,7 +28,7 @@
 - [Подводные камни](#подводные-камни)
 - [Когда что выбирать](#когда-что-выбирать)
 
-См. также: [06-databases/relational-databases-and-sql/06-outbox-idempotency-and-payment-flow.md](../../06-databases/relational-databases-and-sql/06-outbox-idempotency-and-payment-flow.md) — короткая interview-шпаргалка по outbox в контексте платежей.
+См. также: [06-databases/postgresql/14-outbox-and-idempotency.md](../../06-databases/database-systems-catalog/postgresql/14-outbox-and-idempotency.md) — короткая interview-шпаргалка по outbox в контексте платежей.
 
 ---
 

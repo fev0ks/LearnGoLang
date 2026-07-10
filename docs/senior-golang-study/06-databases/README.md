@@ -3,7 +3,6 @@
 Сюда складывай материалы по SQL и storage design.
 
 Подпакеты:
-- [Relational Databases And SQL](./relational-databases-and-sql/README.md)
 - [Go Database Libraries](./go-database-libraries/README.md)
 - [Database Systems Catalog](./database-systems-catalog/README.md)
 - [Database Fundamentals](./database-fundamentals/README.md)

@@ -172,7 +172,7 @@ sequenceDiagram
 - **read-your-writes** — после write читать с primary или из session-local state;
 - **monotonic reads** — пользователь не должен видеть «откат во времени» между запросами;
 - идемпотентные event handlers ([06-idempotency.md](../../05-system-design/reliability-patterns/06-idempotency.md));
-- outbox для надёжной публикации событий ([06-outbox-idempotency-and-payment-flow.md](../relational-databases-and-sql/06-outbox-idempotency-and-payment-flow.md));
+- outbox для надёжной публикации событий ([14-outbox-and-idempotency.md](../database-systems-catalog/postgresql/14-outbox-and-idempotency.md));
 - versioning, background reconciliation, TTL и invalidation для кэшей.
 
 ## Case: профиль пользователя
@@ -207,7 +207,7 @@ Interview answer:
 - async publish после commit; consumers идемпотентны;
 - reconciliation job сверяет provider и локальные payments.
 
-Это сочетание: **strong consistency внутри bounded context платежа + eventual consistency между сервисами и read models**. Подробный разбор — [06-outbox-idempotency-and-payment-flow.md](../relational-databases-and-sql/06-outbox-idempotency-and-payment-flow.md).
+Это сочетание: **strong consistency внутри bounded context платежа + eventual consistency между сервисами и read models**. Подробный разбор — [14-outbox-and-idempotency.md](../database-systems-catalog/postgresql/14-outbox-and-idempotency.md).
 
 ## Типичные ошибки
 

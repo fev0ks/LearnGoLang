@@ -69,4 +69,4 @@ WHERE rnk = 2;
 ## Что проверяет на собесе
 
 Top-N с учётом дубликатов и edge case «данных нет». Развитие — задача 177 (N-я
-зарплата). Оконные функции подробно: [relational-databases-and-sql/04-pagination-and-query-patterns.md](../../../../../relational-databases-and-sql/04-pagination-and-query-patterns.md).
+зарплата). Оконные функции подробно: [postgresql/13-pagination.md](../../../13-pagination.md).

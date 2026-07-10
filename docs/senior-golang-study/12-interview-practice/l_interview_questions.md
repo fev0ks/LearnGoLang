@@ -126,19 +126,19 @@
 
 **Индексы в БД? Плюсы и минусы?**
 
-- Структуры (обычно B-tree) для быстрого поиска/сортировки/джойнов вместо полного скана. Виды: B-tree (диапазоны, сортировка, дефолт), Hash (равенство), GIN (jsonb, полнотекст), GiST/BRIN (геоданные, диапазоны). «+» ускоряют чтение; «−» замедляют запись (надо обновлять индекс), занимают место, лишние индексы вредят. См. [relational-databases-and-sql/03-indexes-and-query-plans.md](../06-databases/relational-databases-and-sql/03-indexes-and-query-plans.md).
+- Структуры (обычно B-tree) для быстрого поиска/сортировки/джойнов вместо полного скана. Виды: B-tree (диапазоны, сортировка, дефолт), Hash (равенство), GIN (jsonb, полнотекст), GiST/BRIN (геоданные, диапазоны). «+» ускоряют чтение; «−» замедляют запись (надо обновлять индекс), занимают место, лишние индексы вредят. См. [postgresql/02-indexes.md](../06-databases/database-systems-catalog/postgresql/02-indexes.md).
 
 **Зачем транзакции? Уровни изоляции?**
 
-- Атомарная единица работы с ACID. Уровни: Read Uncommitted, Read Committed (дефолт PG), Repeatable Read, Serializable — отсекают dirty/non-repeatable/phantom read. См. [relational-databases-and-sql/02-transactions-isolation-and-locks.md](../06-databases/relational-databases-and-sql/02-transactions-isolation-and-locks.md).
+- Атомарная единица работы с ACID. Уровни: Read Uncommitted, Read Committed (дефолт PG), Repeatable Read, Serializable — отсекают dirty/non-repeatable/phantom read. См. [postgresql/04-transactions-and-locking.md](../06-databases/database-systems-catalog/postgresql/04-transactions-and-locking.md).
 
 **Расскажи про JOIN.**
 
-- Соединение строк таблиц по условию. `INNER` — только совпавшие; `LEFT/RIGHT` — все из левой/правой + совпадения (или NULL); `FULL` — все из обеих; `CROSS` — декартово произведение. Алгоритмы планировщика: nested loop, hash join, merge join. См. [relational-databases-and-sql/01-relational-model-and-sql-basics.md](../06-databases/relational-databases-and-sql/01-relational-model-and-sql-basics.md).
+- Соединение строк таблиц по условию. `INNER` — только совпавшие; `LEFT/RIGHT` — все из левой/правой + совпадения (или NULL); `FULL` — все из обеих; `CROSS` — декартово произведение. Алгоритмы планировщика: nested loop, hash join, merge join. См. [postgresql/00-sql-basics-and-syntax.md](../06-databases/database-systems-catalog/postgresql/00-sql-basics-and-syntax.md).
 
 **Deadlock в базе данных?**
 
-- Две транзакции взаимно ждут блокировки друг друга (T1 держит A, ждёт B; T2 держит B, ждёт A). СУБД детектирует цикл и откатывает одну из транзакций (жертву). Профилактика: единый порядок захвата строк, короткие транзакции, меньше escalation блокировок. См. [relational-databases-and-sql/02-transactions-isolation-and-locks.md](../06-databases/relational-databases-and-sql/02-transactions-isolation-and-locks.md).
+- Две транзакции взаимно ждут блокировки друг друга (T1 держит A, ждёт B; T2 держит B, ждёт A). СУБД детектирует цикл и откатывает одну из транзакций (жертву). Профилактика: единый порядок захвата строк, короткие транзакции, меньше escalation блокировок. См. [postgresql/04-transactions-and-locking.md](../06-databases/database-systems-catalog/postgresql/04-transactions-and-locking.md).
 
 **Денормализация — плюсы и минусы?**
 
@@ -309,7 +309,7 @@ SELECT * FROM carts WHERE sku = 192 AND country = 'ru';
 SELECT * FROM carts WHERE country = 'ru' AND customer_id = 10;
 ```
 - **Нет (как обычный index scan не применится).** Нарушен leftmost-prefix: отсутствует ведущий столбец `sku`, а по `country`/`customer_id` без него B-tree навигировать не может. Планировщик уйдёт в seqscan (теоретически возможен дорогой full index scan, но это не то ускорение, ради которого строят индекс). Чтобы запрос Б был быстрым, нужен индекс с `country` впереди, например `(country, customer_id)`.
-- Разбор leftmost-prefix — раздел «Составные индексы» выше и [relational-databases-and-sql/03-indexes-and-query-plans.md](../06-databases/relational-databases-and-sql/03-indexes-and-query-plans.md).
+- Разбор leftmost-prefix — раздел «Составные индексы» выше и [postgresql/02-indexes.md](../06-databases/database-systems-catalog/postgresql/02-indexes.md).
 
 ### Лайвкодинг-вопросы по слайсам
 

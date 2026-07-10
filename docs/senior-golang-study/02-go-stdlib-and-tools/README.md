@@ -29,7 +29,7 @@
 | `net/http` — клиент, Transport, reuse | [networking/protocols/03-http-client](../08-networking-and-api/protocols/03-http-client.md) |
 | Таймауты и deadlines | [reliability/01-timeouts-and-deadlines](../05-system-design/reliability-patterns/01-timeouts-and-deadlines.md) |
 | Graceful shutdown | [patterns/08-graceful-shutdown](../04-architecture-and-patterns/patterns/08-graceful-shutdown.md) |
-| `database/sql`, пул соединений | [go-database-libraries/02-standard-library-database-sql](../06-databases/go-database-libraries/02-standard-library-database-sql.md), [05-connection-pooling-and-production-issues](../06-databases/relational-databases-and-sql/05-connection-pooling-and-production-issues.md) |
+| `database/sql`, пул соединений | [go-database-libraries/02-standard-library-database-sql](../06-databases/go-database-libraries/02-standard-library-database-sql.md), [postgresql/09-connection-pooling](../06-databases/database-systems-catalog/postgresql/09-connection-pooling.md) |
 | `testing`, `httptest`, fuzzing, race | [09-testing-and-quality](../09-testing-and-quality/README.md), [11-race-fuzz-and-benchmarks](../09-testing-and-quality/11-race-fuzz-and-benchmarks.md) |
 | `runtime/pprof`, `runtime/trace`, benchmarks, `go tool pprof/trace` | [01-go-core/profiling](../01-go-core/profiling/README.md), [06-benchmarks](../01-go-core/profiling/06-benchmarks.md) |
 

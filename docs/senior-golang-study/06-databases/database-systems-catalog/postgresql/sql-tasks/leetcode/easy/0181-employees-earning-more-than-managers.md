@@ -40,4 +40,4 @@ WHERE e.salary > m.salary;
 
 Понимание self-join и моделирования иерархий через `managerId`. Рекурсивный
 вариант (вся цепочка начальников) — это уже `WITH RECURSIVE`, см.
-[relational-databases-and-sql/01-relational-model-and-sql-basics.md](../../../../../relational-databases-and-sql/01-relational-model-and-sql-basics.md).
+[postgresql/00-sql-basics-and-syntax.md](../../../00-sql-basics-and-syntax.md).

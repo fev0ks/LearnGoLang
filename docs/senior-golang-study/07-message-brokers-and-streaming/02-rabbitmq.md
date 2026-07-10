@@ -134,7 +134,7 @@ if ok, err := conf.WaitContext(ctx); err != nil || !ok {
 }
 ```
 
-Итог: at-least-once на публикации = persistent message + durable queue + publisher confirm. Для критичных событий поверх этого — outbox-паттерн ([06-outbox-idempotency-and-payment-flow.md](../06-databases/relational-databases-and-sql/06-outbox-idempotency-and-payment-flow.md)).
+Итог: at-least-once на публикации = persistent message + durable queue + publisher confirm. Для критичных событий поверх этого — outbox-паттерн ([14-outbox-and-idempotency.md](../06-databases/database-systems-catalog/postgresql/14-outbox-and-idempotency.md)).
 
 ### Manual acknowledgement — подтверждение обработки
 

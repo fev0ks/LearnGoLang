@@ -43,4 +43,4 @@ LEFT JOIN Address a ON a.personId = p.personId;
 ## Что проверяет на собесе
 
 Базовое понимание типов JOIN и того, как фильтры в `WHERE` ломают внешние
-соединения. См. также [relational-databases-and-sql/01-relational-model-and-sql-basics.md](../../../../../relational-databases-and-sql/01-relational-model-and-sql-basics.md).
+соединения. См. также [postgresql/00-sql-basics-and-syntax.md](../../../00-sql-basics-and-syntax.md).

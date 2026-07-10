@@ -148,7 +148,7 @@
 
 **Какие уровни изоляции транзакций знаешь? В чём разница? (~60×)**
 
-- По нарастанию строгости: **Read Uncommitted** (видны чужие незакоммиченные — dirty read), **Read Committed** (только закоммиченные; дефолт PostgreSQL), **Repeatable Read** (стабильный снимок в рамках транзакции; в PG отсекает и фантомы), **Serializable** (эквивалент последовательного выполнения; конфликты → ошибка `40001`, нужен retry). Каждый уровень отсекает свои аномалии: dirty → non-repeatable → phantom read → write skew. Строже = меньше параллелизма. См. [relational-databases-and-sql/02-transactions-isolation-and-locks.md](../06-databases/relational-databases-and-sql/02-transactions-isolation-and-locks.md).
+- По нарастанию строгости: **Read Uncommitted** (видны чужие незакоммиченные — dirty read), **Read Committed** (только закоммиченные; дефолт PostgreSQL), **Repeatable Read** (стабильный снимок в рамках транзакции; в PG отсекает и фантомы), **Serializable** (эквивалент последовательного выполнения; конфликты → ошибка `40001`, нужен retry). Каждый уровень отсекает свои аномалии: dirty → non-repeatable → phantom read → write skew. Строже = меньше параллелизма. См. [postgresql/04-transactions-and-locking.md](../06-databases/database-systems-catalog/postgresql/04-transactions-and-locking.md).
 
 **Какие типы индексов в PostgreSQL знаешь? Чем B-Tree отличается от Hash? (~50×)**
 
@@ -168,11 +168,11 @@
 
 **Что такое deadlock в БД? Когда возникает? (~30×)**
 
-- Взаимная блокировка: T1 держит строку A и ждёт B, T2 держит B и ждёт A — цикл ожидания. СУБД детектирует и **откатывает одну** транзакцию с ошибкой (жертву). Профилактика: захватывать строки в **едином порядке** (напр. по id), короткие транзакции, ретрай на стороне приложения. См. [relational-databases-and-sql/02-transactions-isolation-and-locks.md](../06-databases/relational-databases-and-sql/02-transactions-isolation-and-locks.md).
+- Взаимная блокировка: T1 держит строку A и ждёт B, T2 держит B и ждёт A — цикл ожидания. СУБД детектирует и **откатывает одну** транзакцию с ошибкой (жертву). Профилактика: захватывать строки в **едином порядке** (напр. по id), короткие транзакции, ретрай на стороне приложения. См. [postgresql/04-transactions-and-locking.md](../06-databases/database-systems-catalog/postgresql/04-transactions-and-locking.md).
 
 **В чём разница между LEFT JOIN и INNER JOIN? (~30×)**
 
-- `INNER JOIN` возвращает только строки с совпадением в **обеих** таблицах. `LEFT JOIN` — **все** строки левой + совпадения правой (нет совпадения → NULL-ы в колонках правой). Типовое применение LEFT — «все пользователи, включая тех, у кого нет заказов»; фильтр `WHERE right.id IS NULL` находит строки **без** пары. См. [relational-databases-and-sql/01-relational-model-and-sql-basics.md](../06-databases/relational-databases-and-sql/01-relational-model-and-sql-basics.md).
+- `INNER JOIN` возвращает только строки с совпадением в **обеих** таблицах. `LEFT JOIN` — **все** строки левой + совпадения правой (нет совпадения → NULL-ы в колонках правой). Типовое применение LEFT — «все пользователи, включая тех, у кого нет заказов»; фильтр `WHERE right.id IS NULL` находит строки **без** пары. См. [postgresql/00-sql-basics-and-syntax.md](../06-databases/database-systems-catalog/postgresql/00-sql-basics-and-syntax.md).
 
 **Что такое WAL (Write-Ahead Log) и для чего нужен? (~25×)**
 

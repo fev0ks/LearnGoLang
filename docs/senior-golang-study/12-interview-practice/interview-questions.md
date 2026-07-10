@@ -137,11 +137,11 @@
 
 **Зачем нужны индексы? Примеры.**
 
-- Ускоряют поиск/сортировку/джойны, заменяя полный скан таблицы на навигацию по структуре. Виды: B-tree (диапазоны, сортировка, дефолт), Hash (равенство), GIN/инвертированный (jsonb, полнотекст, массивы), GiST/BRIN (геоданные, диапазоны по времени). Плата — замедление записи и место на диске. См. [relational-databases-and-sql/03-indexes-and-query-plans.md](../06-databases/relational-databases-and-sql/03-indexes-and-query-plans.md) и [postgresql/02-indexes.md](../06-databases/database-systems-catalog/postgresql/02-indexes.md).
+- Ускоряют поиск/сортировку/джойны, заменяя полный скан таблицы на навигацию по структуре. Виды: B-tree (диапазоны, сортировка, дефолт), Hash (равенство), GIN/инвертированный (jsonb, полнотекст, массивы), GiST/BRIN (геоданные, диапазоны по времени). Плата — замедление записи и место на диске. См. [postgresql/02-indexes.md](../06-databases/database-systems-catalog/postgresql/02-indexes.md) и [postgresql/02-indexes.md](../06-databases/database-systems-catalog/postgresql/02-indexes.md).
 
 **Чем hash-индекс отличается от B-tree-индекса?**
 
-- **Hash-индекс** хранит хеши значений и поддерживает только поиск по **точному равенству** (`=`) за O(1); не умеет диапазоны (`<`, `>`, `BETWEEN`), сортировку, `LIKE 'a%'` и сортированный обход. **B-tree** упорядочен, поэтому покрывает равенство, диапазоны, `ORDER BY`, префиксный поиск — за O(log n) и потому является дефолтным индексом. Hash выигрывает лишь в узком случае массивных lookup’ов по равенству; на практике B-tree выбирают почти всегда. См. [relational-databases-and-sql/03-indexes-and-query-plans.md](../06-databases/relational-databases-and-sql/03-indexes-and-query-plans.md) и [postgresql/02-indexes.md](../06-databases/database-systems-catalog/postgresql/02-indexes.md).
+- **Hash-индекс** хранит хеши значений и поддерживает только поиск по **точному равенству** (`=`) за O(1); не умеет диапазоны (`<`, `>`, `BETWEEN`), сортировку, `LIKE 'a%'` и сортированный обход. **B-tree** упорядочен, поэтому покрывает равенство, диапазоны, `ORDER BY`, префиксный поиск — за O(log n) и потому является дефолтным индексом. Hash выигрывает лишь в узком случае массивных lookup’ов по равенству; на практике B-tree выбирают почти всегда. См. [postgresql/02-indexes.md](../06-databases/database-systems-catalog/postgresql/02-indexes.md) и [postgresql/02-indexes.md](../06-databases/database-systems-catalog/postgresql/02-indexes.md).
 
 **Как устроен B-tree-индекс? Чем отличается от бинарного дерева, как идёт поиск, зачем балансировка, сколько детей у узла?**
 
@@ -161,7 +161,7 @@
 
 **Будет ли работать составной индекс по (a, b, c), если искать по b и c?**
 
-- Нет (как эффективный index scan — не будет). Составной B-tree упорядочен по **левому префиксу**: сначала по `a`, внутри равных `a` — по `b`, и т.д. Без условия на ведущий столбец `a` дерево навигировать нельзя, поэтому фильтр только по `b` и `c` индекс `(a,b,c)` использовать как обычно не сможет (планировщик уйдёт в seq scan; теоретически возможен дорогой full index scan). Чтобы ускорить такой запрос — нужен индекс с `b` впереди, например `(b, c)`. См. [relational-databases-and-sql/03-indexes-and-query-plans.md](../06-databases/relational-databases-and-sql/03-indexes-and-query-plans.md).
+- Нет (как эффективный index scan — не будет). Составной B-tree упорядочен по **левому префиксу**: сначала по `a`, внутри равных `a` — по `b`, и т.д. Без условия на ведущий столбец `a` дерево навигировать нельзя, поэтому фильтр только по `b` и `c` индекс `(a,b,c)` использовать как обычно не сможет (планировщик уйдёт в seq scan; теоретически возможен дорогой full index scan). Чтобы ускорить такой запрос — нужен индекс с `b` впереди, например `(b, c)`. См. [postgresql/02-indexes.md](../06-databases/database-systems-catalog/postgresql/02-indexes.md).
 
 **Индекс построили, но запрос всё равно тормозит — что делать?**
 
@@ -171,19 +171,19 @@
 
 - **AVL** — самобалансирующееся **бинарное** дерево поиска: у каждого узла максимум 2 ребёнка, для каждого узла высоты левого и правого поддеревьев отличаются не больше чем на 1 (балансировка вращениями при вставке/удалении). За счёт строгого баланса гарантирует O(log n) на поиск — но один узел хранит **один ключ**, поэтому дерево высокое.
 - **B-tree** — сбалансированное **многопутевое** дерево: у узла не 2, а сотни-тысячи детей и много ключей в узле, все листья на одной глубине. Тоже O(log n), но основание логарифма большое (fan-out), поэтому дерево очень низкое (2–4 уровня на миллионы строк).
-- **Почему B-tree лучше для БД:** узел B-tree совпадает по размеру со страницей диска (обычно 8 КБ), и за одну дисковую I/O-операцию читаются сразу сотни ключей. У БД узкое место — именно random-I/O к диску, а не сравнения в памяти. AVL с одним ключом на узел и большой высотой потребовал бы на порядки больше дисковых обращений. AVL хорош в RAM (например, in-memory индекс), B-tree — когда данные на диске (индексы БД, файловые системы). См. [relational-databases-and-sql/03-indexes-and-query-plans.md](../06-databases/relational-databases-and-sql/03-indexes-and-query-plans.md) и [16-.../05-trees-and-graphs.md](../16-algorithms-and-data-structures/05-trees-and-graphs.md).
+- **Почему B-tree лучше для БД:** узел B-tree совпадает по размеру со страницей диска (обычно 8 КБ), и за одну дисковую I/O-операцию читаются сразу сотни ключей. У БД узкое место — именно random-I/O к диску, а не сравнения в памяти. AVL с одним ключом на узел и большой высотой потребовал бы на порядки больше дисковых обращений. AVL хорош в RAM (например, in-memory индекс), B-tree — когда данные на диске (индексы БД, файловые системы). См. [postgresql/02-indexes.md](../06-databases/database-systems-catalog/postgresql/02-indexes.md) и [16-.../05-trees-and-graphs.md](../16-algorithms-and-data-structures/05-trees-and-graphs.md).
 
 **Зачем нужны транзакции? Какие уровни изоляции?**
 
-- Транзакция объединяет операции в атомарную единицу с гарантиями ACID — либо всё применилось, либо ничего. Уровней изоляции четыре по стандарту SQL, по нарастанию строгости: **Read Uncommitted** (видны чужие незакоммиченные изменения — dirty read), **Read Committed** (видны только закоммиченные; дефолт в PostgreSQL), **Repeatable Read** (повторное чтение в транзакции стабильно; в PG реализован как snapshot, отсекает и фантомы), **Serializable** (результат эквивалентен последовательному выполнению транзакций). Каждый следующий отсекает больше аномалий: dirty read → non-repeatable read → phantom read → write skew. Строже = меньше параллелизма и больше откатов. См. [relational-databases-and-sql/02-transactions-isolation-and-locks.md](../06-databases/relational-databases-and-sql/02-transactions-isolation-and-locks.md) и [database-fundamentals/01-acid.md](../06-databases/database-fundamentals/01-acid.md).
+- Транзакция объединяет операции в атомарную единицу с гарантиями ACID — либо всё применилось, либо ничего. Уровней изоляции четыре по стандарту SQL, по нарастанию строгости: **Read Uncommitted** (видны чужие незакоммиченные изменения — dirty read), **Read Committed** (видны только закоммиченные; дефолт в PostgreSQL), **Repeatable Read** (повторное чтение в транзакции стабильно; в PG реализован как snapshot, отсекает и фантомы), **Serializable** (результат эквивалентен последовательному выполнению транзакций). Каждый следующий отсекает больше аномалий: dirty read → non-repeatable read → phantom read → write skew. Строже = меньше параллелизма и больше откатов. См. [postgresql/04-transactions-and-locking.md](../06-databases/database-systems-catalog/postgresql/04-transactions-and-locking.md) и [database-fundamentals/01-acid.md](../06-databases/database-fundamentals/01-acid.md).
 
 **В чём отличие WHERE и HAVING?**
 
-- `WHERE` фильтрует строки до группировки (`GROUP BY`) и не работает с агрегатами. `HAVING` фильтрует уже сгруппированные результаты и применяется к агрегатам (`HAVING COUNT(*) > 5`). Порядок: WHERE → GROUP BY → HAVING. См. [relational-databases-and-sql/01-relational-model-and-sql-basics.md](../06-databases/relational-databases-and-sql/01-relational-model-and-sql-basics.md).
+- `WHERE` фильтрует строки до группировки (`GROUP BY`) и не работает с агрегатами. `HAVING` фильтрует уже сгруппированные результаты и применяется к агрегатам (`HAVING COUNT(*) > 5`). Порядок: WHERE → GROUP BY → HAVING. См. [postgresql/00-sql-basics-and-syntax.md](../06-databases/database-systems-catalog/postgresql/00-sql-basics-and-syntax.md).
 
 **Примеры агрегатных функций. В какой секции их фильтруют?**
 
-- `COUNT`, `SUM`, `AVG`, `MIN`, `MAX`. Они схлопывают группы строк в одно значение; чтобы отфильтровать по результату агрегата, используют секцию `HAVING` (в `WHERE` агрегаты нельзя). См. [relational-databases-and-sql/01-relational-model-and-sql-basics.md](../06-databases/relational-databases-and-sql/01-relational-model-and-sql-basics.md).
+- `COUNT`, `SUM`, `AVG`, `MIN`, `MAX`. Они схлопывают группы строк в одно значение; чтобы отфильтровать по результату агрегата, используют секцию `HAVING` (в `WHERE` агрегаты нельзя). См. [postgresql/00-sql-basics-and-syntax.md](../06-databases/database-systems-catalog/postgresql/00-sql-basics-and-syntax.md).
 
 **Что такое триггер? Для чего и какие проблемы?**
 
@@ -210,15 +210,15 @@
 
 **SQL — декларативный или императивный язык?**
 
-- Декларативный: описывается **что** нужно получить (какой результат), а не **как** его вычислять пошагово. Способ выполнения (порядок джойнов, индексы, алгоритмы) выбирает планировщик/оптимизатор СУБД. Императивные вставки возможны в процедурных расширениях (PL/pgSQL), но сам SQL — декларативный. См. [relational-databases-and-sql/01-relational-model-and-sql-basics.md](../06-databases/relational-databases-and-sql/01-relational-model-and-sql-basics.md).
+- Декларативный: описывается **что** нужно получить (какой результат), а не **как** его вычислять пошагово. Способ выполнения (порядок джойнов, индексы, алгоритмы) выбирает планировщик/оптимизатор СУБД. Императивные вставки возможны в процедурных расширениях (PL/pgSQL), но сам SQL — декларативный. См. [postgresql/00-sql-basics-and-syntax.md](../06-databases/database-systems-catalog/postgresql/00-sql-basics-and-syntax.md).
 
 **Что такое первичный ключ и какие у него свойства? Может ли он быть составным?**
 
-- Первичный ключ однозначно идентифицирует строку в таблице. Свойства: **уникальность**, **NOT NULL** (не может быть пустым), неизменность (желательно), один на таблицу; СУБД автоматически строит по нему уникальный индекс. Да, ключ может быть **составным** (несколько столбцов) — уникальна тогда комбинация значений (напр. `(order_id, product_id)` в строках заказа). См. [relational-databases-and-sql/01-relational-model-and-sql-basics.md](../06-databases/relational-databases-and-sql/01-relational-model-and-sql-basics.md).
+- Первичный ключ однозначно идентифицирует строку в таблице. Свойства: **уникальность**, **NOT NULL** (не может быть пустым), неизменность (желательно), один на таблицу; СУБД автоматически строит по нему уникальный индекс. Да, ключ может быть **составным** (несколько столбцов) — уникальна тогда комбинация значений (напр. `(order_id, product_id)` в строках заказа). См. [postgresql/00-sql-basics-and-syntax.md](../06-databases/database-systems-catalog/postgresql/00-sql-basics-and-syntax.md).
 
 **Что такое нормализация БД?**
 
-- Процесс проектирования схемы по нормальным формам (1NF–3NF/BCNF): данные раскладывают по таблицам так, чтобы убрать избыточность и аномалии вставки/обновления/удаления, а связи выражались через внешние ключи. Каждый факт хранится в одном месте. См. [relational-databases-and-sql/01-relational-model-and-sql-basics.md](../06-databases/relational-databases-and-sql/01-relational-model-and-sql-basics.md).
+- Процесс проектирования схемы по нормальным формам (1NF–3NF/BCNF): данные раскладывают по таблицам так, чтобы убрать избыточность и аномалии вставки/обновления/удаления, а связи выражались через внешние ключи. Каждый факт хранится в одном месте. См. [postgresql/00-sql-basics-and-syntax.md](../06-databases/database-systems-catalog/postgresql/00-sql-basics-and-syntax.md).
 
 **Зачем применяют денормализацию и какие у неё минусы?**
 
@@ -253,7 +253,7 @@
 
 **На уровне Serializable две транзакции апдейтят одну строку — что произойдёт?**
 
-- Update берёт блокировку строки, поэтому вторая транзакция **ждёт** коммита первой. Дальше — ключевое отличие от Read Committed: если первая **закоммитила** изменение этой строки, вторая не допишет поверх, а сразу упадёт с ошибкой сериализации `could not serialize access due to concurrent update (40001)` — обе работают со snapshot на момент своего старта, и «перечитать и обновить новую версию» им нельзя (так PostgreSQL ведёт себя уже на Repeatable Read). Вторая продолжит работу, только если первая откатилась. Приложение обязано ловить `40001` и **повторять** транзакцию (retry). Serializable добавляет сверху **SSI** (Serializable Snapshot Isolation): помимо write-write конфликта на одной строке, откатываются и опасные read-write зависимости, когда итог не эквивалентен ни одному последовательному порядку. А «вторая дописывает поверх» — это поведение **Read Committed**: там после ожидания транзакция перечитывает актуальную версию строки и обновляет её. См. [relational-databases-and-sql/02-transactions-isolation-and-locks.md](../06-databases/relational-databases-and-sql/02-transactions-isolation-and-locks.md).
+- Update берёт блокировку строки, поэтому вторая транзакция **ждёт** коммита первой. Дальше — ключевое отличие от Read Committed: если первая **закоммитила** изменение этой строки, вторая не допишет поверх, а сразу упадёт с ошибкой сериализации `could not serialize access due to concurrent update (40001)` — обе работают со snapshot на момент своего старта, и «перечитать и обновить новую версию» им нельзя (так PostgreSQL ведёт себя уже на Repeatable Read). Вторая продолжит работу, только если первая откатилась. Приложение обязано ловить `40001` и **повторять** транзакцию (retry). Serializable добавляет сверху **SSI** (Serializable Snapshot Isolation): помимо write-write конфликта на одной строке, откатываются и опасные read-write зависимости, когда итог не эквивалентен ни одному последовательному порядку. А «вторая дописывает поверх» — это поведение **Read Committed**: там после ожидания транзакция перечитывает актуальную версию строки и обновляет её. См. [postgresql/04-transactions-and-locking.md](../06-databases/database-systems-catalog/postgresql/04-transactions-and-locking.md).
 
 **Как бы делал INSERT 100 000 000 строк?**
 
@@ -277,13 +277,13 @@
 
 **Как заблокировать строку?**
 
-- `SELECT ... FOR UPDATE` внутри транзакции — берёт **эксклюзивную блокировку** на выбранные строки до конца транзакции: другие транзакции, попытавшиеся сделать `FOR UPDATE`/`UPDATE`/`DELETE` той же строки, **ждут**. Варианты: `FOR NO KEY UPDATE` (слабее), `FOR SHARE` (разделяемая — читать можно, менять нельзя), `FOR UPDATE NOWAIT` (не ждать — сразу ошибка) и `FOR UPDATE SKIP LOCKED` (пропустить занятые — удобно для очередей задач в БД). Применяют для паттерна «прочитал → проверил → обновил» без гонок. См. [relational-databases-and-sql/02-transactions-isolation-and-locks.md](../06-databases/relational-databases-and-sql/02-transactions-isolation-and-locks.md).
+- `SELECT ... FOR UPDATE` внутри транзакции — берёт **эксклюзивную блокировку** на выбранные строки до конца транзакции: другие транзакции, попытавшиеся сделать `FOR UPDATE`/`UPDATE`/`DELETE` той же строки, **ждут**. Варианты: `FOR NO KEY UPDATE` (слабее), `FOR SHARE` (разделяемая — читать можно, менять нельзя), `FOR UPDATE NOWAIT` (не ждать — сразу ошибка) и `FOR UPDATE SKIP LOCKED` (пропустить занятые — удобно для очередей задач в БД). Применяют для паттерна «прочитал → проверил → обновил» без гонок. См. [postgresql/04-transactions-and-locking.md](../06-databases/database-systems-catalog/postgresql/04-transactions-and-locking.md).
 
 **Что такое оптимистичные и пессимистичные блокировки?**
 
 - Две стратегии управления конкурентным доступом. **Пессимистичная** — «конфликт вероятен» → **блокируем сразу**: перед изменением берём лок на строку (`SELECT … FOR UPDATE`), другие ждут. Конфликтов не будет, но падает параллелизм и есть риск deadlock/долгих ожиданий; хороша при **высокой конкуренции** за одни строки (списание денег, склад).
 - **Оптимистичная** — «конфликт редок» → **не блокируем**, а проверяем при коммите: читаем строку с колонкой **`version`/timestamp**, изменяем как `UPDATE … SET ..., version = version + 1 WHERE id = ? AND version = ?`. Если затронуто **0 строк** — значит кто-то уже обновил (версия не совпала) → **конфликт → повторить или отдать ошибку**. Реализуется обычно на **уровне приложения/ORM** (не блокировками БД). Хороша при **низкой конкуренции** и read-heavy.
-- Связь: пессимистичная = блокировки БД (`FOR UPDATE`, см. выше); **Serializable (SSI) в PostgreSQL — по сути оптимистичный** контроль, конфликт ловится откатом `40001` на коммите. См. [relational-databases-and-sql/02-transactions-isolation-and-locks.md](../06-databases/relational-databases-and-sql/02-transactions-isolation-and-locks.md).
+- Связь: пессимистичная = блокировки БД (`FOR UPDATE`, см. выше); **Serializable (SSI) в PostgreSQL — по сути оптимистичный** контроль, конфликт ловится откатом `40001` на коммите. См. [postgresql/04-transactions-and-locking.md](../06-databases/database-systems-catalog/postgresql/04-transactions-and-locking.md).
 
 ## Брокеры сообщений
 

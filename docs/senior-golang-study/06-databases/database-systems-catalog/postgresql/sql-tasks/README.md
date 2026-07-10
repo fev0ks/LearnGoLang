@@ -2,7 +2,7 @@
 
 Задачи на SQL с разбором и решениями — для подготовки к собеседованиям и тренировки
 запросов. Теория по реляционным БД и SQL лежит рядом:
-[../relational-databases-and-sql](../../../relational-databases-and-sql/README.md).
+[postgresql](../README.md).
 
 ## Структура
 
