@@ -171,6 +171,8 @@ flowchart TB
   (сознательный trade-off: privacy vs storage)
 ```
 
+Тот же content-addressed дедуп на ещё большем масштабе — тела массовых рассылок в [16. Gmail](./16-gmail-email-service.md) (одно тело на 10M получателей).
+
 ---
 
 ### Variable-Size Chunking (Rabin Fingerprint)

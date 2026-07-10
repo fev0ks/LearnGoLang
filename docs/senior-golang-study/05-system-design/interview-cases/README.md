@@ -29,6 +29,7 @@
 - [13. Avito / Classifieds](./13-avito-classifieds.md) — фасетный поиск (Elasticsearch), category-specific атрибуты (JSONB + денорм), Outbox→ES, медиа-пайплайн, горячее чтение карточек, view counter, модерация/антифрод
 - [14. Stock / Inventory Service](./14-stock-inventory-service.md) — двухфазный резерв (hold→commit/cancel) + TTL, защита от overselling (atomic условный декремент), горячий SKU при flash sale (бакетирование / Redis fast-path), шардинг по product_id, sync-репликация, чтение из кеша vs решение на записи
 - [15. TMS / Transport Management](./15-tms-transport-management.md) — нормализация разнородных источников (anti-corruption adapters), заказ↔маршрут many-to-many (консолидация ~1300/маршрут), типы маршрутов (line-haul/первая/последняя миля/смешанный), составной заказ как бизнес-сага (DAG этапов через хабы), назначение исполнителя (Redis geo + NX-лок), трекинг 10K водителей (stateless WS-gateway)
+- [16. Gmail / Email Service](./16-gmail-email-service.md) — тонкий SMTP-приём + durable-лог (250 OK = Kafka ack), immutable blob + mutable metadata, дедуп рассылок по body_hash, labels вместо папок, wide-column шард по user_id (ящик = один range-scan), per-user поисковый индекс, threading по RFC-заголовкам, outbound-ретраи с backoff до 24ч
 
 ## Структура каждого кейса
 
