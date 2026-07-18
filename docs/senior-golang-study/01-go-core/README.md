@@ -13,7 +13,7 @@
 - [07. Strings](./07-strings.md) — string header (ptr/len), immutability, byte vs rune, UTF-8, len=байты, range по рунам, конверсии и аллокации, substring retention, strings.Builder, string(int) ловушка, unsafe-конверсии
 - [08. Unsafe And Low-Level](./08-unsafe-and-low-level.md) — unsafe.Pointer vs uintptr, Sizeof/Alignof/Offsetof, padding/alignment, zero-copy string↔[]byte, layout, где используется в рантайме
 - [Runtime Scheduler](./runtime-scheduler/) — GMP scheduler, syscall handoff, netpoller (подраздел)
-- [Map Internals](./map-internals/) — hmap+bmap (до 1.24), Swiss Tables (1.24+), ctrl bytes, matchH2, tombstones (подраздел)
+- [Map Internals](./map-internals/) — актуальные Swiss Tables, поведение map, `sync.Map` и короткая история hmap (подраздел)
 - [Memory Internals](./memory-internals/) — стек и heap, аллокатор, escape analysis, GC (подраздел)
 - [Concurrency & Performance](./concurrency-and-performance/) — goroutines/channels, sync-примитивы, worker pool, context (подраздел)
 - [Profiling](./profiling/) — pprof, CPU/memory/goroutine/block/mutex профили, execution tracer, benchmarks (подраздел)
@@ -22,18 +22,19 @@
 
 Как горутины исполняются на OS-потоках и почему I/O не блокирует scheduler. Файлы тесно связаны, читать по порядку:
 
-- [01. Scheduler And Preemption](./runtime-scheduler/01-scheduler-and-preemption.md) — GMP модель, work stealing, async preemption, syscall handoff, GOMAXPROCS в контейнерах
-- [02. Syscall](./runtime-scheduler/02-syscall.md) — entersyscall/exitsyscall, P handoff, sysmon retake, CGo цена, LockOSThread, thread exhaustion
-- [03. Netpoller](./runtime-scheduler/03-netpoller.md) — epoll/kqueue интеграция, pollDesc, горутина parking/wakeup, SetDeadline, DNS resolver
-- [04. Timers](./runtime-scheduler/04-timers.md) — time.Sleep/Timer/Ticker, per-P timer heap, почему не syscall, утечки тикеров, история timerproc
+- [01. Scheduler And Preemption](./runtime-scheduler/01-scheduler-and-preemption.md) — G/M/P mental model, run queues, work stealing, async preemption и container-aware `GOMAXPROCS` в Go 1.25+
+- [02. Syscall](./runtime-scheduler/02-syscall.md) — blocking syscall flow, P handoff, реальная cancellation, cgo, `LockOSThread` и thread exhaustion
+- [03. Netpoller](./runtime-scheduler/03-netpoller.md) — readiness/completion model, parking/wakeup G, framing, deadlines, backpressure и DNS resolver
+- [04. Timers](./runtime-scheduler/04-timers.md) — `time.Sleep`/Timer/Ticker, per-P timers, связь с netpoll и timer semantics Go 1.23+
 
 ## Map Internals (подраздел)
 
-Детальный разбор внутренней реализации map:
+Сначала актуальная реализация и наблюдаемое поведение; старая hmap оставлена как исторический контекст:
 
-- [01. hmap + bmap](./map-internals/01-hmap-before-1.24.md) — до Go 1.24: bucket layout, tophash, overflow chains, incremental evacuation
-- [02. Swiss Tables](./map-internals/02-swiss-tables-since-1.24.md) — с Go 1.24: open addressing, ctrl bytes, matchH2 bitset, directory
-- [03. Задачки и подводные камни](./map-internals/03-puzzles-and-gotchas.md) — гочи map: итерация, NaN-ключ, nil map, concurrent fatal, неадресуемость
+- [02. Swiss Tables](./map-internals/02-swiss-tables-since-1.24.md) — с Go 1.24: groups, control bytes, H1/H2, probing, tombstones и directory
+- [03. Задачки и подводные камни](./map-internals/03-puzzles-and-gotchas.md) — nil map, addressability, range, comparable keys, NaN и concurrency
+- [04. sync.Map](./map-internals/04-sync-map.md) — выбор структуры, API и concurrent hash-trie с Go 1.24
+- [01. Историческая hmap + bmap](./map-internals/01-hmap-before-1.24.md) — Go 1.23 и ниже: buckets, tophash, overflow chains и incremental evacuation
 
 ## Memory Internals (подраздел)
 
@@ -87,10 +88,11 @@
 - что происходит с P когда горутина уходит в blocking syscall
 - почему 100k соединений не требуют 100k OS threads
 - когда `sync.Pool` полезен, а когда нет
-- как устроен bucket в hmap: tophash, раздельное хранение ключей и значений
+- как современная map использует groups, H1/H2 и control bytes для lookup
 - почему порядок итерации по map случаен
-- что такое Swiss Tables и чем они лучше chaining через overflow buckets
-- как matchH2 проверяет 8 слотов одной битовой операцией
+- зачем tombstone сохраняет корректность probe sequence после delete
+- чем Swiss Tables отличаются от исторического chaining через overflow buckets
+- когда `sync.Map` подходит лучше typed map под lock
 
 ## Подборка
 

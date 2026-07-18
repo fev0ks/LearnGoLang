@@ -1,293 +1,366 @@
-# Timers: time.Sleep, Timer, Ticker
+# Timers: time.Sleep, Timer и Ticker
 
-Таймеры — отдельная механика рантайма, тесно связанная с планировщиком и netpoller'ом. Понимание того, что `time.Sleep` не блокирует поток и не делает syscall на каждый сон, объясняет, почему Go держит миллионы «спящих» горутин дёшево.
+Timer park goroutine до deadline, не резервируя OS thread. Начиная с Go 1.23 channel-based timers получили новые GC и Stop/Reset guarantees, поэтому старые советы про обязательное drain канала часто больше не нужны.
 
 ## Содержание
 
-- [Что делает time.Sleep](#что-делает-timesleep)
-- [Где живут таймеры: per-P heap](#где-живут-таймеры-per-p-heap)
-- [Кто запускает истёкшие таймеры](#кто-запускает-истёкшие-таймеры)
-- [Syscall ли это и что с M](#syscall-ли-это-и-что-с-m)
-- [runtime.timer: структура](#runtimetimer-структура)
-- [Timer / Ticker / After / AfterFunc](#timer--ticker--after--afterfunc)
-- [Ловушки и утечки](#ловушки-и-утечки)
-- [История: timerproc до 1.14](#история-timerproc-до-114)
+- [Mental model](#mental-model)
+- [Где хранятся timers](#где-хранятся-timers)
+- [Связь с scheduler и netpoller](#связь-с-scheduler-и-netpoller)
+- [Какой API выбирать](#какой-api-выбирать)
+- [Что изменилось в Go 1.23](#что-изменилось-в-go-123)
+- [Практические паттерны](#практические-паттерны)
+- [Точность и Ticker](#точность-и-ticker)
+- [Типичные ошибки](#типичные-ошибки)
+- [Версионная карта runtime timers](#версионная-карта-runtime-timers)
 - [Interview-ready answer](#interview-ready-answer)
+- [Официальные источники](#официальные-источники)
 
----
-
-## Что делает time.Sleep
-
-`time.Sleep` не крутит busy-loop и не занимает поток ОС:
-
-```
-1. горутина регистрирует таймер (addtimer) и ПАРКУЕТСЯ:
-   gopark → состояние Gwaiting, waitReason "sleep" (виден как [sleep] в дампах)
-2. M освобождается и берёт другую горутину — поток НЕ висит на сне
-3. таймер «созрел» → его callback (goroutineReady) переводит горутину в Grunnable
-4. горутина попадает в очередь и продолжает выполнение после Sleep
-```
-
-Стоимость сна ≈ одна запись в куче таймеров + припаркованная горутина (~2 KB стека). **Никакого `nanosleep` на каждую горутину** — иначе миллион спящих горутин потребовал бы миллион потоков или syscall'ов.
-
----
-
-## Где живут таймеры: per-P heap
-
-Начиная с **Go 1.14**, таймеры интегрированы в планировщик и хранятся **по одному heap на каждый P**:
-
-```
-p struct {
-    timers       []*timer  // min-heap по времени срабатывания (when)
-    timer0When   atomic.Int64 // when ближайшего таймера (быстрый peek без лока)
-    numTimers    atomic.Uint32
-    deletedTimers atomic.Uint32
-    // …
-}
-```
-
-- это **min-куча** (binary heap): в корне — таймер с наименьшим `when`;
-- `timer0When` кэширует время корня, чтобы планировщик мог **дёшево** (атомарным чтением, без лока) узнать «когда ближайший дедлайн»;
-- каждый P обслуживает свои таймеры → меньше contention, лучше локальность.
-
-Таймеры **переезжают вместе с work stealing**: если P засыпает или его забирают, его таймеры могут перейти на другой P (`adoptTimers`), чтобы не «зависли».
-
-```mermaid
-flowchart TD
-    A["time.Sleep / NewTimer / NewTicker"] --> B["addtimer: положить в p.timers (min-heap)"]
-    B --> C["обновить p.timer0When = when корня"]
-    C --> D{"планировщик в findRunnable"}
-    D -->|"timer0When ≤ now"| E["checkTimers: запустить созревшие callbacks"]
-    D -->|"ещё рано"| F["netpoll(delay = timer0When − now)"]
-    E --> G["callback: разбудить горутину / послать в канал"]
-```
-
----
-
-## Кто запускает истёкшие таймеры
-
-**Отдельной горутины-таймера НЕТ** (с 1.14). Истёкшие таймеры обрабатывает сам планировщик в нескольких точках:
-
-- **`findRunnable`** на каждом обороте вызывает `checkTimers(p)` — прежде чем искать горутину, P отрабатывает свои созревшие таймеры;
-- **`netpoll(delay)`**: если P собирается заснуть (работы нет), он засыпает в netpoll с таймаутом, равным времени до ближайшего таймера — и просыпается ровно к сроку;
-- **`sysmon`** периодически пингует netpoll как страховку (вдруг все P спят).
-
-> **Важно: netpoll опрашивает только сеть, таймеры он не «обрабатывает».** `netpoll` под капотом — это `epoll_wait` (Linux) / `kevent` (BSD), и он ждёт готовности **сетевых fd**. Но у `epoll_wait` есть аргумент **timeout** — «сколько максимум блокироваться». Go переиспользует именно его: `delay` — это **не таймер внутри netpoll**, а просто таймаут блокировки, равный времени до ближайшего таймера. Поэтому **один** `epoll_wait` убивает двух зайцев: проснуться (а) если пришли сетевые данные, либо (б) когда истёк timeout. Во втором случае netpoll возвращает **пусто**, а уже сам планировщик (`checkTimers`) запускает созревшие таймеры. Сам callback таймера выполняет **планировщик**, а не netpoll — netpoll лишь «будильник», через который P досыпает до ближайшего срока. Подробнее про `delay` — в [03-netpoller](./03-netpoller.md#что-за-delay-в-netpolldelay).
-
-Таким образом, выполнение callback'а таймера — это часть работы планировщика, а не отдельная сущность.
-
-### Где таймеры в чеклисте планировщика
-
-Все эти точки — пункты одного цикла `findRunnable()`, который M проходит сверху вниз на каждом обороте (и сразу после пробуждения). Таймеры падают на **шаг 2**, а блокирующий сон «до срока» — это **шаг 9**:
-
-```
-findRunnable() для текущего P:
-  1. safepoint / GC
-▶ 2. checkTimers(P)          — отработать СОЗРЕВШИЕ таймеры этого P  ← ВОТ ЗДЕСЬ time.Sleep/Timer/Ticker
-  3. локальная очередь (LRQ)
-  4. раз в 61 тик            — глобальная очередь (анти-голодание)
-  5. глобальная очередь (GRQ)
-  6. netpoll(0)              — неблокирующая проверка сетевых горутин
-  7. work stealing           — украсть у другого P (+ проверить ЕГО таймеры)
-  ──────────── если всё пусто: ────────────
-  8. отдать P, M → idle-пул
-▶ 9. netpoll(delay)          — БЛОКИРУЮЩИЙ epoll_wait, delay = время до ближайшего таймера
-                               (поспать ровно до срока, заодно ловя сеть)
- 10. stopm()                — futex-сон, если и это не помогло
-```
-
-Связка двух подсвеченных шагов: **шаг 9** заставляет M проспать ровно до ближайшего дедлайна (через таймаут `epoll_wait`), а проснувшись, M возвращается в начало цикла, и **шаг 2** (`checkTimers`) запускает созревший таймер → горутина `time.Sleep` становится `Grunnable`. Полный разбор чеклиста — в [01-scheduler-and-preemption](./01-scheduler-and-preemption.md#цикл-поиска-работы-findrunnable).
-
----
-
-## Syscall ли это и что с M
-
-Частый вопрос на собесе. Ответ: **нет, отдельного syscall на таймер нет, и поток не блокируется**.
-
-- **Проверка «пора ли»** — это сравнение `when` с `runtime.nanotime()`. На Linux `nanotime` читается через **vDSO** — специальную область, отображённую в адресное пространство процесса, — то есть **в user-space, без перехода в OS-ядро**. Это не syscall. На занятой системе таймеры отрабатываются инлайн в `findRunnable` вообще без syscall'ов.
-- **Когда работать нечего и все P простаивают** — один M паркуется в `netpoll(delay)`, где `delay = timer0When − now`. Вот этот `epoll_wait` (Linux) / `kevent` (BSD) с таймаутом — **единственный syscall ожидания**, и он один обслуживает **сразу сеть И таймеры**: проснётся либо по готовности I/O, либо к дедлайну ближайшего таймера. После пробуждения M запускает созревшие таймеры.
-
-**Что с M:**
-
-| Сценарий | Что с потоком |
-|---|---|
-| горутина в `Sleep`, есть другая работа | M **свободен**, исполняет другие горутины |
-| все P простаивают | **один** M спит в `netpoll(delay)` (kernel), остальные припаркованы |
-| таймер сработал | M просыпается из netpoll, `checkTimers` будит горутину |
-
-> **А что делают остальные M, пока один дежурит в netpoll?** Спят на **futex** в idle-пуле потоков (`sched.midle`), **не держа P** и не потребляя CPU. Роль «дежурного» в `epoll_wait` берёт ровно один M (захват через CAS `sched.lastpoll → 0`) — остальным дублировать блокирующий `epoll_wait` незачем, они уходят в `stopm()` → futex-сон. Сами P при этом отвязаны и лежат в `sched.pidle`. Появилась работа → дежурный (или `wakep` → `futexwakeup` будит idle-M) просыпается, **сначала берёт P**, потом горутину. Потоки не уничтожаются, а копятся припаркованными и переиспользуются — в простое почти все спят на futex.
-
-Итог: **миллион `time.Sleep` = миллион записей в per-P кучах, но 0–1 реально ожидающий поток** (один M в netpoll на ближайший дедлайн), а не миллион потоков и не миллион syscall'ов. В этом всё отличие от наивного «поток на таймер».
-
----
-
-## runtime.timer: структура
-
-Все высокоуровневые таймеры (`Timer`, `Ticker`, `time.After`, `context` с дедлайном) — обёртки над одним рантайм-типом:
+## Mental model
 
 ```go
-// runtime/time.go (упрощённо)
+time.Sleep(500 * time.Millisecond)
+```
+
+Упрощённо runtime:
+
+1. создаёт timer с deadline;
+2. переводит current G в waiting;
+3. M продолжает исполнять другие goroutines;
+4. после deadline runtime делает sleeping G runnable;
+5. scheduler позже снова запускает её на любом подходящем M.
+
+`Sleep` гарантирует паузу **не меньше** duration, но не точный момент resume. После deadline goroutine ещё ждёт scheduler и OS CPU time.
+
+## Где хранятся timers
+
+В current runtime timers организованы как per-P sets с heap, ordered по ближайшему deadline. Это уменьшает contention по сравнению с одной global heap.
+
+Операции в общем случае:
+
+- add/modify timer поддерживает heap order;
+- scheduler проверяет ближайшие timers;
+- expired timer делает G runnable, отправляет value в channel или запускает callback;
+- periodic timer вычисляет следующий deadline.
+
+Конкретные fields и helper function names в `runtime/time.go` — implementation details. Стабильная идея: множество timers обслуживается runtime, а не отдельным OS thread на timer.
+
+<details>
+<summary>Упрощённые структуры timer и timers в Go 1.26</summary>
+
+```go
+// Один logical trigger.
 type timer struct {
-    when   int64        // когда сработать (наносекунды, монотонные часы)
-    period int64        // > 0 → периодический (Ticker): после срабатывания when += period
-    f      func(any, uintptr) // callback при срабатывании
-    arg    any          // аргумент callback (напр. канал или *g горутины)
-    // … статус (atomic), поля для heap
+	mu     mutex
+	state  uint8
+	isChan bool
+
+	when   int64
+	period int64
+	f      func(arg any, seq uintptr, delay int64)
+	arg    any
+	seq    uintptr
+
+	ts *timers
+}
+
+// Per-P набор timers.
+type timers struct {
+	mu   mutex
+	heap []timerWhen
+	len  atomic.Uint32
+
+	zombies     atomic.Int32
+	minWhenHeap atomic.Int64
 }
 ```
 
-- `when` — абсолютное время по **монотонным** часам (не зависит от перевода системного времени);
-- `period == 0` → одноразовый таймер (`Timer`); `period > 0` → периодический (`Ticker`), рантайм сам перепланирует;
-- `f(arg, …)` — что сделать: разбудить горутину (`Sleep`), послать время в канал (`Timer`/`Ticker`), вызвать функцию (`AfterFunc`).
+Ключевые поля:
 
-Управляющие функции рантайма: `addtimer` (добавить), `deltimer` (удалить), `modtimer` (изменить `when` — это и есть `Reset`), `adjusttimers`/`checkTimers` (обслуживание кучи).
+- `when` — absolute monotonic deadline;
+- `period == 0` — one-shot timer;
+- `period > 0` — periodic timer/Ticker;
+- `f/arg` — действие: разбудить G, подготовить channel send или запустить callback;
+- `seq` — защита от callback старой configuration после Reset/deadline update;
+- `heap[0]` — ближайший timer внутри per-P set.
 
----
+Scheduler способен обращаться к timers другого P, поэтому «per-P» не означает «вообще без synchronization». Heap защищается lock, а atomics дают дешёвый fast check ближайшего deadline и количества entries.
 
-## Timer / Ticker / After / AfterFunc
+</details>
 
-| API | Что делает | period |
-|---|---|---|
-| `time.NewTimer(d)` | один раз пошлёт время в `t.C` через `d` | 0 |
-| `time.After(d)` | то же, но возвращает только канал (таймер не остановить) | 0 |
-| `time.AfterFunc(d, f)` | через `d` вызовет `f` в **отдельной горутине** | 0 |
-| `time.NewTicker(d)` | шлёт время в `t.C` каждые `d` | `d` |
-| `time.Tick(d)` | то же, но без возможности остановить | `d` |
+## Связь с scheduler и netpoller
+
+Когда runnable work есть, scheduler попутно проверяет expired timers. Когда work нет, runtime может block в netpoll с timeout до ближайшего timer.
+
+```text
+network event раньше deadline → poller просыпается из-за fd
+deadline раньше network event → poller timeout, scheduler проверяет timers
+```
+
+Netpoller не исполняет timer callback. Он лишь помогает runtime эффективно спать до network event или ближайшего deadline. Callback/ready goroutine затем проходит через scheduler.
+
+## Какой API выбирать
+
+| API | Когда использовать | Можно управлять lifecycle |
+| --- | --- | --- |
+| `time.Sleep` | просто приостановить current G | нет |
+| `time.After` | одноразовый timeout в простом `select` | channel only |
+| `time.NewTimer` | timeout нужно Stop/Reset/reuse | да |
+| `time.AfterFunc` | запустить callback после delay | Stop/Reset со специальной семантикой |
+| `time.NewTicker` | periodic event | да, через `Stop` |
+| `time.Tick` | короткий convenience case | channel only |
+
+## Что изменилось в Go 1.23
+
+Для channel-based timers (`NewTimer`, `After`, `NewTicker`, `Tick`) в Go 1.23:
+
+- GC может собирать unreferenced timers/tickers, даже если code не вызывает `Stop`;
+- timer channels работают как synchronous (`cap=0`);
+- после return из `Stop` или `Reset` channel не получит stale value от прежней configuration.
+
+Поэтому старый универсальный idiom больше не нужен для Go 1.23+:
 
 ```go
-// одноразовый — с возможностью отмены
-t := time.NewTimer(5 * time.Second)
-select {
-case <-t.C:
-    // сработал
-case <-ctx.Done():
-    t.Stop() // отменили — освобождаем таймер
+// Старый pre-1.23 pattern; в новом коде не копировать механически.
+if !t.Stop() {
+    <-t.C
 }
+t.Reset(d)
+```
 
-// периодический — ОБЯЗАТЕЛЬНО Stop
-tk := time.NewTicker(time.Second)
-defer tk.Stop()
+В module с `go` directive до 1.23 может действовать legacy timer behavior; им также управляет `GODEBUG=asynctimerchan`.
+
+`Stop` всё ещё полезен, когда timer больше не нужен: это явный lifecycle и предотвращение ненужного wakeup/callback. Для Ticker `Stop` прекращает будущие ticks.
+
+<details>
+<summary>Current и legacy Reset рядом</summary>
+
+Для module с Go 1.23+ channel timer можно reset без ручного drain:
+
+```go
+t.Reset(nextDelay)
+```
+
+Старый pattern для legacy semantics выглядел так:
+
+```go
+if !t.Stop() {
+	select {
+	case <-t.C:
+	default:
+	}
+}
+t.Reset(nextDelay)
+```
+
+Не смешивайте patterns механически. Поведение выбирается `go` directive module и может быть изменено `GODEBUG=asynctimerchan`; при upgrade полезно иметь test на Stop/Reset behavior, от которого зависит код.
+
+</details>
+
+## Практические паттерны
+
+### Timeout с context
+
+Если операция принимает context, обычно проще позволить higher-level API управлять timer:
+
+```go
+ctx, cancel := context.WithTimeout(parent, 2*time.Second)
+defer cancel()
+
+return call(ctx)
+```
+
+### Переиспользуемый Timer в hot loop
+
+`time.After` на каждой итерации создаёт новый timer. В hot path можно reuse один:
+
+```go
+t := time.NewTimer(time.Second)
+defer t.Stop()
+
 for {
     select {
-    case <-tk.C:
-        tick()
+    case v := <-in:
+        handle(v)
+        t.Reset(time.Second) // Go 1.23+ semantics
+    case <-t.C:
+        onIdleTimeout()
+        t.Reset(time.Second)
+    }
+}
+```
+
+Это пример для одного owner goroutine. Concurrent Stop/Reset/read одного timer требует отдельного synchronization design.
+
+<details>
+<summary>Debounce на одном reusable Timer</summary>
+
+```go
+func debounce[T any](
+	ctx context.Context,
+	in <-chan T,
+	delay time.Duration,
+	flush func(T),
+) {
+	timer := time.NewTimer(time.Hour)
+	_ = timer.Stop() // пример рассчитан на Go 1.23+ semantics
+	defer timer.Stop()
+
+	var (
+		latest T
+		armed  bool
+		timerC <-chan time.Time
+	)
+
+	for {
+		select {
+		case value, ok := <-in:
+			if !ok {
+				return
+			}
+			latest = value
+			armed = true
+			timer.Reset(delay) // Go 1.23+ channel timer semantics
+			timerC = timer.C
+		case <-timerC:
+			if armed {
+				flush(latest)
+			}
+			armed = false
+			timerC = nil
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+```
+
+Одна goroutine владеет Timer, поэтому нет concurrent Reset/read. `nil` channel выключает timer branch после flush. В production нужно отдельно решить, следует ли flush последнее значение при закрытии input или cancellation.
+
+</details>
+
+### Ticker lifecycle
+
+```go
+ticker := time.NewTicker(time.Second)
+defer ticker.Stop()
+
+for {
+    select {
+    case <-ticker.C:
+        refresh()
     case <-ctx.Done():
         return
     }
 }
 ```
 
----
+## Точность и Ticker
 
-## Ловушки и утечки
+Timers — scheduling mechanism, а не hard real-time clock:
 
-**1. `time.Tick` / `time.After` без остановки — утечка.** Таймер живёт в рантайм-куче, и пока он не сработал/не остановлен, на него есть ссылка — GC его не соберёт.
+- OS scheduling и load задерживают execution after deadline;
+- long GC/runtime work может добавить latency;
+- Ticker корректирует interval и может drop ticks, если receiver не успевает;
+- wall clock может меняться, поэтому Go time values используют monotonic component для duration comparisons, когда он доступен.
 
-```go
-// ПЛОХО: тикер не остановить никогда → утечка на весь lifetime процесса
-for range time.Tick(time.Second) { ... } // нельзя Stop
+Если нужно обработать «сколько периодов прошло», нельзя полагаться на количество полученных ticker events — вычисляйте состояние из current time/domain data.
 
-// ХОРОШО
-tk := time.NewTicker(time.Second)
-defer tk.Stop()
-for range tk.C { ... }
-```
-
-**2. `time.After` в цикле `select` создаёт новый таймер на каждой итерации.**
+<details>
+<summary>Эксперимент: Ticker не является очередью всех ticks</summary>
 
 ```go
-// ПЛОХО на горячем пути: каждый виток — новый таймер в кучу
-for {
-    select {
-    case v := <-in:
-        handle(v)
-    case <-time.After(time.Second): // НОВЫЙ таймер каждую итерацию
-        timeout()
-    }
-}
+ticker := time.NewTicker(100 * time.Millisecond)
+defer ticker.Stop()
 
-// ЛУЧШЕ: один переиспользуемый Timer + Reset
+previous := time.Now()
+for range 5 {
+	tickTime := <-ticker.C
+	fmt.Println("tick delta:", tickTime.Sub(previous).Round(10*time.Millisecond))
+	previous = tickTime
 
-// --- Go 1.23+ (рекомендуется): без ручного осушения ---
-t := time.NewTimer(time.Second)
-defer t.Stop()
-for {
-    select {
-    case v := <-in:
-        handle(v)
-        t.Reset(time.Second)   // 1.23+ гарантирует: стейл-значения не будет
-    case <-t.C:
-        timeout()
-        t.Reset(time.Second)
-    }
-}
-
-// --- Go ≤ 1.22 (старый идиом с осушением канала) ---
-t := time.NewTimer(time.Second)
-defer t.Stop()
-for {
-    select {
-    case v := <-in:
-        handle(v)
-        if !t.Stop() { <-t.C } // осушить буфер, ЕСЛИ таймер уже сработал и значение не прочитано
-        t.Reset(time.Second)
-    case <-t.C:
-        timeout()
-        t.Reset(time.Second)
-    }
+	// Receiver медленнее периода ticker.
+	time.Sleep(350 * time.Millisecond)
 }
 ```
 
-> **Зачем осушение `if !t.Stop() { <-t.C }` (до 1.23).** До Go 1.23 канал `t.C` **буферизован (cap 1)**: сработавший таймер кладёт туда значение. `Stop()` вернёт `false`, если таймер **уже сработал** — тогда в буфере лежит непрочитанное «старое» срабатывание, и его надо забрать (`<-t.C`), иначе следующий `Reset` + чтение поймают этот устаревший тик.
->
-> **Ловушка:** `<-t.C` в этом идиоме **заблокируется**, если значение из канала **уже вычитано** (несколько читателей `t.C`, или значение прочитано раньше в этой же итерации). В примере выше это безопасно — одна горутина, ветки `select` взаимоисключающие, так что непрочитанный тик максимум один. Но как общий приём идиом корректен только при «я единственный читатель и ещё не читал».
->
-> **Go 1.23+:** каналы таймеров сделали **небуферизованными**, и после `Stop`/`Reset` гарантированно **не придёт старое значение**. Осушать стало нечего — идиом `if !t.Stop() { <-t.C }` **не нужен и может сам зависнуть** (значения в канале нет → `<-t.C` блокируется). Просто вызывай `Reset` (или `Stop` + `Reset`). Плюс с 1.23 GC собирает неостановленные таймеры, так что забытый `Stop` уже не «течёт» так, как раньше (но `defer Stop()` для тикеров — по-прежнему хороший тон).
+Программа не получает по три события после каждого `Sleep`: Ticker корректирует schedule и может drop ticks для медленного receiver. Поэтому periodic reconciliation обычно вычисляет состояние заново, а не делает «один шаг на каждый tick».
 
-**3. `AfterFunc` запускает `f` в новой горутине** — если `f` обращается к разделяемому состоянию, нужна синхронизация.
+</details>
 
----
+`time.AfterFunc` запускает callback в отдельной goroutine. Callback может пересекаться с application work и требует обычной synchronization. Семантика `Reset` отличается в зависимости от того, active timer или callback уже запущен; её проверяют по package docs.
 
-## История: timerproc до 1.14
+<details>
+<summary>AfterFunc: Stop не ждёт уже начавшийся callback</summary>
 
-То, что многие помнят по старым статьям:
+```go
+done := make(chan struct{})
+timer := time.AfterFunc(100*time.Millisecond, func() {
+	defer close(done)
+	expensiveCleanup()
+})
 
-- **до Go 1.10**: одна глобальная куча таймеров + **одна выделенная горутина `timerproc`**, которая спала до ближайшего дедлайна и будила таймеры. Один лок на всё → узкое место под нагрузкой (много `Sleep`/таймеров со всех горутин толкались на одном мьютексе).
-- **Go 1.10–1.13**: глобальную кучу пошардили на **64 корзины** (по `P mod 64`) со своими локами — снизили contention, но всё ещё отдельные структуры.
-- **Go 1.14**: таймеры **встроили в per-P планировщик** (`p.timers`), убрали `timerproc` совсем. Обработка слилась с `findRunnable`/`netpoll`. Результат: нет лишней горутины, нет глобального лока, лучше локальность, таймеры едут с work stealing.
+if !timer.Stop() {
+	// В этом примере callback уже мог начаться; ждём его отдельно.
+	<-done
+}
+```
 
-Поэтому «есть отдельная горутина для таймеров» — **верно только для Go < 1.14**.
+Такое ожидание корректно здесь, потому что timer новый, `Stop` вызывается один раз, а callback гарантированно закрывает `done`. В общем случае повторные `Reset`/`Stop` требуют отдельной state machine: Timer API не заменяет `WaitGroup`, mutex или ownership protocol.
 
----
+</details>
+
+## Типичные ошибки
+
+- считать `time.Sleep` blocking syscall для M;
+- ожидать resume точно в deadline;
+- создавать `time.After` в hot loop без оценки allocations;
+- переносить pre-1.23 drain pattern в Go 1.23+;
+- забывать `Ticker.Stop`, когда periodic work должен прекратиться;
+- делать тяжёлый `AfterFunc` callback без контроля concurrency;
+- считать каждый ticker event гарантированным;
+- одновременно управлять одним Timer из нескольких goroutines без clear ownership.
+
+## Версионная карта runtime timers
+
+Этот раздел помогает читать старые статьи, не перенося их устройство на актуальный runtime:
+
+| Версия | Модель |
+| --- | --- |
+| Ранние версии до Go 1.10 | Global timer heap и отдельная `timerproc` goroutine |
+| Go 1.10–1.13 | Timer heaps sharded, но architecture ещё отличается от современной per-P integration |
+| Go 1.14+ | Timers интегрированы с P/scheduler и timeout ожидания netpoll |
+| Go 1.23+ | Channel timers получают synchronous-channel и новые GC/Stop/Reset guarantees |
+
+Поэтому утверждение «в Go есть одна специальная goroutine, которая обслуживает все timers» описывает старый runtime, а не Go 1.26. В актуальной модели scheduler проверяет per-P timers, а blocking netpoll timeout помогает эффективно ждать ближайший deadline.
+
+Версионная карта не обещает одинаковый internal layout во всех releases после Go 1.14. Проверять нужно стабильную API semantics package `time`, а runtime fields использовать только для понимания и диагностики.
 
 ## Interview-ready answer
 
-**1. «`time.Sleep` — это syscall? что происходит с потоком (M)?»**
+**1. Блокирует ли time.Sleep OS thread?**
 
-- Нет. Горутина регистрирует таймер и паркуется (`Gwaiting`, reason `sleep`), а M освобождается и берёт другие горутины — поток не висит. Таймер лежит в per-P min-куче. Проверка «пора ли» — `nanotime` через vDSO (не syscall). Единственный syscall ожидания возникает, только когда всё простаивает: один M спит в `netpoll(delay)`. Поэтому миллион спящих горутин — миллион записей в кучах, но 0–1 ожидающий поток.
+- Нет. Runtime регистрирует timer и park G. M с P запускает другую goroutine. После deadline G становится runnable и позже продолжает работу.
 
-**2. «Есть ли отдельная горутина для таймеров?»**
+**2. Где живут timers?**
 
-- С Go 1.14 — нет. Истёкшие таймеры запускает сам планировщик: на каждом обороте `findRunnable` зовёт `checkTimers(p)`. Отдельная горутина `timerproc` была до 1.14 (глобальная, позже шардированная куча) и была узким местом — её убрали, перенеся таймеры в per-P heaps (едут даже с work stealing).
+- В current runtime это per-P timer sets/heaps. Scheduler проверяет expired timers, а при idle может использовать netpoll timeout до ближайшего deadline. Отдельный thread на каждый timer не нужен.
 
-**3. «Таймеры работают через netpoll? netpoll же про сеть.»**
+**3. Зачем netpoller участвует в timers?**
 
-- netpoll и правда опрашивает только **сетевые** fd. Но `netpoll(delay)` — это `epoll_wait` с **аргументом-таймаутом**, и Go ставит этот таймаут = время до ближайшего таймера. Так **один** `epoll_wait` будит M либо по сетевому событию, либо к сроку таймера. Сам callback таймера выполняет потом планировщик (`checkTimers`), а не netpoll — netpoll лишь «будильник».
+- Blocking poll уже умеет ждать с timeout. Runtime выбирает timeout по ближайшему timer, поэтому один wait просыпается либо по network readiness, либо по времени. Timer work после wakeup делает scheduler.
 
-**4. «Когда всё простаивает — что с потоками?»**
+**4. Что изменилось в Go 1.23?**
 
-- **Один** M — «дежурный»: спит в `netpoll(delay)` (`epoll_wait`, в OS-ядре). **Остальные** M спят на **futex** в idle-пуле (`sched.midle`), не держа P. P отвязаны и лежат в `sched.pidle`. Появилась работа → дежурный или разбуженный `futexwakeup` idle-M **сначала берёт P**, потом горутину.
+- Channel timers работают как synchronous, Stop/Reset гарантируют отсутствие stale values, а GC может собирать unreferenced unstopped timers/tickers. Старый обязательный drain channel больше не является правильным default для нового кода.
 
-**5. «Чем `time.After` опасен в цикле?»**
+**5. Есть ли отдельная timerproc goroutine?**
 
-- Каждая итерация `select` с `time.After` создаёт **новый** таймер в куче — на горячем пути лишний мусор. Лучше один `time.NewTimer` + `Reset`. А `time.Tick` без `Stop` — утечка; для периодики `NewTicker` + `defer Stop()`.
+- Это описание старых версий. В Go 1.26 timers организованы как per-P sets и интегрированы с scheduler/netpoll wait; отдельного OS thread или goroutine на каждый timer нет.
 
-**6. «Что вернёт `Timer.Stop()` и зачем `if !t.Stop() { <-t.C }`?»**
+## Официальные источники
 
-- `Stop()` → `false`, если таймер **уже сработал**. До Go 1.23 канал буферизован (cap 1), поэтому после `Stop()==false` в нём может лежать «старый» тик — его осушают `<-t.C` перед `Reset`. Ловушка: `<-t.C` **зависнет**, если значение уже вычитано. **В Go 1.23+** каналы небуферизованные, стейл-значений после `Stop`/`Reset` нет — идиом осушения **не нужен и может сам зависнуть**, просто вызывай `Reset`.
-
-## Подборка
-
-- [runtime/time.go (source)](https://github.com/golang/go/blob/master/src/runtime/time.go)
-- [Go 1.14 release notes — runtime timers](https://go.dev/doc/go1.14#runtime)
-- [pkg time](https://pkg.go.dev/time)
+- [time package](https://pkg.go.dev/time)
+- [runtime timers source](https://go.dev/src/runtime/time.go)
+- [Go 1.23 timer channel changes](https://go.dev/wiki/Go123Timer)
+- [Go 1.23 release notes](https://go.dev/doc/go1.23)

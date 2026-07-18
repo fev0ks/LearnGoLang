@@ -1,89 +1,87 @@
 # schedtrace demo
 
-Синтетическая программа, чтобы «вживую» посмотреть на планировщик Go через `GODEBUG=schedtrace`. Связана с [../../01-scheduler-and-preemption.md](../../01-scheduler-and-preemption.md).
+Небольшая программа для наблюдения за scheduler через `GODEBUG=schedtrace`. Основная теория — в [Scheduler и preemption](../../01-scheduler-and-preemption.md).
 
-## Что внутри
+## Что моделирует программа
 
-`main.go` поднимает три вида нагрузки (управляются флагами):
+- `-cpu` — CPU-bound goroutines, которые конкурируют за P;
+- `-io` — timer-waiting goroutines: название flag историческое, реального network I/O здесь нет;
+- `-spin` — tight loop для наблюдения async preemption;
+- `-dur` — продолжительность эксперимента.
+- `-trace` — записать execution trace в указанный файл.
 
-- **CPU-bound** горутины (`-cpu`) — бесконечно считают порциями, заполняют локальные очереди P → видно work stealing и preemption;
-- **I/O-bound** горутины (`-io`) — спят на тикере (`Gwaiting`), почти не грузят CPU, но «висят» как горутины;
-- **spin** (`-spin`) — tight loop без точек уступки, демо async preemption (Go 1.14+ вытеснит через `SIGURG`).
+## Запуск
 
-## Как запустить
+Лучше сначала собрать binary: так `GODEBUG` применяется только к target process, а output не смешивается с parent process `go run`.
 
 ```bash
 cd docs/senior-golang-study/01-go-core/runtime-scheduler/examples/schedtrace
+go build -o ./sched .
 
-# Базово: печать состояния планировщика раз в 1000 мс
-GODEBUG=schedtrace=1000 go run .
-
-# Один P — нагляднее видно чередование горутин (concurrency без parallelism)
-GOMAXPROCS=1 GODEBUG=schedtrace=1000 go run .
-
-# Подробно по каждому P/M/G
-GODEBUG=schedtrace=1000,scheddetail=1 go run .
-
-# Поиграть с нагрузкой
-go run . -cpu=16 -io=5000 -dur=15s
-GODEBUG=schedtrace=1000 go run . -spin
+GODEBUG=schedtrace=1000 ./sched
+GOMAXPROCS=1 GODEBUG=schedtrace=1000 ./sched
+GODEBUG=schedtrace=1000,scheddetail=1 ./sched
+GODEBUG=schedtrace=1000 ./sched -cpu=16 -io=5000 -dur=15s
+GOMAXPROCS=1 GODEBUG=schedtrace=1000 ./sched -spin
+./sched -cpu=16 -io=5000 -dur=5s -trace=trace.out
+go tool trace trace.out
 ```
 
-> Эта программа специально почти **не аллоцирует** — она про планировщик. Чтобы посмотреть на **GC** (`gctrace=1`), есть отдельный пример: [memory-internals/examples/gctrace](../../../memory-internals/examples/gctrace/).
+При `go run` можно увидеть schedtrace и от Go tool process, и от target program. Это не два scheduler внутри приложения — это разные processes, унаследовавшие `GODEBUG`.
 
-> **Видишь ДВЕ строки `SCHED` на интервал? Это нормально — и важно понять почему.** При `go run` живут **два процесса**, и оба наследуют `GODEBUG`:
-> 1. **родитель `go run`** — он не просто компилирует, а **остаётся жить весь прогон** (ждёт дочерний процесс). Почти простаивает → его строки выглядят как `idleprocs=4 ... runqueue=0 [0 0 0 0]`;
-> 2. **целевая программа** (дочерний процесс) — реальная нагрузка: `idleprocs=0 ... runqueue=519 [200 113 130 1]`.
->
-> У каждого свой таймер schedtrace → время чуть разное (`1008ms` vs `1003ms`), а изредка строки **перемешиваются** в stdout (два процесса пишут разом). Чтобы видеть **только свою программу** — собери бинарник и запусти его напрямую:
-> ```bash
->   go build -o ./sched .
-> или с выводом алокатора
->   go build -gcflags=-m -o sched . 
-> потом 
->   GOMAXPROCS=2 GODEBUG=schedtrace=1000,gctrace=1 ./sched 
-> ```
-> Тогда строка `SCHED` будет одна на интервал.
+## Как читать SCHED
 
-## Как читать строку SCHED
+Типичная summary line:
 
-```
-SCHED 1007ms: gomaxprocs=2 idleprocs=0 threads=4 spinningthreads=0 \
-              needspinning=1 idlethreads=1 runqueue=132 [ 61 74 ] schedticks=[ 3356 3112 ]
+```text
+SCHED 1007ms: gomaxprocs=2 idleprocs=0 threads=4 \
+spinningthreads=0 needspinning=1 idlethreads=1 runqueue=132 [61 74]
 ```
 
-| Поле | Что значит |
-|---|---|
-| `1007ms` | время с запуска (интервал ≈ заданному в schedtrace) |
-| `gomaxprocs=2` | число P |
-| `idleprocs=0` | простаивающих P (под нагрузкой 0 — все заняты) |
-| `threads=4` | всего OS-потоков (включая sysmon, netpoller) |
-| `spinningthreads` | число **M (с привязанным P)**, которые остались без работы и активно ищут её (крадут из чужих LRQ, смотрят GRQ/netpoll) прежде чем припарковаться. Это состояние M, но work stealing перекладывает горутины между очередями **P** |
-| `idlethreads` | припаркованные M (резерв в idle-пуле) |
-| `runqueue=132` | горутин в **глобальной** очереди (GRQ) |
-| `[ 61 74 ]` | длины **LRQ** каждого P — дисбаланс → сейчас будет work stealing |
-| `schedticks` | счётчики решений планировщика по P (тот самый `schedtick`, кратность 61) |
+| Поле | Что показывает |
+| --- | --- |
+| `gomaxprocs` | число P |
+| `idleprocs` | P без runnable work в момент snapshot |
+| `threads` | созданные OS threads |
+| `spinningthreads` | M, которые активно ищут work |
+| `idlethreads` | parked M |
+| `runqueue` | global runnable queue |
+| `[61 74]` | local queue lengths для P |
 
-## Что попробовать (мини-эксперименты)
+Это snapshot implementation state. Формат и дополнительные поля могут меняться между Go versions; не стройте alert по парсингу stderr без version control.
 
-1. **Work stealing и GRQ.** Запусти `go run . -cpu=8 -io=2000` и смотри на `runqueue` и `[..]`: в момент старта тысячи горутин не влезают в LRQ (по 256) → излишек уходит в GRQ (`runqueue` подскакивает), потом разгребается.
-2. **Concurrency без parallelism.** `GOMAXPROCS=1 GODEBUG=schedtrace=1000 go run .` — `gomaxprocs=1`, одна LRQ, всё чередуется на одном P. Сравни `[app] NumGoroutine` (живо много) с тем, что исполняется одна.
-3. **I/O-bound почти не грузит P.** Подними `-io=5000 -cpu=0` — горутин тысячи (`NumGoroutine` большой), но LRQ почти пустые: они спят в `Gwaiting`, а не на CPU.
-4. **Async preemption.** `GOMAXPROCS=1 GODEBUG=schedtrace=1000 go run . -spin` — spin-горутина крутит tight loop, но остальные (тикеры, печать `NumGoroutine`) **продолжают работать**: sysmon вытесняет spin через `SIGURG`. До Go 1.14 на 1 P это бы всё заморозило.
-5. **Число потоков.** Добавь много блокирующих файловых операций (или `-io` с реальным I/O) и смотри, как растёт `threads` (Go поднимает новые M под застрявшие syscall).
+## Эксперименты
 
-## Полезные соседние GODEBUG
+1. **Concurrency без parallelism:** `GOMAXPROCS=1`; goroutines много, но Go-код исполняет один P.
+2. **Queue pressure:** увеличьте `-cpu` и смотрите, как меняются global/local queues.
+3. **Waiting goroutines:** `-cpu=0 -io=5000`; goroutine count большой, а CPU queues почти пусты.
+4. **Async preemption:** `GOMAXPROCS=1 ... -spin`; timer-based status output продолжает получать CPU.
+5. **More detail:** включите `scheddetail=1`, но используйте короткий run — output очень большой.
+
+Work stealing происходит быстро, поэтому один snapshot редко показывает причинно-следственную связь. Для timeline используйте `runtime/trace` и `go tool trace`.
+
+<details>
+<summary>Какие snapshots ожидать</summary>
+
+Значения ниже иллюстративные: точный output зависит от Go version, машины и момента snapshot.
+
+```text
+# CPU pressure: все P заняты, в queues остаётся runnable work
+SCHED ... gomaxprocs=2 idleprocs=0 ... runqueue=14 [31 28]
+
+# Mostly waiting: P простаивают, runnable queues пусты
+SCHED ... gomaxprocs=2 idleprocs=2 ... runqueue=0 [0 0]
+```
+
+Во втором случае `-io=5000` всё ещё создаёт тысячи goroutines, но они ждут timers. Summary schedtrace не показывает их полное число — его печатает сама программа через `runtime.NumGoroutine`, а подробные states можно увидеть с `scheddetail=1` или goroutine dump.
+
+</details>
+
+## Полезные команды
 
 ```bash
-GODEBUG=schedtrace=1000              # состояние планировщика
-GODEBUG=schedtrace=1000,scheddetail=1 # + детально по каждому P/M/G
-GODEBUG=gctrace=1                    # циклы GC (см. memory-internals/04-garbage-collector.md)
-GODEBUG=schedtrace=1000,gctrace=1    # вместе
+GODEBUG=schedtrace=1000,gctrace=1 ./sched
+kill -QUIT <pid> # goroutine dump и завершение process на Unix
 ```
 
-Дамп всех горутин со стеками (включая системные `forcegc`/`bgsweep`/`bgscavenge`):
-
-```bash
-# во время работы программы в другом терминале:
-kill -QUIT <pid>      # SIGQUIT печатает стеки всех горутин и падает
-```
+Для GC есть отдельный пример: [memory-internals/examples/gctrace](../../../memory-internals/examples/gctrace/).

@@ -1,894 +1,638 @@
-# Netpoller: сетевой I/O без blocking threads
+# Netpoller: network I/O без blocked thread на каждое соединение
 
-Как Go позволяет тысячам горутин ждать сетевых событий, не блокируя OS-потоки, — и почему именно это делает Go эффективным для высоконагруженных сетевых сервисов. Короткое определение — в разделе [«В двух словах»](#в-двух-словах-что-такое-netpoller) ниже, дальше — детализация.
+Netpoller связывает blocking-looking APIs пакета `net` с OS event mechanisms: readiness-based epoll на Linux и kqueue на BSD/macOS, completion-oriented backend на Windows и другими platform implementations.
 
 ## Содержание
 
-- [В двух словах: что такое netpoller](#в-двух-словах-что-такое-netpoller)
-- [Проблема: blocking I/O vs threads](#проблема-blocking-io-vs-threads)
-- [Решение: epoll/kqueue/IOCP](#решение-epollkqueueiocp)
-- [Откуда берётся соединение: что происходит до первого `Read`](#откуда-берётся-соединение-что-происходит-до-первого-read)
-- [Как понять, что сообщение пришло целиком (framing)](#как-понять-что-сообщение-пришло-целиком-framing)
-- [Сколько соединений на сервере: conn ≠ число запросов](#сколько-соединений-на-сервере-conn--число-запросов)
-- [А чтения из Kafka, Redis, RabbitMQ — тоже через netpoller?](#а-чтения-из-kafka-redis-rabbitmq--тоже-через-netpoller)
-- [Архитектура netpoller в Go](#архитектура-netpoller-в-go)
-- [Куда приходят данные, пока горутина спит](#куда-приходят-данные-пока-горутина-спит)
-- [Жизненный цикл сетевого соединения](#жизненный-цикл-сетевого-соединения)
-- [pollDesc: связь fd и горутины](#polldesc-связь-fd-и-горутины)
-- [Когда netpoll() вызывается](#когда-netpoll-вызывается)
-- [Deadlines: SetDeadline через таймеры](#deadlines-setdeadline-через-таймеры)
-- [Что происходит с состоянием netpoller при отмене](#что-происходит-с-состоянием-netpoller-при-отмене)
-- [DNS resolver: Go vs platform](#dns-resolver-go-vs-platform)
-- [Типичные паттерны и ошибки](#типичные-паттерны-и-ошибки)
+- [Mental model](#mental-model)
+- [Socket, fd и platform poller](#socket-fd-и-platform-poller)
+- [Что происходит при Read](#что-происходит-при-read)
+- [Где находятся bytes и buffers](#где-находятся-bytes-и-buffers)
+- [Readiness не равно сообщению](#readiness-не-равно-сообщению)
+- [Lifecycle соединения](#lifecycle-соединения)
+- [Accept, Write и Close](#accept-write-и-close)
+- [pollDesc и scheduler](#polldesc-и-scheduler)
+- [Когда runtime вызывает netpoll](#когда-runtime-вызывает-netpoll)
+- [Deadlines и context cancellation](#deadlines-и-context-cancellation)
+- [Какие операции используют netpoller](#какие-операции-используют-netpoller)
+- [DNS resolver](#dns-resolver)
+- [Backpressure и server timeouts](#backpressure-и-server-timeouts)
 - [Диагностика](#диагностика)
+- [Типичные ошибки](#типичные-ошибки)
 - [Interview-ready answer](#interview-ready-answer)
+- [Официальные источники](#официальные-источники)
 
----
+## Mental model
 
-## В двух словах: что такое netpoller
-
-**netpoller — это тонкий слой Go-рантайма поверх механизма готовности I/O самой ОС** (`epoll` на Linux, `kqueue` на macOS/BSD, IOCP на Windows). Сам он сеть «не опрашивает» — реальную работу (принять пакеты, сложить данные, пометить сокет готовым) делает **OS-ядро**. Задача netpoller — **использовать** готовый механизм ОС и связать его с горутинами.
-
-Главное, что он делает: **превращает «готовность fd» в «готовность горутины».** ОС умеет сказать «вот эти сокеты готовы к чтению», но про горутины она ничего не знает. netpoller берёт этот список готовых fd и переводит его в список горутин, которые можно разбудить и поставить в очередь планировщика.
-
-> **Что такое сокет?** Сокет — это объект в **OS-ядре**, «точка подключения» для сетевого обмена (само слово socket = «розетка/гнездо»). Через него программа шлёт и принимает данные по сети. Сокет хранит всё состояние общения: протокол (TCP/UDP), локальный и удалённый адрес:порт, буферы приёма/отправки, для TCP — состояние соединения (`ESTABLISHED`, `CLOSE_WAIT`…). Сам он живёт в ядре, а программа обращается к нему по номеру — **fd** (см. ниже). Подключённый TCP-сокет однозначно определяется **4-кортежем** (`IP:порт клиента` ↔ `IP:порт сервера`) и протоколом. Аналогия: сокет = телефонный аппарат, fd = бирка с номером, по которой к нему обращается программа.
-
-> **Что такое fd (file descriptor)?** Это просто **целое число** — «ручка», которую OS-ядро выдаёт процессу на открытый ресурс: сокет, файл, pipe и т.п. В Unix «всё есть файл», поэтому соединение, файл и канал — всё это fd (например, `3`, `4`, `5`…). Когда программа вызывает `conn.Read`, внутри это `read(fd, …)` — операция над числом-дескриптором. Само OS-ядро по этому числу находит свою структуру (буферы, состояние TCP и пр.). `socket()`/`accept()`/`open()` возвращают новый fd; `close()` его освобождает. fd уникальны **в пределах процесса** и выдаются по возрастанию (0/1/2 заняты под stdin/stdout/stderr).
-
-```
-┌─ Go runtime: NETPOLLER ──────────────────────────┐
-│  • регистрирует сокеты в epoll ОС  (epoll_ctl)   │
-│  • спрашивает «кто готов?»         (epoll_wait)  │
-│  • готовый fd  →  готовая горутина  ← ВОТ суть   │
-└──────────────────────┬───────────────────────────┘
-                       │ syscalls
-                       ▼
-┌─ OS kernel: epoll/kqueue/IOCP ───────────────────┐
-│  • принимает данные из сети в socket buffer      │
-│  • помечает готовые fd в ready-list              │
-│  • отдаёт список готовых по epoll_wait           │
-└──────────────────────────────────────────────────┘
-```
-
-Разделение ответственности:
-
-| Кто | Что делает |
-|---|---|
-| **OS-ядро** (epoll/kqueue) | принимает пакеты, складывает в socket buffer, помечает fd готовым — вся «настоящая» работа с сетью |
-| **netpoller** (Go runtime) | регистрирует сокеты в epoll, дёргает `epoll_wait`, и **готовый fd → готовая горутина** (через `pollDesc`) для планировщика |
-
-Зачем это нужно: без netpoller каждое `conn.Read` блокировало бы целый OS-поток в ожидании данных (один поток на соединение). С netpoller горутина просто **паркуется** (~2 KB памяти, без потока и CPU), пока ОС не скажет «данные пришли». Поэтому Go держит сотни тысяч соединений на горстке потоков. Всё, что ниже в этом файле, — детализация этой одной идеи.
-
----
-
-## Проблема: blocking I/O vs threads
-
-**Наивный подход: один поток на соединение**
-
-```
-10 000 соединений
-= 10 000 OS threads
-= ~80 GB стека (8 MB × 10 000)
-= огромный context switch overhead
-```
-
-**Классический async подход: event loop**
-
-```
-1 поток + event loop (Node.js, nginx worker)
-= O(1) memory
-= но: всё в одном потоке, CPU-bound блокирует всех
-```
-
-**Go подход: goroutine per connection + netpoller**
-
-```
-10 000 соединений
-= 10 000 горутин × 2–8 KB стека = 20–80 MB
-= 4–8 OS threads (GOMAXPROCS)
-= код пишется синхронно, выполняется асинхронно
-```
-
-Горутины пишут `conn.Read()` как блокирующий вызов, но под капотом горутина **паркуется** и OS thread освобождается для других горутин.
-
----
-
-## Решение: epoll/kqueue/IOCP
-
-Go использует платформенный механизм асинхронного уведомления о готовности I/O:
-
-| Платформа | Механизм | Сложность |
-|---|---|---|
-| Linux | `epoll` | O(1) на событие, O(log n) на добавление |
-| macOS/BSD | `kqueue` | аналогично epoll |
-| Windows | `IOCP` (I/O Completion Ports) | completion model, не readiness |
-| Solaris | `event ports` | |
-
-**epoll (Linux) — как работает:**
-
-```c
-// Создать epoll instance
-epfd = epoll_create1(0);
-
-// Зарегистрировать fd для мониторинга
-epoll_ctl(epfd, EPOLL_CTL_ADD, sockfd, &event);
-
-// Ждать событий (блокирующий вызов на отдельном потоке)
-n = epoll_wait(epfd, events, MAX_EVENTS, timeout_ms);
-// events[0..n-1] содержат готовые fd
-```
-
-**Ключевое преимущество epoll**: возвращает только **готовые** fd, не перебирает все. При 10 000 соединений и 100 активных — epoll_wait вернёт 100, а не перебирает 10 000.
-
----
-
-## Откуда берётся соединение: что происходит до первого `Read`
-
-Прежде чем кто-то вызовет `conn.Read(buf)`, соединение надо **установить**. `net.Conn` — это **интерфейс одного уже открытого соединения** (потока байт). Под TCP внутри лежит `*net.TCPConn`, а в нём — один сокет = один **fd**. Соединение создаётся **один раз** и потом переиспользуется на много `Read`/`Write`.
-
-**Серверная сторона** (`net.Listen` → `Accept` → горутина на соединение):
-
-```
-net.Listen("tcp", ":8080")
-    ↓  под капотом: socket() → bind() → listen()  — слушающий сокет (свой fd, O_NONBLOCK,
-    ↓                                                зарегистрирован в epoll)
-listener.Accept()                  ← БЛОКИРУЕТСЯ, пока не придёт новое соединение
-    ↓  TCP handshake (SYN/SYN-ACK/ACK) делает OS-ядро само
-    ↓  accept() возвращает НОВЫЙ fd на КАЖДОЕ принятое соединение
-conn (net.Conn)  ←─ отдельный сокет/fd под это соединение
-    ↓
-go handleConn(conn)                ← обычно ОДНА горутина на ОДНО соединение
-                                      └→ внутри: for { conn.Read(buf); ... }
-```
-
-Тот же netpoller обслуживает и `Accept`: если новых соединений нет, `accept()` вернёт `EAGAIN`, и горутина-акцептор **паркуется** на слушающем fd ровно так же, как `Read` паркуется на fd соединения. Пришёл SYN → OS-ядро завершило handshake → слушающий fd помечен готовым → netpoll будит акцептора.
-
-> Syscall-уровень каждого шага (`socket`/`bind`/`listen`/`accept`/`epoll_ctl`/`close`) расписан ниже в разделе [Жизненный цикл сетевого соединения](#жизненный-цикл-сетевого-соединения). Здесь — общая картина «откуда взялся `conn`».
-
-**Клиентская сторона** — соединение создаёт `net.Dial`:
-
-```
-conn, _ := net.Dial("tcp", "host:443")   // socket() + connect() + handshake → готовый fd
-```
-
-После того как `conn` получен (через `Accept` или `Dial`), он **живёт долго**, и `Read`/`Write` на нём вызываются **многократно**:
-
-```go
-func handleConn(conn net.Conn) {   // ОДНО соединение = один fd на всё время
-    defer conn.Close()             // закрыть fd, иначе утечка дескрипторов
-    buf := make([]byte, 4096)
-    for {
-        n, err := conn.Read(buf)   // вызывается МНОГО раз на том же conn
-        if err != nil {            // io.EOF = peer закрыл соединение
-            return
-        }
-        process(buf[:n])           // обработать первые n байт
-    }
-}
-```
-
-> **TCP — это поток байт, а не сообщения.** Один `Read` возвращает `n` байт — **столько, сколько прямо сейчас лежит** в socket receive buffer OS-ядра. Это может быть меньше `len(buf)`; данные двух `Write` с другой стороны могут «склеиться» в один `Read`, а одно большое сообщение — прийти за несколько `Read`. Поэтому границы сообщений задаёт приложение (длина-префикс, разделитель, `bufio.Scanner` и т.п.). `n < len(buf)` — это норма, а не ошибка.
-
-Итог: соединение устанавливается один раз (`Accept`/`Dial` → новый fd), а схема ниже — это трасса **одного** `conn.Read(buf)` на **уже существующем** соединении. Она показывает не «как создаётся соединение», а что происходит **внутри каждого вызова чтения**: попытка прочитать → если данных нет, park → netpoll будит → повтор чтения.
-
-## Как понять, что сообщение пришло целиком (framing)
-
-Частое заблуждение: «горутина ждёт, пока придёт всё сообщение целиком». На уровне **одного `Read` это не так** — но на уровне библиотек, которыми обычно пользуются, **так и есть**. Разберём оба уровня, потому что путаница именно здесь.
-
-### Голый `Read` про «сообщения» не знает
-
-На уровне TCP/сокета понятия «сообщение» **не существует** — есть только поток байт. Поэтому `read()` не ждёт «целое сообщение» и не может понять, что «частей больше не будет». Он возвращается, как только в socket buffer есть **хоть 1 байт**, и отдаёт столько, сколько там сейчас лежит:
-
-- `n > 0` — какие-то байты: может быть **полсообщения**, ровно одно, полтора или **несколько склеенных**;
-- `n == 0, io.EOF` — peer **закрыл соединение** (FIN). Это единственный «конец» на уровне потока — и он про **всё соединение**, а не про сообщение;
-- сигнал готовности из netpoller («сокет готов к чтению») значит **«появился ≥1 байт»**, а не «накопилось целое сообщение». Ядро тоже не знает, где границы прикладных сообщений.
-
-### Границы задаёт приложение (framing)
-
-Раз TCP границ не хранит, их определяет **прикладной протокол**. Три классических способа:
-
-```go
-// 1. Длина-префикс (gRPC, Kafka): [4 байта длины N][N байт тела]
-var lenBuf [4]byte
-io.ReadFull(conn, lenBuf[:])               // ровно 4 байта
-n := binary.BigEndian.Uint32(lenBuf[:])
-body := make([]byte, n)
-io.ReadFull(conn, body)                     // ровно n байт → теперь сообщение целое
-
-// 2. Разделитель (HTTP-заголовки \r\n\r\n, Redis RESP, построчные)
-scanner := bufio.NewScanner(conn)           // по умолчанию режет по '\n'
-for scanner.Scan() { use(scanner.Bytes()) } // одна «строка» = одно сообщение
-
-// 3. Закрытие соединения = конец (HTTP/1.0 без Content-Length): копить до io.EOF
-```
-
-### Кто же «ждёт всё сообщение»: обёртка, а не один `Read`
-
-Вот здесь интуиция верна — но **на уровне обёртки**. `io.ReadFull`/`bufio`/`json.Decoder`/парсер протокола внутри **зовут `Read` в цикле**, пока framing не скажет «собрано». С точки зрения вызывающего кода вызов возвращается, когда сообщение **целиком получено** — но реализовано это как много `Read`, между которыми горутина паркуется.
-
-Пример: сообщение 10 KB пришло тремя TCP-сегментами.
-
-```
-io.ReadFull(conn, body[:10KB]):
-   Read → 4KB   → буфер пуст → park в netpoller → wake (пришёл сегмент)
-   Read → 4KB   → park → wake
-   Read → 2KB   → набрали 10KB
-   → возврат в ТВОЙ код: всё сообщение здесь
-```
-
-Горутина за это время **запарковалась/проснулась 2–3 раза**, но снаружи виден один `ReadFull`, вернувший целое тело. Всё это время она в `Gwaiting` — поток (M) свободен, ожидание «бесплатное».
-
-| Уровень | Что значит «готово» | Кто ждёт всё сообщение |
-|---|---|---|
-| голый `conn.Read` | появился ≥1 байт | никто — отдаёт что есть, границы решает приложение |
-| `io.ReadFull` / `bufio` / `json.Decoder` | framing собрал кадр целиком | **обёртка** — циклом `Read` + park, пока не наберёт |
-
-**Итог:** «горутина ждёт всё сообщение» — это свойство **обёртки** (`io.ReadFull`/`bufio`/парсер), а не одного `Read`. Один `Read` просыпается на первых же байтах; собирает сообщение и решает «полное ли оно» — прикладной код или библиотека.
-
-## Сколько соединений на сервере: conn ≠ число запросов
-
-Частый вопрос: «если 1000 пользователей отправили форму — будет 1000 conn?» Ответ: **на уровне TCP — да, одно соединение на клиента**, но считать надо **одновременно живые** соединения, а не число запросов или пользователей.
-
-Соединение однозначно определяется **4-кортежем** `(IP клиента, порт клиента, IP сервера, порт сервера)`. Каждое живое соединение — это отдельный сокет = отдельный **fd** = отдельный `net.Conn`. Поэтому **1000 клиентов, держащих соединение в один момент → до 1000 conn / 1000 fd / 1000 горутин**. Это ровно та ситуация, ради которой и нужен netpoller: 1000 горутин спят «бесплатно» в `Gwaiting`, а не висят на 1000 потоках.
-
-Но «1000 отправили форму» обычно ≠ «1000 одновременных conn»:
-
-- **Считается одновременность, не сумма.** Если запросы размазаны во времени, в пике открыто столько, сколько live прямо сейчас (часто десятки–сотни) — остальные уже закрылись или ещё не пришли.
-- **Keep-alive: один клиент → одно соединение на много запросов.** HTTP/1.1 по умолчанию держит TCP-соединение открытым (`Connection: keep-alive`) и переиспользует его под последовательные запросы — форма, потом картинка, потом ещё запрос идут по **одному** conn, а не открывают новое соединение на каждый HTTP-запрос.
-- **HTTP/2: много запросов в ОДНОМ соединении.** Один TCP-conn несёт много параллельных «стримов» — 1000 запросов от клиента могут идти по одному соединению. (Браузер на HTTP/1.1, наоборот, открывает ~6 соединений на домен ради параллелизма.)
-- **За reverse proxy / LB** — прокси **пулит** соединения к бэкенду, их обычно сильно меньше, чем клиентских.
-
-| Сценарий | conn на сервере |
-|---|---|
-| 1000 клиентов держат соединения одновременно (HTTP/1.1) | ~1000 conn / 1000 fd / 1000 горутин |
-| 1000 запросов размазаны во времени | столько, сколько live в пике (десятки–сотни) |
-| Один клиент, 1000 запросов по keep-alive (HTTP/1.1) | 1 conn |
-| Один клиент, 1000 запросов по HTTP/2 | 1 conn, 1000 стримов |
-| Сервис за reverse proxy / LB | пул к бэкенду — заметно меньше клиентских |
-
-**В Go этим занимается сам `net/http`** — руками «горутину на соединение» писать не нужно:
-
-```
-listener.Accept()  → новый conn (fd) на каждое ПРИНЯТОЕ TCP-соединение
-    ↓
-go c.serve(...)    → net/http сам поднимает ОДНУ горутину на соединение
-    ↓
-for {              // keep-alive: цикл по запросам в рамках ОДНОГО conn
-    req := readRequest(conn)   // ← park в netpoller, если данных ещё нет
-    handler.ServeHTTP(w, req)
-}
-```
-
-Для HTTP/2 поверх одного conn добавляются ещё горутины на стримы. Ключевое: **conn считается на одновременно живые соединения**, и именно поэтому 100k соединений в Go живут на горстке потоков — netpoller паркует горутины, а не блокирует потоки.
-
-## А чтения из Kafka, Redis, RabbitMQ — тоже через netpoller?
-
-Да. Kafka, Redis, RabbitMQ, Postgres и т.п. — это всё **сетевые соединения по TCP**. Если Go-клиент открывает соединение через стандартный пакет `net` (`net.Dial` → `net.Conn`), сокет автоматически ставится в `O_NONBLOCK`, и **всё чтение/запись идёт через netpoller** — ровно как `conn.Read`, который мы разбирали. Планировщику без разницы, какой протокол сверху.
-
-```
-go-redis / kafka-go / amqp091 / pgx
-    ↓  внутри: net.Dial("tcp", "broker:9092") → conn (fd, O_NONBLOCK)
-client.Get(ctx, key)         // или ReadMessage / Consume / pool.Query
-    ↓
-conn.Write(команда)          // отправить запрос (RESP / Kafka protocol / AMQP frame)
-    ↓
-conn.Read(ответ)             // ← ответа ещё нет → park в netpoller, M свободен
-    ↓
-ответ пришёл → netpoll будит → парсим протокол в user-space
-```
-
-То есть «прочитать сообщение из Kafka» с точки зрения рантайма = тот же park на fd + пробуждение через netpoll. Разбор протокола (RESP у Redis, фреймы у Kafka/AMQP) происходит **в user-space уже после** того, как `Read` вернул байты.
-
-**Connection pooling.** Клиенты БД/брокеров держат **пул долгоживущих соединений** (как `pgxpool`). Одно обращение к Redis = взять conn из пула → `Write` команды → `Read` ответа (park в netpoller) → вернуть conn в пул. Каждое соединение в пуле — отдельный fd, переиспользуется. Поэтому тысячи параллельных запросов к Redis не создают тысячи соединений — они мультиплексируются через пул из десятков conn.
-
-**TLS** (Redis/Kafka over TLS): `crypto/tls` оборачивает `net.Conn`, но под капотом тот же сокет → **тоже netpoller**. И сам TLS-хендшейк — это сетевой I/O, который точно так же паркуется.
-
-> Единственное исключение — клиенты, которые через **cgo** оборачивают C-библиотеку с собственными сокетами (например, `confluent-kafka-go` поверх `librdkafka`): там I/O идёт мимо netpoller и блокирует поток M, как файловый. Pure-Go клиенты (`go-redis`, `kafka-go`, `amqp091-go`, `pgx`) этой проблемы не имеют.
-
-## Архитектура netpoller в Go
-
-Трасса одного `conn.Read(buf)` на уже открытом соединении:
-
-```
-net.Conn.Read(buf)                 ← conn уже получен из Accept/Dial (см. выше)
-    ↓
-internal/poll.FD.Read()
-    ↓
-poll.FD.readLock() → syscall.Read() (O_NONBLOCK)
-    ↓ если EAGAIN (данных нет)
-pollDesc.waitRead()
-    ↓
-gopark() — горутина паркуется (Gwaiting), M освобождается
-    ↓
-[данные появились в OS-ядре]
-netpoll(delay) → возвращает список готовых горутин
-    ↓
-горутина → Grunnable → LRQ любого P
-    ↓
-горутина продолжает, syscall.Read() возвращает данные
-```
-
-**Ключевые компоненты:**
-
-```
-runtime.pollDesc    — один на каждый fd, хранит заблокированные горутины
-runtime.netpollGenericInit() — инициализация epoll fd при старте
-runtime.netpoll(delay) — вызов epoll_wait, возврат готовых горутин
-runtime.netpollready() — разбудить горутину для конкретного fd
-```
-
-> **«Возвращает горутины» — не магия.** `netpoll` буквально отдаёт `gList` (список горутин), но fd сам по себе как ключ для поиска **не используется**. При регистрации сокета (`epoll_ctl ADD`) Go кладёт в `epoll_event.data` **указатель на `pollDesc`**, поэтому `epoll_wait` отдаёт события, каждое из которых уже несёт указатель на нужный `pollDesc`. Внутри `netpoll` из `pollDesc.rg`/`pollDesc.wg` достаётся припаркованная читающая/пишущая горутина и добавляется в список. Цепочка: `epoll_wait` → событие с `*pollDesc` → `pd.rg/wg` → горутина. Подробнее про поля pollDesc — в разделе [pollDesc: связь fd и горутины](#polldesc-связь-fd-и-горутины) ниже.
+`conn.Read` выглядит blocking, но waiting goroutine не обязана удерживать M:
 
 ```mermaid
-flowchart TD
-    subgraph reg["Регистрация сокета (один раз, при открытии)"]
-        A["epoll_ctl(ADD, fd)"] -->|"кладёт указатель *pollDesc<br/>в epoll_event.data"| EP["epoll-инстанс<br/>в OS-ядре"]
-    end
+sequenceDiagram
+    participant G as Goroutine
+    participant FD as non-blocking socket
+    participant NP as netpoller
+    participant S as Scheduler
 
-    subgraph one["Один проход netpoll (резолв G по событию)"]
-        W["epoll_wait()"] --> EV["готовое событие<br/>event.data = *pollDesc"]
-        EV --> PD["pollDesc → поле pd.rg/wg"]
-        PD --> SCHED["G → Grunnable → run queue"]
-    end
-
-    EP -.->|"fd стал готов →<br/>ядро кладёт событие в ready-list"| W
-    SCHED --> RUN["горутина исполняет Read():<br/>копирует готовые байты из socket buffer"]
-    RUN --> Q{"сообщение собрано?<br/>framing: длина-префикс / разделитель"}
-   
-    Q -->|"да"| DONE["io.ReadFull / bufio / json.Decoder<br/>отдаёт сообщение в прикладной код"]
-
-    PARK["горутина паркуется<br/>G → pd.rg/wg, статус Gwaiting"]
-    Q -->|"нет — нужно ещё байт"| PARK
-    PARK -.->|"ждёт готовности fd"| W
-    
-    NOTE["fd как ключ для поиска НЕ используется:<br/>событие само несёт указатель на pollDesc"]
-    EV -.- NOTE
+    G->>FD: read()
+    FD-->>G: EAGAIN / not ready
+    G->>NP: register wait and park
+    Note over G: Gwaiting, no OS thread reserved
+    NP-->>S: fd readable
+    S-->>G: make runnable
+    G->>FD: retry read()
+    FD-->>G: bytes / error
 ```
 
-То есть указатель на горутину «прицеплен» к сокету ещё на этапе регистрации (через `pollDesc`), поэтому по готовому событию рантайм сразу знает, кого будить — без поиска по fd. А петля `Q → PARK` показывает ту самую цикличность: пока framing не собрал сообщение, горутина проходит `park → netpoll → Read` снова и снова.
+Это позволяет обслуживать много mostly-idle connections небольшим числом OS threads. Цена всё равно есть: socket buffers, fd, goroutine stack/metadata, application buffers и GC roots.
 
-> **Это цикл, а не один проход.** Схема выше — **одна** итерация park → wake. Для одного логического сообщения горутина может пройти её **много раз**: `io.ReadFull`/`bufio`/`json.Decoder` вызывают `Read` в цикле, и на каждом неполном чтении горутина снова паркуется (`pd.rg`) и снова будится этим же механизмом, пока framing не соберёт сообщение целиком. То есть одну «прочитанную обёрткой» структуру может обслужить несколько срабатываний netpoll. Подробнее — в разделе [Как понять, что сообщение пришло целиком](#как-понять-что-сообщение-пришло-целиком-framing).
+## Socket, fd и platform poller
 
-### Что за `delay` в `netpoll(delay)`
+На Unix socket является kernel object, а file descriptor — небольшое integer handle процесса для доступа к нему:
 
-`delay` (в наносекундах) говорит, **насколько `netpoll` имеет право заблокироваться** в `epoll_wait`/`kevent`, ожидая готовности fd:
-
-| `delay` | Поведение `epoll_wait` | Когда вызывается |
-|---|---|---|
-| `< 0` | блокироваться **бесконечно**, пока хоть один fd не станет готов | P нечего делать и **нет таймеров** — можно спать сколько угодно |
-| `0` | **не блокироваться**, вернуть готовые прямо сейчас (poll) | быстрая неблокирующая проверка в `findRunnable` и в `sysmon` |
-| `> 0` | блокироваться **не дольше** `delay` нс (таймаут) | P засыпает, но **есть таймер** — проснуться не позже ближайшего дедлайна |
-
-Главное здесь — **`delay > 0` объединяет сеть и таймеры в один syscall**. Когда P готовится заснуть, планировщик смотрит на ближайший таймер (`time.Sleep`, `time.After`, дедлайны соединений) и передаёт время до него как `delay`. Тогда **один** `epoll_wait` одновременно: (а) проснётся, если пришли сетевые данные, и (б) проснётся не позже, чем сработает ближайший таймер. Не нужны ни отдельный поток для таймеров, ни busy-wait. Подробно про эту связку — в [04-timers](./04-timers.md).
-
-> На уровне ОС `delay` в нс конвертируется в таймаут `epoll_wait` (мс) или в `timespec` для `kevent`. `delay < 0` → таймаут `-1` (ждать вечно), `delay == 0` → таймаут `0` (вернуться сразу).
-
----
-
-## Куда приходят данные, пока горутина спит
-
-Частый вопрос: если горутина, ждущая `conn.Read`, **снята с потока и не исполняется**, то куда вообще приходят данные? Ответ: **приём данных делает OS-ядро, а не горутина** — асинхронно, независимо от того, исполняется ли сейчас горутина (и даже процесс).
-
-Когда `read()` вернул `EAGAIN` (данных нет), горутина паркуется, а её fd зарегистрирован в epoll. Дальше всё происходит **в OS-ядре**:
-
-```
-1. Пакет приходит на сетевую карту (NIC — Network Interface Card)
-   → NIC по DMA (Direct Memory Access — запись в RAM напрямую,
-     минуя CPU) кладёт пакет в буферы OS-ядра → аппаратное прерывание
-
-2. OS-ядро (в контексте прерывания/softirq, БЕЗ участия прикладного кода):
-   → сетевой стек: драйвер → IP → TCP (проверка, сборка, отправка ACK)
-   → копирует payload в RECEIVE-БУФЕР СОКЕТА (память OS-ЯДРА, привязана к fd)
-   → помечает fd как "readable" и кладёт его в ready-list epoll-инстанса
-
-3. Данные лежат в socket buffer OS-ядра, fd помечен готовым.
-   Горутина всё ещё СПИТ — для приёма она не нужна.
-
-4. Go-рантайм вызывает netpoll() = epoll_wait()
-   → OS-ядро отдаёт готовые fd → рантайм по fd находит pollDesc
-   → припаркованную горутину → Grunnable
-
-5. Горутина просыпается, ПОВТОРЯЕТ read():
-   → копирует байты из socket buffer OS-ЯДРА → в buf приложения (user-space)
+```text
+Go net.Conn
+    -> internal/poll.FD
+        -> fd = 42
+            -> kernel socket
+                ├── TCP state
+                ├── local/remote addresses
+                ├── receive buffer
+                └── send buffer
 ```
 
-Горутина нужна **только на шаге 5** — скопировать уже пришедшие данные. Само ожидание и приём её не занимают: данные хранит OS-ядро (в socket buffer), готовность запоминает epoll (тоже в OS-ядре).
+`fd` не содержит данные и не является глобально уникальным. После `close(42)` OS может быстро выдать число `42` другому resource, поэтому runtime защищается от stale readiness events через lifecycle sequence внутри poll state.
 
-### Два разных буфера (частая путаница)
+| Platform | Backend idea |
+| --- | --- |
+| Linux | `epoll`: readiness set для registered fd |
+| macOS/BSD | `kqueue`: readiness/events через kernel queue |
+| Windows | IOCP: completion-oriented notifications |
+| Другие systems | Свой backend с общим runtime contract |
 
-| Буфер | Где живёт | Кто пишет | Кто читает |
-|---|---|---|---|
-| **socket receive buffer** | память **OS-ядра**, на каждый fd (размер ~ `SO_RCVBUF`) | OS-ядро при приёме пакетов | `read()` при вызове |
-| **user buffer** (`buf` в `conn.Read(buf)`) | память **процесса** (стек/heap горутины) | `read()` копирует сюда | прикладной код |
+Platform poller знает о descriptors/events, но ничего не знает о goroutines. Go netpoller выполняет перевод:
 
-`read()` — это операция «перелей из буфера OS-ядра в мой буфер». Пусто в буфере OS-ядра → `EAGAIN` → паркуемся; есть данные → копируем и возвращаем `n`.
+```text
+fd ready/completed
+    -> найти pollDesc
+    -> извлечь waiting reader/writer G
+    -> сделать G runnable
+    -> scheduler позже запускает G на M + P
+```
 
-> Аналогия: посылку заказали и ушли. Курьер (OS-ядро) принимает её и кладёт в почтовый ящик (socket buffer) — стоять у двери не нужно. Горутина подходит к ящику (`read`), только когда удобно, и забирает доставленное. epoll — это «лампочка на ящике: есть ли что забрать».
+<details>
+<summary>Что именно делает OS, а что Go runtime</summary>
 
-Именно поэтому асинхронный I/O масштабируется: при **блокирующем** чтении поток сидел бы внутри `read()` в OS-ядре, ожидая данные — один поток на соединение. В Go ожиданием и приёмом занимается OS-ядро, а горутина спит «бесплатно» (запись в pollDesc + ~2 KB стека) и просыпается лишь скопировать готовое.
+| Слой | Ответственность |
+| --- | --- |
+| NIC + kernel network stack | Принимает packets, обрабатывает TCP, кладёт bytes в socket receive buffer |
+| epoll/kqueue/IOCP | Сообщает process о readiness/completion registered operations |
+| Go netpoller | Связывает OS event с `pollDesc` и waiting G |
+| Scheduler | Ставит awakened G в runnable queues и даёт CPU |
+| Application protocol | Читает bytes, восстанавливает frames/messages и применяет business logic |
 
----
+Netpoller не принимает packets, не хранит HTTP requests и не выполняет handler. Он является adapter между OS I/O event и scheduler.
 
-## Жизненный цикл сетевого соединения
+</details>
 
-### Создание сервера
+## Что происходит при Read
+
+Упрощённый flow для readiness-based poller на Unix:
+
+1. `net.Conn.Read` доходит до `internal/poll`.
+2. Runtime делает non-blocking read attempt.
+3. Если bytes доступны — call возвращается сразу.
+4. Если fd пока не ready — goroutine регистрируется как reader waiter и park.
+5. M и P исполняют другую runnable goroutine.
+6. OS poller сообщает readiness.
+7. Runtime делает waiting G runnable.
+8. G повторяет syscall и получает bytes или новую ошибку.
+
+Readiness означает «операция сейчас, вероятно, не заблокируется», а не «runtime уже скопировал payload в goroutine». До повторного read состояние может снова измениться, поэтому implementation обязана корректно повторять попытку.
+
+Пока G parked, network packets принимают NIC и kernel network stack. Bytes лежат в kernel socket receive buffer, а не в goroutine и не в netpoller.
+
+## Где находятся bytes и buffers
+
+Обычно одновременно существуют минимум два разных buffer layers:
+
+```text
+peer writes bytes
+    -> network
+    -> kernel socket receive buffer
+    -> read(fd, userBuf)
+    -> Go []byte supplied by application
+    -> optional bufio/protocol buffer
+```
+
+| Buffer | Кто владеет | Когда занимает память |
+| --- | --- | --- |
+| Kernel receive/send buffer | OS socket | Пока connection открыт и данные queued |
+| Slice, переданный в `Read` | Go application | Пока на slice есть ссылки |
+| `bufio.Reader`, HTTP/gRPC/parser buffers | Library/application | Зависит от pooling и lifecycle request/connection |
+
+Readiness обычно означает, что kernel receive buffer содержит данные либо fd находится в terminal/error state. Payload не копируется в Go heap до выполнения `read`/completion path.
+
+Практическое следствие: mostly-idle connection не удерживает отдельный thread, но всё равно удерживает fd, kernel buffers, goroutine и часто application buffers. «100k connections» никогда не означает нулевую стоимость.
+
+## Readiness не равно сообщению
+
+TCP — byte stream. Один `Read` может вернуть:
+
+- часть application message;
+- несколько messages сразу;
+- заголовок без полного body;
+- `n > 0` вместе с non-nil error.
+
+Message boundaries задаёт protocol framing:
+
+- fixed size;
+- delimiter (`\n`);
+- length prefix;
+- protocol parser, например HTTP.
 
 ```go
-ln, err := net.Listen("tcp", ":8080")
-// 1. socket(AF_INET6, SOCK_STREAM, 0)    — создать fd
-// 2. setsockopt(fd, SO_REUSEADDR, ...)   — опции
-// 3. bind(fd, :8080)
-// 4. listen(fd, backlog)
-// 5. setNonblock(fd)                     — O_NONBLOCK
-// 6. epoll_ctl(epfd, ADD, fd, EPOLLIN)   — зарегистрировать в epoll
+header := make([]byte, 4)
+if _, err := io.ReadFull(conn, header); err != nil {
+    return err
+}
+
+n := binary.BigEndian.Uint32(header)
+if n > maxFrameSize {
+    return ErrFrameTooLarge
+}
+body := make([]byte, n)
+_, err := io.ReadFull(conn, body)
+return err
 ```
 
-### Accept нового соединения
+`io.ReadFull` может вызвать несколько `Read`; между ними goroutine будет park/resume через netpoller.
+
+<details>
+<summary>Полный пример length-prefixed framing</summary>
 
 ```go
-conn, err := ln.Accept()
-// 1. Горутина вызывает accept()
-// 2. Если нет соединений → EAGAIN → parkGoRoutine
-// 3. epoll уведомляет: новое соединение готово
-// 4. Горутина разбужена → accept() снова → получает conn fd
-// 5. conn fd выставляется в O_NONBLOCK
-// 6. epoll_ctl(epfd, ADD, connfd, EPOLLIN|EPOLLOUT)
+const maxFrameSize = 1 << 20 // 1 MiB
+
+func readFrame(r io.Reader) ([]byte, error) {
+	var header [4]byte
+	if _, err := io.ReadFull(r, header[:]); err != nil {
+		return nil, err
+	}
+
+	size := binary.BigEndian.Uint32(header[:])
+	if size > maxFrameSize {
+		return nil, fmt.Errorf("frame too large: %d", size)
+	}
+
+	body := make([]byte, int(size))
+	if _, err := io.ReadFull(r, body); err != nil {
+		return nil, err
+	}
+	return body, nil
+}
+
+func writeFrame(w io.Writer, body []byte) error {
+	if len(body) > maxFrameSize {
+		return fmt.Errorf("frame too large: %d", len(body))
+	}
+
+	var header [4]byte
+	binary.BigEndian.PutUint32(header[:], uint32(len(body)))
+	if err := writeFull(w, header[:]); err != nil {
+		return err
+	}
+	return writeFull(w, body)
+}
+
+func writeFull(w io.Writer, data []byte) error {
+	for len(data) > 0 {
+		n, err := w.Write(data)
+		if n > 0 {
+			data = data[n:]
+		}
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return io.ErrShortWrite
+		}
+	}
+	return nil
+}
 ```
 
-### Read данных
+Проверка максимального размера выполняется **до** allocation body. `writeFull` учитывает, что произвольный `io.Writer` может принять только часть buffer за один вызов.
 
-```go
-n, err := conn.Read(buf)
-// 1. syscall.Read(fd, buf) — O_NONBLOCK
-// 2. Если EAGAIN → pollDesc.waitRead()
-//    → gopark(netpollblockcommit)
-//    → горутина Gwaiting, M берёт другую горутину
-// 3. Данные пришли: epoll_wait → EPOLLIN на connfd
-//    → netpollready(pd, 'r') → горутина → Grunnable
-// 4. Горутина продолжает, Read возвращает данные
+</details>
 
-// Write аналогично через EPOLLOUT
+## Lifecycle соединения
+
+### Server side: Listen и Accept
+
+```text
+net.Listen("tcp", ":8080")
+    -> socket
+    -> bind
+    -> listen
+    -> non-blocking listening fd registered with poller
+
+listener.Accept()
+    -> try accept
+    -> EAGAIN: park acceptor G
+    -> listening fd becomes readable
+    -> wake G and retry accept
+    -> new connected fd / net.Conn
 ```
 
-### Close соединения
+Listening socket и accepted connection — разные kernel sockets с разными fd. Один listener живёт долго, а каждый successful `Accept` создаёт отдельный connected socket.
 
 ```go
-conn.Close()
-// 1. epoll_ctl(epfd, DEL, fd, 0) — убрать из epoll
-// 2. close(fd)
-// 3. pollDesc помечается как closed
-// 4. Если горутина паркована на этом fd — она разбуждается с ошибкой ErrNetClosing
+listener, err := net.Listen("tcp", ":8080")
+if err != nil {
+	return err
+}
+defer listener.Close()
+
+for {
+	conn, err := listener.Accept()
+	if err != nil {
+		return err
+	}
+	go handleConn(conn)
+}
 ```
 
----
+### Client side: Dial
 
-## pollDesc: связь fd и горутины
+`net.Dialer.DialContext` создаёт socket и выполняет non-blocking connect flow. Пока handshake не завершается, goroutine ждёт readiness через poller; context/deadline ограничивает ожидание.
 
-Каждый сетевой fd имеет связанный `pollDesc`:
+После `Accept` или `Dial` один `net.Conn` обычно переживает множество `Read`/`Write`. Для HTTP/1 keep-alive через одно connection последовательно проходят разные requests; HTTP/2 и multiplexed protocols допускают несколько logical streams одновременно.
+
+```text
+connections != requests != goroutines
+```
+
+Их соотношение задаёт protocol и library. Поэтому метрики active connections недостаточно для оценки handler concurrency или request load.
+
+## Accept, Write и Close
+
+- `Accept` listener также может park goroutine до появления connection.
+- `Write` может park, если send buffer заполнен и fd пока не writable.
+- `Close` выводит descriptor из poller и будит goroutines, ожидающие read/write, с error.
+
+На одном `net.Conn` несколько goroutines могут одновременно вызывать methods; package contract это допускает. Но application protocol всё равно должен синхронизировать framing и ownership writes, чтобы bytes разных messages не смешивались логически.
+
+`Write` не обещает, что peer уже читает bytes. Успех означает, что local stack принимает данные; они могут оставаться в kernel send buffer. Если buffer заполнен из-за slow peer, write получает would-block и G park до writability либо deadline.
+
+`Close` концептуально выполняет несколько связанных действий:
+
+1. запрещает новые operations через `internal/poll.FD` lifecycle lock;
+2. удаляет/закрывает descriptor в platform poller;
+3. будит reader/writer waiters с error;
+4. освобождает OS fd, когда references/in-flight operations позволяют.
+
+TCP half-close (`CloseWrite`/`CloseRead` у `*net.TCPConn`) отличается от полного `Close`: одна direction может завершиться, пока другая продолжает работать. Это protocol decision и не отменяет необходимость окончательно закрыть connection.
+
+## pollDesc и scheduler
+
+Runtime связывает pollable fd с `pollDesc`. Для mental model достаточно знать, что он хранит:
+
+- fd identity/lifecycle state;
+- отдельное ожидание reader и writer;
+- read/write deadlines;
+- защиту от stale events после close/reuse descriptor.
+
+Reader и writer ожидания независимы. Упрощённо каждое direction state может означать:
+
+```text
+nil/no waiter
+waiting G
+ready event already arrived
+```
+
+Это требуется из-за race между park и OS event:
+
+```text
+G проверяет fd -> EAGAIN
+                     OS event может прийти здесь
+G регистрирует wait
+G park
+```
+
+Если event приходит до фактического park, state запоминает readiness, и G не засыпает навсегда. Если G уже parked, event извлекает её и делает runnable. Close/deadline используют тот же synchronization path, но пробуждают с error.
+
+Netpoller возвращает scheduler список goroutines, для которых I/O ready. Они становятся runnable и попадают в scheduling flow; netpoller сам не выполняет application handler.
+
+Scheduler проверяет netpoll без blocking, когда ищет work, и может сделать blocking poll, когда runnable work нет. Timeout blocking poll согласуется с ближайшими runtime timers.
+
+<details>
+<summary>Упрощённый pollDesc</summary>
 
 ```go
-// runtime/netpoll.go (упрощённо)
 type pollDesc struct {
-    link *pollDesc  // free list
+	fd    uintptr
+	fdseq atomic.Uintptr
 
-    fd      uintptr // файловый дескриптор
-    closing bool
+	rg atomic.Uintptr // reader wait state
+	wg atomic.Uintptr // writer wait state
 
-    rg  atomic.Uintptr  // goroutine waiting for read, or flags
-    wg  atomic.Uintptr  // goroutine waiting for write, or flags
-    rd  int64           // read deadline (unix nano)
-    wd  int64           // write deadline (unix nano)
-    rt  timer           // read deadline timer
-    wt  timer           // write deadline timer
+	rd int64 // read deadline
+	wd int64 // write deadline
+
+	closing bool
 }
 ```
 
-Горутина, ждущая `Read`, хранится в `rg`. Горутина, ждущая `Write`, в `wg`. По одной горутине на каждое направление на каждый fd.
+Реальная структура содержит locks, timer sequences и error state. `fdseq` помогает отличить event старой жизни descriptor от нового resource, которому OS переиспользует тот же fd number.
 
-**Что это значит на практике:** нельзя делать concurrent `Read` из нескольких горутин на один `conn` — второй `Read` заменит `rg` первого, и первая горутина потеряет уведомление. Все официальные клиенты (HTTP, etc.) это учитывают.
+</details>
 
----
+## Когда runtime вызывает netpoll
 
-## Когда netpoll() вызывается
+`netpoll(delay)` поддерживает три режима:
 
-`netpoll(delay)` вызывается из нескольких мест в scheduler:
+| `delay` | Поведение |
+| ---: | --- |
+| `0` | Проверить events и сразу вернуть |
+| `> 0` | Block максимум до указанного timeout |
+| `< 0` | Block без timer deadline до внешнего event/break |
 
-```
-1. findRunnable() — каждый раз когда P ищет новую горутину
-   если LRQ, global queue, work steal все пусты → netpoll(0) (non-blocking)
+Runtime вызывает poller из нескольких мест, потому что scheduler бывает в разных состояниях:
 
-2. sysmon — периодически
-   netpoll(delay) с timeout → проверить готовые fd
+1. `findRunnable` делает non-blocking poll, чтобы быстро подобрать готовый network work;
+2. когда runnable work отсутствует, один M может block в poller до I/O или ближайшего timer;
+3. `sysmon` периодически делает non-blocking poll, если scheduler давно не забирает events;
+4. новый earlier timer или runnable work может вызвать `netpollBreak`, чтобы разбудить blocked poller и пересчитать timeout.
 
-3. startTheWorld (после GC STW) — разбудить всех waiting goroutines
+Такой design не требует отдельного permanent «network thread» на каждое connection. В отдельный момент один M может ждать внутри epoll/kqueue/IOCP, но он обслуживает events множества descriptors.
 
-4. Явный вызов runtime.Gosched() → может триггернуть netpoll
-```
+## Deadlines и context cancellation
 
-**Важно**: netpoll не крутится в выделенном потоке. Он вызывается как часть scheduler loop:
-
-```
-findRunnable():
-  1. runnext
-  2. LRQ
-  3. global queue (1 раз в 61 тик)
-  4. netpoll(0)   ← проверить готовые сетевые события
-  5. work steal
-  6. netpoll(-1)  ← если нечего делать — ждать с timeout
-```
-
-### netpoll дёргается постоянно или по событию?
-
-Это **событийная модель, а не периодический опрос**. Как именно вызывается netpoll, зависит от того, есть ли работа.
-
-**Есть работа → быстрый неблокирующий чек `netpoll(0)`.** Пока в очередях есть готовые горутины, M крутит обычный `schedule → findRunnable → run`. netpoll внутри `findRunnable` вызывается **неблокирующе** (`delay = 0`) и **не на каждой итерации**, а оппортунистически — когда есть сетевые waiters (`netpollWaiters > 0`). Это «забежал, забрал готовые fd, побежал дальше»: `epoll_wait` с таймаутом 0 возвращается сразу. Под нагрузкой щупается часто, но это копеечные мгновенные проверки.
-
-**Работы нет → ОДИН M блокируется в `netpoll(delay)`.** Когда M обошёл всё (LRQ/GRQ пусты, красть не у кого) и собирается уснуть (`stopm`), вместо busy-wait он вызывает **блокирующий** netpoll. Делает это **только один** M (guard через CAS `sched.lastpoll → 0`):
-
-```
-delay = время до ближайшего таймера   (или -1, если таймеров нет)
-netpoll(delay):
-   epoll_wait(..., timeout=delay)   ← M СПИТ ЗДЕСЬ, в ядре, CPU не ест
-```
-
-Он спит внутри `epoll_wait`, пока не случится одно из: **готов fd** (вернёт список горутин → `Grunnable`), **истёк `delay`** (вернёт пусто → планировщик идёт запускать подошедшие таймеры), либо его разбудили досрочно через `netpollBreak`. Никакого опроса по кругу — ядро само будит M по событию или таймауту.
-
-**`netpollBreak` — досрочное пробуждение.** Если M залёг в `epoll_wait` с `delay = 2ms`, а в это время добавили таймер на `100µs` или появилась работа, которую надо разобрать сейчас, — рантайм пишет в служебный wake-fd (eventfd/pipe), и это **прерывает `epoll_wait` досрочно**. Так пересчитывается ближайший дедлайн, не дожидаясь старого `delay`.
-
-| Состояние планировщика | Как вызывается netpoll | Частота |
-|---|---|---|
-| Есть работа | `netpoll(0)` неблокирующе в `findRunnable` | оппортунистически, когда есть сетевые waiters (дёшево) |
-| Работы нет | `netpoll(delay)` **блокирующе**, один M спит в `epoll_wait` | не «дёргается» — ядро будит по событию / таймауту / `netpollBreak` |
-| Все P заняты CPU | `netpoll(0)` из sysmon (бэкстоп, см. ниже) | ~раз в 10мс |
-
-### Зачем netpoll вызывают из ДВУХ мест (findRunnable и sysmon)
-
-Это частый источник непонимания. Путь через `findRunnable` работает, **только когда хотя бы один P простаивает** и заходит искать новую горутину. А если **все P заняты** — крутят CPU-bound горутины и не заглядывают за новой работой?
-
-Тогда netpoll из планировщика **никто не вызовет**. В это время по сети пришли данные, fd готовы, горутины, ждавшие `conn.Read`, уже могут продолжить — но **сидят незамеченными**: их некому перевести в `Grunnable`, потому что ни один P не «оглядывается».
-
-Вот для этого и нужен **`sysmon`** — он работает **независимо, без P**, и периодически проверяет, давно ли вызывался netpoll (по таймстампу `sched.lastpoll`). Если давно — вызывает netpoll сам, забирает готовые I/O-горутины и кладёт в очередь.
-
-```
-Все P простаивают  → netpoll зовётся из findRunnable          ✓ (основной путь)
-Все P заняты CPU    → findRunnable никто не зовёт
-                    → netpoll сам по себе не сработал бы
-                    → sysmon периодически зовёт netpoll        ✓ (страховка)
-```
-
-Итог: **`findRunnable` проверяет готовность сетевых fd (вызывает netpoll), когда планировщик и так ищет работу; `sysmon` — страховка на случай, когда все P заняты вычислениями и искать работу некому.** Поэтому сетевые горутины не «висят» даже под полной CPU-нагрузкой.
-
-> Уточнение по словам: netpoll (`epoll_wait`) **не «опрашивает сеть»** — данные OS-ядро уже приняло в socket buffer. netpoll лишь спрашивает у OS-ядра, **какие fd уже помечены готовыми** (проверяет ready-list epoll — те самые «флажки на почтовых ящиках»).
-
----
-
-## Deadlines: SetDeadline через таймеры
-
-`conn.SetDeadline(t)` не делает syscall. Это чисто Go runtime механизм через timer heap:
+`SetDeadline` задаёт absolute deadline для текущих и будущих I/O operations:
 
 ```go
-conn.SetDeadline(time.Now().Add(5 * time.Second))
-// Устанавливает pollDesc.rd = deadline unix nano
-// runtime timer: через 5s вызвать netpollDeadline(pd, 'r')
-// netpollDeadline → pollDesc пометить как expired
-//                → разбудить горутину с ошибкой timeout
-```
-
-**Что происходит при истечении дедлайна:**
-
-```go
-n, err := conn.Read(buf)
-// err = &net.OpError{Err: poll.ErrDeadlineExceeded}
-// errors.Is(err, os.ErrDeadlineExceeded) → true
-```
-
-**SetDeadline vs SetReadDeadline:**
-
-```go
-// SetDeadline — для обоих направлений
-conn.SetDeadline(time.Now().Add(30 * time.Second))
-
-// SetReadDeadline — только для Read
-conn.SetReadDeadline(time.Now().Add(10 * time.Second))
-
-// SetWriteDeadline — только для Write
-conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
-
-// Сбросить дедлайн (без ограничения)
-conn.SetDeadline(time.Time{})
-```
-
-**Паттерн для idle connections (keep-alive servers):**
-
-```go
-func handleConn(conn net.Conn) {
-    defer conn.Close()
-    buf := make([]byte, 4096)
-
-    for {
-        // Сдвигать дедлайн на каждой итерации
-        conn.SetDeadline(time.Now().Add(30 * time.Second))
-
-        n, err := conn.Read(buf)
-        if err != nil {
-            if errors.Is(err, os.ErrDeadlineExceeded) {
-                // Клиент молчал 30s — закрыть
-                return
-            }
-            return
-        }
-        handleRequest(buf[:n])
-    }
+if err := conn.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
+    return err
 }
 ```
 
-### А почему я не вижу `SetDeadline` в реальном коде?
+Runtime связывает deadline с timer. Если fd не становится ready вовремя, timer будит waiting G, и `Read`/`Write` возвращает error, wrapping `os.ErrDeadlineExceeded`.
 
-Потому что в прикладном коде почти никогда не работают с `net.Conn` напрямую — `SetReadDeadline` в цикле это паттерн уровня **библиотек и низкоуровневых серверов**. Таймауты задаются **декларативно**, а перевод в `SetDeadline` + netpoller делает библиотека:
+Deadline — не «таймаут одного следующего Read». Он действует, пока его не изменить или не сбросить zero value. Idle timeout обычно реализуют продлением deadline после успешной активности.
+
+Внутри `pollDesc` read и write deadline имеют отдельные timers и sequence counters. Когда application меняет deadline, sequence позволяет старому timer callback не отменить более новую operation. На каждое connection не создаётся sleeping goroutine: deadlines используют общую runtime timer machinery.
+
+| Причина wakeup | Что видит operation |
+| --- | --- |
+| fd ready | Повторяет read/write и получает bytes/result |
+| deadline timer | Timeout error (`errors.Is(err, os.ErrDeadlineExceeded)`) |
+| `Close` | Closed-network-connection style error |
+| Context-aware higher-level API | Library переводит cancellation в close/deadline/protocol abort |
+
+Сам `context.Context` не является частью `net.Conn`. Higher-level APIs (`DialContext`, `http.NewRequestWithContext`) связывают cancellation с закрытием, deadline или protocol-specific abort. В собственном protocol обычно делают одно из двух:
+
+- при `ctx.Done()` закрывают connection;
+- вычисляют deadline из context и вызывают `SetDeadline`.
+
+<details>
+<summary>Cancellation через Close: connection после этого непригоден</summary>
 
 ```go
-// HTTP-сервер: дедлайны на conn выставляет сам net/http в цикле обслуживания
-srv := &http.Server{
-    ReadTimeout:       5 * time.Second,
-    WriteTimeout:      10 * time.Second,
-    IdleTimeout:       120 * time.Second,
-    ReadHeaderTimeout: 2 * time.Second,
+func readWithCancel(ctx context.Context, conn net.Conn, buf []byte) (int, error) {
+	stop := context.AfterFunc(ctx, func() {
+		_ = conn.Close() // будит blocked Read с error
+	})
+	defer stop()
+
+	n, err := conn.Read(buf)
+	if ctx.Err() != nil {
+		return n, ctx.Err()
+	}
+	return n, err
 }
-
-// HTTP-клиент: транспорт переведёт в дедлайны / закроет fd по ctx
-client := &http.Client{Timeout: 3 * time.Second}
-
-// БД / gRPC: таймаут через context, драйвер сам рулит дедлайном и отменой
-ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
-defer cancel()
-rows, err := pool.Query(ctx, "SELECT ...")
 ```
 
-| Уровень | Чем задаёшь таймаут | Кто зовёт `SetDeadline` |
-|---|---|---|
-| Прикладной (99% кода) | `http.Server{ReadTimeout}`, `http.Client{Timeout}`, `context.WithTimeout` | библиотека (`net/http`, драйвер БД) |
-| Низкоуровневый | `conn.SetReadDeadline(...)` руками | приложение |
+Этот pattern означает ownership: cancellation уничтожает connection. Он подходит для одноразового соединения, но не для shared/pool connection. В HTTP, gRPC и database drivers предпочтительнее использовать context-aware API самой библиотеки.
 
-Руками `SetReadDeadline` пишут авторы сырых TCP-серверов/клиентов, connection pool'ов, клиентов Redis/Kafka/gRPC и сам stdlib (`net/http` `server.go`, функция `conn.serve` — там этот цикл прямо есть). Подвох с «залипающим timed-out» актуален ровно для них (переиспользование conn после таймаута); в прикладном коде после ошибки обычно просто `return` + `defer conn.Close()`.
+</details>
 
-**Вывод:** этим механизмом пользуются постоянно — через `http.Server{ReadTimeout}` и `context.WithTimeout`, — просто `SetDeadline` под капотом звала библиотека, а не прикладной код.
-
----
-
-## Что происходит с состоянием netpoller при отмене
-
-Важно понять: **сам netpoller про `context` ничего не знает.** Припаркованная горутина не «слушает» `ctx.Done()` — она просто лежит в `pollDesc` и ждёт, пока её кто-то активно разбудит. Пока горутина спит на `conn.Read`, её указатель сохранён в `pollDesc.rg` (чтение) или `pollDesc.wg` (запись), статус — `Gwaiting`, M свободен.
-
-Разбудить её и «вычистить» это состояние могут только два механизма — и они дают **разный** результат. Разберём оба.
-
-### Кейс 1: истёк дедлайн (`SetDeadline` / таймаут)
-
-Состояние **не теряется и соединение остаётся живым** — просто текущий `Read`/`Write` прерывается ошибкой.
-
-```
-SetReadDeadline(t)  →  pollDesc.rd = t,  заведён runtime-таймер
-   ↓ таймер сработал
-netpollDeadline(pd, 'r')  →  netpollunblock(pd, 'r'):
-   • достать G из pd.rg
-   • обнулить pd.rg (sentinel)
-   • вернуть G → Grunnable
-   ↓
-Read возвращает os.ErrDeadlineExceeded   (errors.Is(err, os.ErrDeadlineExceeded) == true)
-   ↓
-fd ОСТАЁТСЯ открытым и в epoll; pollDesc живёт
-   → можно сбросить/обновить дедлайн (SetReadDeadline(...)) и читать дальше по тому же conn
-```
-
-Что с состоянием netpoller: из `pollDesc` вынули только горутину; **сам fd из epoll не убирается, pollDesc не освобождается**. Соединение пригодно для дальнейших операций — это и есть основа keep-alive-паттерна (сдвигать дедлайн на каждой итерации).
-
-### Кейс 2: отменён `context` (закрытие fd)
-
-`net.Conn.Read` **не принимает `context`** напрямую. Обёртки, завязанные на ctx (например, http-транспорт), на `ctx.Done()` запускают сторожевую горутину, которая зовёт `conn.Close()`. Здесь состояние **уничтожается** — соединение становится непригодным.
-
-```
-ctx отменён  →  сторожевая горутина вызывает conn.Close()
-   ↓
-netpollclose(fd):
-   • epoll_ctl(epfd, DEL, fd)         — fd УБИРАЕТСЯ из epoll
-   • pollDesc помечается closing
-   • netpollunblock будит ВСЕ горутины на pd (и rg, и wg) с ошибкой
-   ↓
-Read/Write возвращает net.ErrClosed ("use of closed network connection")
-   ↓
-fd закрыт; pollDesc → возвращается в пул (pollcache)
-   → conn больше использовать нельзя
-```
-
-Что с состоянием netpoller: fd снят с epoll, `pollDesc` помечен closing и уходит в `pollcache` для переиспользования, **все** припаркованные на этом fd горутины (и читатель, и писатель) будятся с `ErrClosed`.
-
-> `(*net.Dialer).DialContext` — гибрид: пока соединение ещё устанавливается, на `ctx.Done()` он прерывает попытку (через дедлайн/закрытие сокета в процессе `connect`).
-
-### Сводка
-
-| | Дедлайн (`SetDeadline`) | Отмена ctx (через `Close`) |
-|---|---|---|
-| Что будит горутину | runtime-таймер → `netpollDeadline` | сторожевая горутина → `conn.Close()` |
-| Кого будит | только текущее направление (`rg` **или** `wg`) | **все** горутины на fd (`rg` **и** `wg`) |
-| fd в epoll | **остаётся** | **снимается** (`epoll_ctl DEL`) |
-| pollDesc | живёт | closing → в `pollcache` |
-| Ошибка из Read | `os.ErrDeadlineExceeded` | `net.ErrClosed` |
-| conn после | **пригоден** (сбросить дедлайн и дальше) | **мёртв** |
-
-### Почему это вообще работает (в отличие от файлов)
-
-Оба моста — таймер и `Close` — будят горутину **из user-space**, потому что она сидит не в ядре, а **в netpoller**. Это ровно причина, по которой отмена `ctx` работает для сети, но **не** для блокирующего файлового/cgo I/O (см. [02-syscall](./02-syscall.md)): M, застрявший в блокирующем `read()` по обычному файлу, сидит **в OS-ядре**, и ни таймер, ни `Close` его оттуда не достанут — отмена `ctx` лишь перестанет ждать результат, но поток останется заблокированным.
-
----
-
-## DNS resolver: Go vs platform
-
-DNS — частая неочевидная точка, где Go может использовать либо netpoller, либо blocking syscalls.
+<details>
+<summary>Idle deadline в простом framed protocol</summary>
 
 ```go
-// По умолчанию Go выбирает сам (зависит от платформы и конфигурации):
-addr, err := net.LookupHost("example.com")
+func serveConn(conn net.Conn) error {
+	defer conn.Close()
+
+	for {
+		if err := conn.SetReadDeadline(time.Now().Add(30 * time.Second)); err != nil {
+			return err
+		}
+
+		request, err := readFrame(conn)
+		if err != nil {
+			if errors.Is(err, os.ErrDeadlineExceeded) {
+				return nil // idle client
+			}
+			return err
+		}
+
+		response := handle(request)
+		if err := conn.SetWriteDeadline(time.Now().Add(5 * time.Second)); err != nil {
+			return err
+		}
+		if err := writeFrame(conn, response); err != nil {
+			return err
+		}
+	}
+}
 ```
 
-**Pure Go resolver** (default на Linux при CGO_ENABLED=0):
-- Читает `/etc/resolv.conf`, `/etc/hosts`
-- Открывает UDP сокет, ставит в O_NONBLOCK
-- DNS запрос через netpoller → горутина паркуется, M свободен
-- Хорошо масштабируется
+Read deadline продлевается после каждого успешно полученного frame, поэтому это idle timeout. Write deadline защищает handler от peer, который перестал читать response.
 
-**CGo resolver** (default на Linux при CGO_ENABLED=1, всегда на macOS):
-- Вызывает `getaddrinfo()` из libc через CGo
-- Blocking CGo call → M заблокирован на время DNS запроса
-- При 1000 concurrent DNS lookup → 1000 OS threads
+</details>
+
+## Какие операции используют netpoller
+
+Обычно интегрируются:
+
+- TCP/UDP sockets;
+- Unix domain sockets;
+- listeners;
+- pipes и другие pollable descriptors, если platform/runtime может настроить их non-blocking.
+
+Regular files обычно не получают полезной readiness-модели и могут блокировать M. Детали — в [syscall](./02-syscall.md).
+
+Kafka, Redis, PostgreSQL и RabbitMQ clients поверх TCP косвенно используют тот же network path, если driver не уходит в cgo/native blocking API. Но batching, protocol parsing и connection pools находятся уже в client library, не в netpoller.
+
+## DNS resolver
+
+На Unix package `net` может использовать:
+
+- pure Go resolver — DNS через Go networking, ожидание обычно паркует G;
+- cgo resolver — вызов system resolver, blocked lookup занимает OS thread.
+
+Go обычно предпочитает pure Go resolver, но platform configuration и функции NSS могут потребовать cgo path. Диагностика:
 
 ```bash
-# Принудить Go resolver
-export GODEBUG=netdns=go
-
-# Принудить CGo resolver  
-export GODEBUG=netdns=cgo
-
-# Посмотреть какой используется
-export GODEBUG=netdns=go+1  # +1 добавляет логирование
+GODEBUG=netdns=1 ./service
+GODEBUG=netdns=go+1 ./service
+GODEBUG=netdns=cgo+1 ./service
 ```
 
-**Для production**: если много concurrent DNS запросов — использовать `GODEBUG=netdns=go` или DNS caching прокси (CoreDNS с caching).
+Не форсируйте resolver без причины: system resolver может быть нужен для corporate NSS/mDNS behavior.
 
----
+## Backpressure и server timeouts
 
-## Типичные паттерны и ошибки
+Netpoller решает проблему blocked threads, но не защищает application от unbounded work.
 
-### Правильный timeout на каждый запрос
+Один connection может породить много requests, а один request — expensive handler. Нужны:
+
+- connection/request limits;
+- bounded queues и worker concurrency;
+- request body limits;
+- deadlines;
+- cancellation propagation;
+- ограничение per-connection buffering.
+
+Минимальная защита HTTP server:
 
 ```go
-// Плохо: нет timeout → горутина висит вечно при зависшем клиенте
-func handle(conn net.Conn) {
-    buf := make([]byte, 4096)
-    conn.Read(buf)  // висим если клиент не пишет
-}
-
-// Хорошо: дедлайн на операцию
-func handle(conn net.Conn) {
-    conn.SetReadDeadline(time.Now().Add(10 * time.Second))
-    buf := make([]byte, 4096)
-    n, err := conn.Read(buf)
-    if errors.Is(err, os.ErrDeadlineExceeded) {
-        // клиент молчал 10s → закрыть
-    }
+srv := &http.Server{
+    Addr:              ":8080",
+    ReadHeaderTimeout: 5 * time.Second,
+    IdleTimeout:       60 * time.Second,
+    WriteTimeout:      30 * time.Second,
 }
 ```
 
-### Concurrent Read/Write на одном conn
+Конкретные timeouts зависят от streaming, uploads и reverse proxy. Нельзя копировать значения без понимания request lifecycle.
+
+<details>
+<summary>Ограничение одновременно обслуживаемых raw connections</summary>
 
 ```go
-// Можно: Read и Write из разных горутин (pollDesc.rg и wg независимы)
-go func() { conn.Read(buf) }()
-go func() { conn.Write(data) }()
+func serve(listener net.Listener, maxHandlers int) error {
+	if maxHandlers <= 0 {
+		return fmt.Errorf("maxHandlers must be positive")
+	}
+	slots := make(chan struct{}, maxHandlers)
 
-// Нельзя: concurrent Read из двух горутин
-go func() { conn.Read(buf1) }()  // записывает pollDesc.rg
-go func() { conn.Read(buf2) }()  // перезапишет pollDesc.rg → первый теряет уведомление
-```
+	for {
+		conn, err := listener.Accept()
+		if err != nil {
+			return err
+		}
 
-### Накопление горутин при отсутствии дедлайнов
-
-```go
-// При 10k соединений без дедлайна — 10k горутин в Gwaiting
-// Они занимают память (~2KB минимум каждая) но не CPU
-// Проверить: runtime.NumGoroutine() в метриках
-// Смотреть: /debug/pprof/goroutine?debug=2
-```
-
-### http.Server и автоматические дедлайны
-
-```go
-server := &http.Server{
-    Addr:         ":8080",
-    Handler:      mux,
-    ReadTimeout:  5 * time.Second,   // time to read request headers + body
-    WriteTimeout: 10 * time.Second,  // time to write response
-    IdleTimeout:  120 * time.Second, // keep-alive idle time
+		select {
+		case slots <- struct{}{}:
+			go func() {
+				defer func() { <-slots }()
+				_ = serveConn(conn)
+			}()
+		default:
+			_ = conn.Close() // overload policy: reject immediately
+		}
+	}
 }
-// http.Server устанавливает conn.SetDeadline автоматически
-// Без этих значений — потенциальные goroutine leaks при slow clients
 ```
 
----
+Это демонстрация backpressure, а не универсальная overload policy. Production server может ограничивать connections на load balancer, ждать bounded время, возвращать protocol error или применять per-tenant limits.
+
+</details>
 
 ## Диагностика
 
+Goroutine dump для network wait обычно содержит:
+
+```text
+goroutine 42 [IO wait]:
+internal/poll.runtime_pollWait(...)
+internal/poll.(*FD).Read(...)
+net.(*netFD).Read(...)
+```
+
+Полезные инструменты:
+
+- goroutine profile/dump — количество и stacks `[IO wait]`;
+- `go tool trace` — network blocking и wakeups;
+- `runtime/metrics` — goroutine count;
+- socket metrics (`ss`, platform tools) — states и queue sizes;
+- application metrics — active connections, request latency, timeouts, pool wait.
+
+<details>
+<summary>Команды для совместной диагностики goroutines и sockets</summary>
+
 ```bash
-# Goroutine dump — посмотреть где горутины заблокированы
-curl http://localhost:6060/debug/pprof/goroutine?debug=2 | head -100
+curl -s http://127.0.0.1:6060/debug/pprof/goroutine?debug=2 \
+  > goroutines.txt
 
-# Типичный вид заблокированной в netpoller горутины:
-# goroutine 42 [IO wait]:
-# internal/poll.runtime_pollWait(0xc000134000, 0x72)
-#     /usr/local/go/src/runtime/netpoll.go:351 +0x85
-# internal/poll.(*pollDesc).waitRead(...)
-# net.(*conn).Read(0xc000124120, ...)
+go tool pprof -http=:0 \
+  http://127.0.0.1:6060/debug/pprof/goroutine
 
-# Количество горутин в метриках
-runtime.NumGoroutine()  // общее число
-// Экспортировать в Prometheus:
-// go_goroutines gauge
-
-# netstat для диагностики соединений
-ss -s           # сводка по TCP состояниям
-ss -tn | wc -l  # количество TCP соединений
-ss -tn state ESTABLISHED | wc -l
-
-# TIME_WAIT — нормально при большом трафике
-ss -tn state TIME-WAIT | wc -l
-
-# CLOSE_WAIT — всегда баг (приложение не закрыло соединение)
-ss -tn state CLOSE-WAIT | wc -l
+ss -s
+ss -tn state established
+ss -tn state close-wait
 ```
 
-```go
-// Кастомный net.Listener для метрик
-type instrumentedListener struct {
-    net.Listener
-    accepts prometheus.Counter
-    active  prometheus.Gauge
-}
+Много `[IO wait]` может быть нормой для mostly-idle connections. Ищите динамику: растут ли одновременно goroutines, open fd, `CLOSE_WAIT`, memory и request latency.
 
-func (l *instrumentedListener) Accept() (net.Conn, error) {
-    conn, err := l.Listener.Accept()
-    if err == nil {
-        l.accepts.Inc()
-        l.active.Inc()
-    }
-    return &instrumentedConn{conn, l.active}, err
-}
-```
+</details>
 
----
+`CLOSE_WAIT` означает, что peer закрыл свою сторону, а local application ещё не закрыл socket. Короткое присутствие нормально; устойчивое накопление часто указывает на leak/lifecycle bug.
+
+## Типичные ошибки
+
+- считать один `Read` одним message;
+- не задавать deadlines для внешних peers;
+- создавать unbounded goroutine per message без backpressure;
+- удерживать большие buffers на каждое idle connection;
+- полагать, что context сам отменит raw `net.Conn.Read`;
+- забывать `Close` connection/body;
+- считать «много goroutines в IO wait» проблемой без проверки memory и latency;
+- путать netpoll readiness с async completion application operation.
 
 ## Interview-ready answer
 
-На собесах про netpoller спрашивают **концептуально**, а не про внутренние поля рантайма. Вот реальные вопросы и короткие ответы; глубину (`pollDesc`, `netpollBreak`, CAS `sched.lastpoll`) держи «в запасе» на случай, если копнут.
+**1. Почему 100k connections не требуют 100k blocked threads?**
 
-**1. «Как Go держит 100k TCP-соединений без 100k потоков?»**
+- Sockets non-blocking. Если fd не ready, runtime park только G и регистрирует wait в OS poller. M продолжает другую goroutine. Когда readiness приходит, G снова становится runnable.
 
-- Через **netpoller** — обёртку над `epoll` (Linux) / `kqueue` (macOS) / IOCP (Windows). Сетевые сокеты неблокирующие (`O_NONBLOCK`) и зарегистрированы в epoll. Горутина, ждущая I/O, **паркуется** (`Gwaiting`) и стоит только ~2 KB стека — не занимает ни поток, ни CPU. Поэтому 100k соединений живут на горстке потоков (≈ `GOMAXPROCS`).
+**2. Где находятся bytes, пока G спит?**
 
-**2. «Что происходит, когда горутина вызывает `conn.Read`, а данных нет?»**
+- В kernel socket buffer. Netpoller хранит readiness/wait state, а не application payload. Проснувшаяся G повторяет read и копирует bytes в user buffer.
 
-- `read()` возвращает `EAGAIN` → горутина паркуется, её fd уже в epoll, а M (поток) освобождается и берёт другую работу. Когда данные пришли, OS-ядро помечает fd готовым, `netpoll` это видит и переводит горутину в `Grunnable` — она досчитывает `Read`.
+**3. Что связывает fd с waiting goroutine?**
 
-**3. «Чем сетевой I/O отличается от файлового / блокирующего syscall?»** (любимый сравнительный вопрос)
-Сеть идёт через netpoller — M **не блокируется**. А чтение **обычного файла**, `exec`, cgo — это блокирующий syscall: M реально висит в OS-ядре, P через handoff уходит другому M, и под нагрузкой Go поднимает новые потоки (риск thread exhaustion). Отсюда же следствие: `context` отменяет сетевую операцию, но **не** вытащит M из блокирующего файлового `read()`.
+- Runtime `pollDesc` хранит lifecycle descriptor, отдельные reader/writer wait states и deadlines. OS event находит `pollDesc`, извлекает нужную G и передаёт её scheduler как runnable.
 
-**4. «netpoller — это отдельный поток-поллер?»**
+**4. Когда вызывается netpoll?**
 
-- Нет. `netpoll` вызывается **из планировщика**: неблокирующе в `findRunnable`, когда P ищет работу, а когда работы нет — один M блокируется в `epoll_wait` (спит в ядре, не busy-wait). Плюс `sysmon` периодически опрашивает как страховку, когда все P заняты CPU.
+- Scheduler делает non-blocking checks при поиске work, может block в poller при отсутствии runnable G, а sysmon периодически подбирает events, если poll давно не выполняется. Timer/work может разбудить blocked poll через `netpollBreak`.
 
-**5. «Как работают таймауты на соединении?»**
+**5. Чем readiness отличается от message completion?**
 
-- `SetDeadline` — это runtime timer heap, **без syscall**. По истечении таймера горутину будят с `os.ErrDeadlineExceeded` (fd при этом остаётся живым). В прикладном коде это задаётся не руками, а через `http.Server{ReadTimeout/WriteTimeout/IdleTimeout}`, `http.Client{Timeout}` или `context.WithTimeout` — `SetDeadline` зовёт библиотека.
+- Readiness говорит, что fd можно попробовать читать. TCP не хранит application boundaries: один read может вернуть partial или multiple messages. Framing реализует protocol/parser.
 
-**6. «Дорого ли goroutine-per-connection?»**
+**6. Как работает SetDeadline?**
 
-- Дёшево, и это идиоматично: запаркованная горутина = ~2 KB памяти, без потока и CPU. Именно поэтому в Go нормально писать `go handleConn(conn)` на каждое соединение, а `net/http` так и делает сам.
+- Runtime добавляет deadline timer к poll descriptor. I/O readiness, close или timer могут разбудить G. При expiry operation возвращает timeout error; отдельный OS thread на deadline не создаётся.
 
-**Важная деталь:** только сетевой I/O идёт через netpoller. Файловый I/O на Linux — blocking syscall, M блокируется, P отдаётся через scheduler handoff механизм.
+**7. Чем connection отличается от request?**
+
+- Connection — один socket/fd, который часто живёт долго. Через него могут идти многие sequential requests или multiplexed streams, поэтому connection count не равен request concurrency.
+
+**8. Использует ли database client netpoller?**
+
+- Если driver написан на Go и общается через pollable TCP socket — обычно да, через package `net`. Если он уходит в cgo/native blocking library, ожидание может занимать M.
+
+**9. Решает ли netpoller проблему overload?**
+
+- Нет. Он экономит threads во время I/O wait, но connections, buffers, goroutines и handlers всё равно потребляют resources. Нужны deadlines, limits, bounded queues и backpressure.
+
+## Официальные источники
+
+- [net package](https://pkg.go.dev/net)
+- [internal/poll source](https://go.dev/src/internal/poll/)
+- [runtime netpoll source](https://go.dev/src/runtime/netpoll.go)
+- [Linux epoll](https://man7.org/linux/man-pages/man7/epoll.7.html)
+- [net/http Server](https://pkg.go.dev/net/http#Server)

@@ -1,46 +1,71 @@
 # Runtime Scheduler
 
-Как Go runtime исполняет горутины поверх OS-потоков: планировщик, системные вызовы, сетевой I/O и таймеры. Темы тесно связаны — scheduler решает, кто исполняется, а syscall, netpoller и таймеры объясняют, что происходит, когда горутина блокируется или спит. Читать по порядку.
+Раздел объясняет, как Go runtime исполняет множество goroutines поверх меньшего числа OS threads и что происходит, когда goroutine ждёт syscall, network I/O или timer.
+
+Описание ориентировано на Go 1.25. Детали `runtime` — implementation details, а не часть language specification: названия функций, очереди и эвристики могут меняться между версиями.
 
 ## Материалы
 
-- [01. Scheduler And Preemption](./01-scheduler-and-preemption.md) — GMP модель (G/M/P), local/global run queues, work stealing, кооперативная и async preemption (SIGURG), sysmon, жизненный цикл M, GOMAXPROCS в контейнерах
-- [02. Syscall](./02-syscall.md) — entersyscall/exitsyscall, P handoff, sysmon retake, fast/slow path, Syscall vs RawSyscall, цена CGo, LockOSThread, thread exhaustion
-- [03. Netpoller](./03-netpoller.md) — epoll/kqueue/IOCP, pollDesc, parking/wakeup горутин, SetDeadline через timer heap, DNS resolver (Go vs CGo), диагностика соединений
-- [04. Timers](./04-timers.md) — time.Sleep/Timer/Ticker, per-P timer heap, почему не syscall и что с M, runtime.timer, утечки тикеров, история timerproc до 1.14
-- 🧪 [examples/schedtrace](./examples/schedtrace/) — запускаемое демо: наблюдать планировщик через `GODEBUG=schedtrace=1000` (work stealing, GRQ, async preemption, GOMAXPROCS=1)
+1. [Scheduler и preemption](./01-scheduler-and-preemption.md) — mental model G/M/P, run queues, work stealing, preemption, `sysmon`, `GOMAXPROCS`.
+2. [Syscall](./02-syscall.md) — почему blocking syscall удерживает OS thread, как runtime передаёт P и откуда берётся thread exhaustion.
+3. [Netpoller](./03-netpoller.md) — как network I/O паркует goroutine без отдельного blocked thread на каждое соединение.
+4. [Timers](./04-timers.md) — почему `time.Sleep` не блокирует M, где хранятся timers и что изменилось в Go 1.23.
+5. 🧪 [schedtrace demo](./examples/schedtrace/) — наблюдаем `GOMAXPROCS`, run queues, waiting goroutines и async preemption.
 
-## Связи между файлами
+## Одна схема на весь раздел
 
+```mermaid
+flowchart LR
+    G1["G: runnable"] --> P["P: local run queue"]
+    P --> M["M: OS thread"]
+    M --> CPU["executes Go code"]
+
+    CPU -->|blocking syscall| SYS["M waits in kernel"]
+    SYS -->|return| G1
+
+    CPU -->|network not ready| NP["netpoller parks G"]
+    NP -->|fd ready / deadline / close| G1
+
+    CPU -->|time.Sleep / Timer| T["runtime timer parks G"]
+    T -->|deadline reached| G1
 ```
-01 Scheduler  → как горутины распределяются по потокам (G/M/P, work stealing, preemption)
-02 Syscall    → что происходит с P, когда горутина блокируется в OS-ядре (handoff)
-03 Netpoller  → почему сетевой I/O НЕ блокирует M (epoll + parking)
-04 Timers     → почему time.Sleep не syscall и не держит поток (per-P heap + netpoll deadline)
-```
 
-Ключевая связка: при **файловом/блокирующем** syscall M блокируется в OS-ядре, а P через handoff отдаётся другому M (файл 02). При **сетевом** I/O горутина паркуется в netpoller, и M вообще не блокируется (файл 03). **Таймеры** (файл 04) используют тот же netpoll: ожидание ближайшего дедлайна — это таймаут одного `epoll_wait`, общий с сетевыми событиями.
+Ключевая разница:
 
-## Вопросы senior-уровня
+| Ожидание | Что ждёт | Что происходит с P |
+| --- | --- | --- |
+| regular blocking syscall / cgo | OS thread M | P может перейти к другому M |
+| network I/O через netpoller | только goroutine G | M и P исполняют другую работу |
+| timer / `time.Sleep` | goroutine G | M и P исполняют другую работу |
 
-- объясни GMP модель: зачем нужен P, чем он отличается от M
-- что такое work stealing и почему крадут с хвоста чужой очереди
-- как работает async preemption и какую проблему она решила в Go 1.14
-- что происходит с P, когда горутина уходит в blocking syscall
-- чем file I/O отличается от network I/O с точки зрения scheduler
-- почему 100k соединений не требуют 100k OS threads
-- как GOMAXPROCS влияет на CPU throttling в контейнерах и зачем automaxprocs
-- почему CGo-вызов дороже обычного syscall
-- когда нужен LockOSThread и чем он опасен
-- как SetDeadline реализован без дополнительных syscall
-- `time.Sleep` — это syscall? что происходит с потоком и куда девается горутина
-- есть ли отдельная горутина для таймеров и где они хранятся
-- почему `time.Tick`/`time.After` могут привести к утечке
+## Что нужно уметь объяснить на интервью
 
-## Подборка
+- зачем в модели нужен P, если код физически исполняет M;
+- почему `GOMAXPROCS` ограничивает parallel Go execution, но не число threads;
+- как local queues и work stealing уменьшают contention;
+- почему долгий blocking syscall может увеличить число M;
+- почему тысячи network connections не требуют тысячи blocked threads;
+- чем readiness notification отличается от готового application message;
+- почему `time.Sleep` паркует G, а не M;
+- как preemption не даёт CPU-bound goroutine монополизировать P;
+- как `schedtrace`, goroutine dump и execution trace помогают диагностике.
 
-- [Go scheduler: implementing language with lightweight concurrency](https://www.youtube.com/watch?v=-K11rY57K7k) — Dmitry Vyukov
-- [Scheduling In Go (3 части)](https://www.ardanlabs.com/blog/2018/08/scheduling-in-go-part1-os-scheduler.html) — Ardan Labs
-- [runtime/proc.go (source)](https://github.com/golang/go/blob/master/src/runtime/proc.go)
-- [runtime/netpoll.go (source)](https://github.com/golang/go/blob/master/src/runtime/netpoll.go)
-- [The Go netpoller](https://morsmachine.dk/netpoller)
+## Практические эксперименты
+
+| Что проверить | Где |
+| --- | --- |
+| concurrency без FIFO и async preemption | [scheduler examples](./01-scheduler-and-preemption.md#run-queues-и-work-stealing) |
+| bounded file I/O и рост OS threads | [syscall examples](./02-syscall.md#почему-context-не-всегда-отменяет-syscall) |
+| TCP framing, deadlines и backpressure | [netpoller examples](./03-netpoller.md#readiness-не-равно-сообщению) |
+| Reset, debounce и dropped ticker events | [timer examples](./04-timers.md#что-изменилось-в-go-123) |
+| live scheduler queues и execution trace | [schedtrace playground](./examples/schedtrace/) |
+
+Расширенные листинги спрятаны под `<details>`, чтобы теория читалась последовательно, а experiments оставались рядом с объясняемым механизмом.
+
+## Официальные источники
+
+- [runtime package](https://pkg.go.dev/runtime)
+- [runtime scheduler source](https://go.dev/src/runtime/proc.go)
+- [runtime netpoll source](https://go.dev/src/runtime/netpoll.go)
+- [runtime timers source](https://go.dev/src/runtime/time.go)
+- [Go 1.25: container-aware GOMAXPROCS](https://go.dev/doc/go1.25#container-aware-gomaxprocs)
