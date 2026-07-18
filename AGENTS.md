@@ -20,6 +20,8 @@ docs/senior-golang-study
 
 ## Язык и стиль
 
+Перед созданием, расширением или рефакторингом материалов в `docs/senior-golang-study` обязательно полностью прочитать и соблюдать [STYLE_GUIDE.md](./docs/senior-golang-study/STYLE_GUIDE.md). В нём зафиксированы требования к глубине объяснения, сохранению примеров, терминологии, структуре и `Interview-ready answer`.
+
 - Основной язык документации: русский.
 - Английские термины можно оставлять на английском, если так их обычно используют в индустрии: `load balancer`, `gateway`, `trace`, `outbox`, `connection pool`.
 - Объяснять сложные термины так, чтобы было понятно не только infrastructure/database specialist, но и backend-разработчику.
