@@ -1,145 +1,258 @@
-# Node Failure, Rollout And Config Delivery
+# Node failure, rollout и доставка конфигурации
+
+Высокая доступность в Kubernetes складывается из нескольких независимых механизмов: обнаружения отказа Node, размещения реплик по failure domains, корректного rollout и согласованной доставки конфигурации. Ни один флаг не обеспечивает её в одиночку.
 
 ## Содержание
 
-- [Что такое Node](#что-такое-node)
-- [Что происходит при падении ноды](#что-происходит-при-падении-ноды)
-- [Почему несколько реплик и разные ноды](#почему-несколько-реплик-и-разные-ноды)
-- [Rolling update стратегия](#rolling-update-стратегия)
-- [Probes и их роль в rollout](#probes-и-их-роль-в-rollout)
-- [Config delivery](#config-delivery)
+- [Node и control plane](#node-и-control-plane)
+- [Что происходит при отказе Node](#что-происходит-при-отказе-node)
+- [Размещение по failure domains](#размещение-по-failure-domains)
+- [Что нужно для безопасного rollout](#что-нужно-для-безопасного-rollout)
+- [PodDisruptionBudget](#poddisruptionbudget)
+- [Доставка конфигурации](#доставка-конфигурации)
+- [Практический CI/CD flow](#практический-cicd-flow)
 - [Interview-ready answer](#interview-ready-answer)
 
-## Что такое Node
+## Node и control plane
 
-`Node` — машина (VM, физический сервер, cloud instance), на которой реально запускаются Pod'ы.
+`Node` — VM или физическая машина, на которой запускаются Pod. Основные роли:
 
-Компоненты на каждой ноде:
-- `kubelet` — агент, который запускает и следит за Pod'ами по указанию control plane;
-- container runtime (containerd, CRI-O);
-- `kube-proxy` или CNI-плагин для сетевого слоя.
+- `kubelet` приводит containers Pod в состояние, описанное API;
+- container runtime, например containerd или CRI-O, запускает containers;
+- CNI/dataplane реализует Pod networking;
+- kube-proxy или альтернативный dataplane реализует Service routing, если выбранная архитектура его использует.
 
-Control plane (kube-apiserver, etcd, scheduler, controller-manager) обычно живет отдельно от worker nodes.
+Control plane хранит API state, запускает scheduler и controllers. В managed Kubernetes control plane обычно отделён от worker Node, но это deployment choice, а не свойство API.
 
-## Что происходит при падении ноды
+## Что происходит при отказе Node
+
+Отказ не определяется мгновенно:
 
 ```mermaid
 sequenceDiagram
-    participant Node
-    participant CP as Control Plane
-    participant Other as Другая нода
+    participant N as Node / kubelet
+    participant CP as Control plane
+    participant RS as Workload controller
+    participant S as Scheduler
+    participant N2 as Healthy Node
 
-    Node->>CP: kubelet перестает слать heartbeat
-    CP->>CP: нода переходит в NotReady (~40s по умолчанию)
-    CP->>CP: Pod'ы на ноде помечаются Terminating
-    CP->>Other: Deployment controller пересоздает Pod'ы
-    Other->>CP: новые Pod'ы проходят readiness probe
-    CP->>CP: Service начинает слать трафик в новые Pod'ы
+    N--xCP: heartbeats / leases прекращаются
+    CP->>CP: Node condition становится Unknown/NotReady
+    CP->>CP: taint unreachable или not-ready
+    CP->>CP: после toleration Pod eligible для eviction
+    RS->>RS: наблюдаемое число реплик уменьшилось
+    RS->>S: создать replacement Pod
+    S->>N2: назначить новый Pod
 ```
 
-Важные тайминги по умолчанию:
-- нода считается `NotReady` через ~40 секунд без heartbeat;
-- Pod'ы эвакуируются через `node-monitor-grace-period` + `pod-eviction-timeout` — суммарно до ~5–6 минут в стандартной конфигурации.
+Точные задержки зависят от версии и конфигурации control plane. Kubernetes обычно автоматически добавляет Pod tolerations для `not-ready` и `unreachable` на 300 секунд; отсчёт начинается после обнаружения проблемы Node. Уменьшение toleration ускоряет replacement, но повышает риск лишних evictions при кратком network partition.
 
-Это время можно сократить через tolerations и настройку controller manager, но для большинства сервисов важнее иметь несколько реплик.
+При partition старая Node может продолжать исполнять процесс, хотя control plane уже создаёт replacement. Для stateful workload это риск двух активных владельцев, поэтому нужны fencing, lease/leader election и storage semantics, а не только Deployment replicas.
 
-## Почему несколько реплик и разные ноды
+PDB не предотвращает involuntary disruption из-за физического отказа Node.
 
-Одна реплика — single point of failure:
-- Pod упал → downtime до пересоздания (~секунды, но трафик теряется);
-- нода упала → downtime до эвакуации (~5 минут).
+<details>
+<summary>Пример сокращённой toleration для stateless API</summary>
 
-Две реплики на разных нодах:
-- Pod упал → Service немедленно переключает трафик на вторую реплику;
-- нода упала → Service переключает трафик, новый Pod поднимается в фоне.
+```yaml
+spec:
+  tolerations:
+    - key: node.kubernetes.io/not-ready
+      operator: Exists
+      effect: NoExecute
+      tolerationSeconds: 30
+    - key: node.kubernetes.io/unreachable
+      operator: Exists
+      effect: NoExecute
+      tolerationSeconds: 30
+```
 
-Чтобы реплики гарантированно оказались на разных нодах:
+Это не универсальная production-рекомендация. Перед изменением проверяют частоту transient network failures, время startup replacement Pod и поведение external load balancer.
+
+</details>
+
+## Размещение по failure domains
+
+Несколько replicas помогают только тогда, когда они не зависят от одного failure domain: Node, zone, rack или power domain.
+
+Для мягкого распределения удобно использовать topology spread constraints:
+
+```yaml
+spec:
+  topologySpreadConstraints:
+    - maxSkew: 1
+      topologyKey: kubernetes.io/hostname
+      whenUnsatisfiable: ScheduleAnyway
+      labelSelector:
+        matchLabels:
+          app: api
+    - maxSkew: 1
+      topologyKey: topology.kubernetes.io/zone
+      whenUnsatisfiable: ScheduleAnyway
+      labelSelector:
+        matchLabels:
+          app: api
+```
+
+`ScheduleAnyway` предпочитает равномерность, но разрешает запуск при недостатке domains. `DoNotSchedule` даёт более строгую гарантию размещения ценой риска оставить Pod в `Pending` во время деградации.
+
+<details>
+<summary>Альтернатива: required podAntiAffinity</summary>
 
 ```yaml
 spec:
   affinity:
     podAntiAffinity:
       requiredDuringSchedulingIgnoredDuringExecution:
-        - labelSelector:
+        - topologyKey: kubernetes.io/hostname
+          labelSelector:
             matchLabels:
-              app: api-server
-          topologyKey: kubernetes.io/hostname
+              app: api
 ```
 
-Без `podAntiAffinity` scheduler может разместить все реплики на одной ноде — тогда её падение положит весь сервис.
+Эта конфигурация запрещает две выбранные replicas на одной Node. Если подходящих Node меньше, новый Pod не запустится. Для большой группы Pod topology spread обычно выражает цель точнее, чем попарная anti-affinity.
 
-## Rolling update стратегия
+</details>
+
+## Что нужно для безопасного rollout
+
+Стратегия определяет только темп замены:
 
 ```yaml
 strategy:
   type: RollingUpdate
   rollingUpdate:
-    maxSurge: 1        # временно разрешить replicas+1 Pod'ов
-    maxUnavailable: 0  # нельзя иметь меньше replicas Pod'ов
+    maxSurge: 1
+    maxUnavailable: 0
+minReadySeconds: 10
+progressDeadlineSeconds: 600
 ```
 
-`maxUnavailable: 0` + `maxSurge: 1` — самая безопасная стратегия:
-- сначала поднимается новый Pod;
-- проходит readiness probe;
-- только после этого убивается старый.
+| Условие | Почему важно |
+| --- | --- |
+| корректная readiness | новый Pod считается available только когда реально готов |
+| capacity для `maxSurge` | scheduler должен разместить дополнительный Pod |
+| `minReadySeconds` при необходимости | краткий флап readiness не считается устойчивой готовностью |
+| graceful termination | старый Pod завершает in-flight work |
+| backward/forward compatibility | старые и новые replicas некоторое время работают вместе |
+| совместимая схема данных | rollback image не должен ломаться на новой schema |
+| мониторинг rollout | API success не равен application success |
 
-Замедляет rollout, но гарантирует zero-downtime.
+`maxUnavailable: 0` не гарантирует zero downtime: Node может упасть во время rollout, readiness может быть слишком поверхностной, а старый и новый protocol — несовместимыми.
 
-`maxUnavailable: 1` + `maxSurge: 0` — быстрее, но временно одной реплики нет.
-
-Откат:
+<details>
+<summary>Как наблюдать rollout и быстро собрать контекст</summary>
 
 ```bash
-kubectl rollout undo deployment/api-server
-kubectl rollout undo deployment/api-server --to-revision=3
-kubectl rollout history deployment/api-server
+kubectl -n payments rollout status deployment/api --timeout=5m
+kubectl -n payments get replicaset -l app=api
+kubectl -n payments get pods -l app=api -o wide
+kubectl -n payments get events --sort-by='.metadata.creationTimestamp'
+
+# После подтверждения необходимости отката:
+kubectl -n payments rollout undo deployment/api
 ```
 
-## Probes и их роль в rollout
+Rollback Deployment возвращает старый Pod template, но не отменяет migration или сообщение, уже опубликованное новой версией.
 
-Kubernetes использует три типа probe:
+</details>
 
-| Probe | Что делает при провале |
-|---|---|
-| `readinessProbe` | убирает Pod из endpoints Service (трафик не идет) |
-| `livenessProbe` | перезапускает контейнер |
-| `startupProbe` | блокирует liveness/readiness до готовности приложения |
+## PodDisruptionBudget
 
-Для rolling update критичен `readinessProbe`: Kubernetes не удаляет старый Pod, пока новый не пройдет readiness.
+PDB нужен для API-initiated evictions, например drain или cluster maintenance:
 
-Без readiness probe — трафик идет в Pod сразу после старта контейнера, до того как приложение реально готово принимать запросы. Результат: 502/503 в начале каждого deploy.
+```yaml
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: api
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: api
+```
 
-Подробно про реализацию probes в Go и graceful shutdown — в [06-probes-and-graceful-shutdown.md](./06-probes-and-graceful-shutdown.md).
+Он не создаёт дополнительные replicas и не влияет на прямое удаление Pod. Если в Deployment три replicas, но Ready только две, `minAvailable: 2` может блокировать следующую eviction до восстановления.
 
-## Config delivery
+Budget должен согласовываться с replicas, autoscaling и процедурами обслуживания. `minAvailable: 100%` часто делает voluntary maintenance невозможным.
 
-Нормальный CI/CD flow:
+## Доставка конфигурации
 
-1. CI собирает image без environment-specific значений — image immutable.
-2. Конфиги живут в `ConfigMap`, секреты в `Secret`.
-3. CD деплоит манифесты через `kubectl apply` или Helm.
-4. При изменении Deployment или ConfigMap делается rollout.
+Image должен быть environment-independent и immutable. Конфигурация доставляется отдельно:
 
-Два способа получить значение в Pod:
+| Механизм | Когда процесс увидит изменение | Риск |
+| --- | --- | --- |
+| ConfigMap/Secret через env | только в новом Pod | без rollout replicas могут получить разные версии |
+| projected volume | после асинхронного обновления kubelet | приложение должно безопасно перечитать файл |
+| `subPath` volume mount | автоматически не обновляется | легко ожидать несуществующий hot reload |
+| внешний CSI/provider | зависит от driver и rotation policy | нужно понимать cache, failure mode и audit trail |
 
-**Env vars** — просто, сразу видны в `kubectl exec`. Смена значения требует rollout.
+Обновление ConfigMap не запускает Deployment rollout. Для restart-based delivery меняют Pod template — например annotation с checksum, которую вычисляет Helm.
 
-**Volume mount** — при обновлении ConfigMap файл обновляется в живом Pod без rollout (задержка ~1 минута). Приложение должно уметь перечитывать файл.
+<details>
+<summary>Пример checksum annotation в Helm</summary>
 
-Для секретов в production многие команды предпочитают внешние менеджеры (HashiCorp Vault, AWS Secrets Manager) с CSI-драйвером — тогда секрет в etcd не хранится в plaintext.
+```yaml
+spec:
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+```
 
-Практическое правило: никаких `APP_ENV=production` в Dockerfile, никакого hardcoded DSN в image.
+После изменения rendered ConfigMap checksum меняется, Deployment создаёт новую revision и rollout доставляет единый config snapshot каждому новому Pod.
+
+</details>
+
+Kubernetes Secret по умолчанию не означает encryption at rest; это настраивается для API server/etcd отдельно. External Secrets Operator обычно создаёт обычный Kubernetes Secret из внешнего store. Secrets Store CSI Driver может монтировать значение напрямую — эти подходы имеют разные следы в etcd и разные failure modes.
+
+## Практический CI/CD flow
+
+```mermaid
+flowchart LR
+    Commit --> Test
+    Test --> Build["Build image once"]
+    Build --> Scan["Scan + sign"]
+    Scan --> Registry["Push immutable digest"]
+    Registry --> Render["Render manifests/chart"]
+    Render --> Validate["Schema + policy checks"]
+    Validate --> Deploy
+    Deploy --> Observe["Rollout + SLO metrics"]
+    Observe -->|"bad"| Rollback["Rollback or roll forward"]
+```
+
+Хороший pipeline:
+
+1. собирает один image и продвигает тот же digest между environments;
+2. хранит desired state и environment config в version control;
+3. не печатает secrets в render/diff logs;
+4. проверяет rollout timeout и application signals;
+5. умеет безопасно остановить rollout;
+6. предпочитает backward-compatible migration и roll forward, не полагаясь только на rollback.
 
 ## Interview-ready answer
 
-**1. Что происходит при падении ноды?**
+**1. Что происходит при отказе Node?**
 
-- Kubelet перестаёт слать heartbeat → нода переходит в `NotReady` (~40 c) → Pod-ы эвакуируются и пересоздаются на других нодах (суммарно до ~5 минут в дефолтной конфигурации). Поэтому критичны минимум 2 реплики на **разных** нодах (podAntiAffinity) — тогда Service немедленно переключает трафик на живую реплику, пока новая поднимается в фоне.
+Control plane перестаёт получать heartbeat, меняет Node condition и добавляет `not-ready`/`unreachable` taint. После toleration Pod может быть evicted, а workload controller создаёт replacement на здоровой Node. Процесс занимает время и при partition старый процесс может ещё работать.
 
-**2. Какая стратегия rolling update самая безопасная?**
+**2. Как разнести replicas по Node и zone?**
 
-- `maxUnavailable: 0` + `maxSurge: 1`: новый Pod поднимается и обязан пройти readiness probe до удаления старого — zero-downtime ценой более медленного rollout. Без readiness probe трафик идёт в неготовый Pod — 502/503 в начале каждого deploy.
+Использовать topology spread constraints или pod anti-affinity. Мягкое правило сохраняет способность запуститься при деградации, строгое может оставить Pod Pending — это trade-off между availability сейчас и изоляцией failure domain.
 
-**3. Как конфигурация должна попадать в Pod?**
+**3. Гарантирует ли rolling update отсутствие downtime?**
 
-- Image immutable: никаких env-specific значений в Dockerfile. Конфиг — ConfigMap, секреты — Secret (env vars или volume mount; mount обновляется без rollout). Для production-секретов — внешние менеджеры (Vault, Secrets Manager) с CSI-драйвером, чтобы секрет не лежал в etcd открытым.
+Нет. `maxSurge`/`maxUnavailable` управляют количеством Pod, но нужны readiness, capacity, draining, совместимые версии и наблюдение за SLO. Rollback template не откатывает внешнее состояние.
+
+**4. Как доставить изменение ConfigMap?**
+
+Env требует нового Pod; projected volume обновляется асинхронно и требует reload, а `subPath` не обновляется. Для предсказуемого snapshot часто меняют checksum annotation Pod template и выполняют обычный rollout.
+
+## Официальные источники
+
+- [Nodes](https://kubernetes.io/docs/concepts/architecture/nodes/)
+- [Taints and tolerations](https://kubernetes.io/docs/concepts/scheduling-eviction/taint-and-toleration/)
+- [Topology spread constraints](https://kubernetes.io/docs/concepts/scheduling-eviction/topology-spread-constraints/)
+- [Deployments](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/)
+- [Updating ConfigMap](https://kubernetes.io/docs/tutorials/configuration/updating-configuration-via-a-configmap/)

@@ -1,959 +1,491 @@
-# Helm
+# Helm: charts, values и releases
 
-Helm — менеджер пакетов для Kubernetes. Если Kubernetes описывает инфраструктуру через YAML-манифесты, то Helm добавляет поверх них параметризацию, версионирование и удобное управление.
+Helm превращает шаблоны Kubernetes manifests в устанавливаемый пакет — chart — и ведёт историю его установок. Он уменьшает дублирование, но добавляет второй язык поверх YAML, поэтому chart должен оставаться проще приложения, которое он разворачивает.
+
+Примеры используют общий для Helm 3 и Helm 4 workflow. Helm 4 является текущей stable major version; перед использованием редких flags проверяйте документацию версии, установленной в CI/CD.
 
 ## Содержание
 
-- [Проблема без Helm](#проблема-без-helm)
+- [Что решает Helm](#что-решает-helm)
 - [Основные понятия](#основные-понятия)
-- [Структура чарта](#структура-чарта)
-- [Chart.yaml](#chartyaml)
-- [values.yaml — параметры чарта](#valuesyaml--параметры-чарта)
-- [Template синтаксис](#template-синтаксис)
-- [_helpers.tpl — переиспользуемые шаблоны](#_helperstpl--переиспользуемые-шаблоны)
+- [Структура chart](#структура-chart)
+- [Values и их приоритет](#values-и-их-приоритет)
+- [Минимум template-синтаксиса](#минимум-template-синтаксиса)
+- [Практический template](#практический-template)
 - [ConfigMap и Secret](#configmap-и-secret)
-- [Deployment](#deployment)
-- [Service](#service)
-- [Helm команды](#helm-команды)
-- [Releases и namespaces](#releases-и-namespaces)
-- [Антипаттерны](#антипаттерны)
+- [Основной workflow](#основной-workflow)
+- [Rollback и ограничения](#rollback-и-ограничения)
+- [Практические правила](#практические-правила)
 - [Interview-ready answer](#interview-ready-answer)
 
----
+## Что решает Helm
 
-## Проблема без Helm
+Без шаблонизации окружения часто получают копии почти одинаковых manifests. Helm позволяет оставить один chart и менять только входные values:
 
-Без Helm для каждого окружения нужно отдельно описывать манифесты. Два сервиса и три окружения — уже 6 почти одинаковых Deployment-файлов; изменение числа реплик — руками в каждом.
-
-```
-# Без Helm: отдельные файлы на каждое окружение
-manifests/
-├── dev/
-│   ├── shortener-deployment.yaml    # replicas: 1, image: :dev
-│   └── analytics-deployment.yaml
-├── staging/
-│   ├── shortener-deployment.yaml    # replicas: 2, image: :staging
-│   └── analytics-deployment.yaml
-└── prod/
-    ├── shortener-deployment.yaml    # replicas: 5, image: :prod
-    └── analytics-deployment.yaml
+```text
+chart templates + default values + environment values
+                         |
+                         v
+              rendered Kubernetes manifests
+                         |
+                         v
+                       release
 ```
 
-С Helm:
+Helm полезен для:
 
-```
-# С Helm: один чарт, разные values
-helm/url-shortener/
-├── templates/
-│   └── shortener-deployment.yaml   # один шаблон с {{ .Values.replicaCount }}
-└── values.yaml                     # значения по умолчанию
+- упаковки набора связанных Kubernetes resources;
+- параметризации image, replicas, resources и feature flags;
+- публикации и переиспользования charts;
+- upgrade/rollback с историей revisions.
 
-helm upgrade --install myapp ./url-shortener -f values-prod.yaml
-```
-
----
+Helm не является единственным способом. Для небольших различий подходят plain YAML, Kustomize или platform-specific tooling. Helm также не управляет бизнес-совместимостью релизов и не делает migration обратимой.
 
 ## Основные понятия
 
-**Chart** — пакет Helm. Директория с шаблонами манифестов и файлом значений. Аналог npm-пакета.
+| Понятие | Значение |
+| --- | --- |
+| `chart` | пакет templates, defaults и metadata |
+| `template` | файл, который после рендера становится Kubernetes manifest |
+| `values` | входные параметры рендера |
+| `release` | установленный экземпляр chart в namespace |
+| `revision` | версия состояния release после install/upgrade/rollback |
 
-**Values** — входные параметры чарта. Задаются в `values.yaml` и могут быть переопределены при установке.
+Один chart можно установить несколько раз с разными release names и values.
 
-**Template** — YAML-файл с плейсхолдерами (`{{ .Values.something }}`). Helm подставляет значения и получает обычный Kubernetes манифест.
+## Структура chart
 
-**Release** — конкретная установка чарта в кластер. Один и тот же чарт можно установить несколько раз под разными именами. Helm хранит историю каждого release.
-
-```
-Chart (шаблон) + Values (параметры) = Kubernetes Manifests (реальные YAML)
-                                               ↓
-                                          Release (установленная версия)
-```
-
----
-
-## Структура чарта
-
-```
-url-shortener/           # имя чарта — директория
-├── Chart.yaml           # метаданные: имя, версия, описание
-├── values.yaml          # значения по умолчанию
-├── values-kind.yaml     # переопределения для конкретной среды (не стандарт, просто файл)
-└── templates/           # шаблоны манифестов
-    ├── _helpers.tpl     # переиспользуемые именованные шаблоны (не создаёт ресурсы)
-    ├── shortener-deployment.yaml
-    ├── shortener-service.yaml
-    ├── shortener-config.yaml    # ConfigMap + Secret
-    ├── analytics-deployment.yaml
-    ├── analytics-service.yaml
-    └── analytics-config.yaml
+```text
+api-chart/
+├── Chart.yaml
+├── values.yaml
+├── values.schema.json
+└── templates/
+    ├── _helpers.tpl
+    ├── deployment.yaml
+    ├── service.yaml
+    └── configmap.yaml
 ```
 
-Файлы в `templates/` которые начинаются с `_` (подчёркивание) — вспомогательные. Helm их не рендерит напрямую, а только если другой шаблон вызовет `include`.
-
----
-
-## Chart.yaml
+`Chart.yaml`:
 
 ```yaml
-apiVersion: v2           # версия Helm API (v2 для Helm 3)
-name: url-shortener      # имя чарта
-description: Local Kubernetes chart for the sandbox URL shortener services.
-type: application        # application (деплоит приложение) или library (только helpers)
-version: 0.1.0           # версия самого чарта (SemVer)
-appVersion: "0.1.0"      # версия приложения — информационное поле
+apiVersion: v2
+name: api
+description: Helm chart for the API service
+type: application
+version: 0.3.0
+appVersion: "1.8.2"
 ```
 
-`version` и `appVersion` — разные вещи:
-- `version` — версия чарта (меняется когда меняется сам шаблон)
-- `appVersion` — версия деплоимого приложения (информационное поле)
+- `version` — версия chart и его templates;
+- `appVersion` — информационная версия приложения;
+- реальный image tag/digest всё равно задаётся в values/template.
 
----
+Файлы templates с именем, начинающимся на `_`, используются как helpers и не рендерятся в самостоятельные manifests.
 
-## values.yaml — параметры чарта
+## Values и их приоритет
 
-`values.yaml` — это объект с любой структурой. Внутри шаблонов к нему обращаются через `.Values`.
-
-```yaml
-# values.yaml учебного чарта (локальный kind-стенд)
-global:
-  appEnv: local
-  imagePullPolicy: IfNotPresent   # не тянуть образ если он уже есть на ноде
-
-shortener:
-  replicaCount: 1
-  image:
-    repository: sandbox-url-shortener/shortener
-    tag: local
-  service:
-    type: ClusterIP
-    port: 8080
-    nodePort: null               # null = значение не задано
-  env:
-    APP_PORT: "8080"
-    LOG_LEVEL: INFO
-    REDIS_ADDR: host.docker.internal:6379
-    KAFKA_PRODUCER_ENABLED: "false"
-  secretEnv:
-    DB_DSN: postgres://shortener:shortener@host.docker.internal:5432/shortener?sslmode=disable
-  probes:
-    liveness:
-      path: /health/live
-      initialDelaySeconds: 5
-      periodSeconds: 10
-      timeoutSeconds: 2
-      failureThreshold: 3
-    readiness:
-      path: /health/ready
-      initialDelaySeconds: 5
-      periodSeconds: 10
-      failureThreshold: 6
-  resources: {}                  # {} = пустой объект, resource limits не заданы
-```
-
-### Переопределение значений — values-kind.yaml
-
-Можно создать любое количество файлов `values-*.yaml`. Они накладываются поверх `values.yaml`:
+Безопасные defaults должны быть понятными и пригодными хотя бы для локального render:
 
 ```yaml
-# values-kind.yaml — только то, что отличается от values.yaml
-global:
-  appEnv: local-k8s              # переопределить одно значение
+replicaCount: 2
 
-shortener:
-  service:
-    type: NodePort               # в kind нет LoadBalancer, нужен NodePort
-    nodePort: 30080              # статичный порт для kind extraPortMappings
-  env:
-    BASE_URL: http://localhost:18080
+image:
+  repository: registry.example/api
+  tag: "1.8.2"
+  digest: ""
+  pullPolicy: IfNotPresent
 
-analytics:
-  service:
-    type: NodePort
-    nodePort: 30090
-```
+service:
+  port: 80
+  targetPort: 8080
 
-При `helm upgrade --install ... -f values-kind.yaml` Helm сначала берёт `values.yaml`, затем мержит поверх `values-kind.yaml`. Итоговые values — объединение обоих файлов.
-
----
-
-## Template синтаксис
-
-Helm использует шаблонизатор Go (`text/template`) с дополнениями от библиотеки Sprig.
-
-### Основной синтаксис
-
-```yaml
-# {{ }} — блок шаблонизатора
-# .Values — объект со всеми values
-# . — текущий контекст (обычно корневой объект чарта)
-
-replicas: {{ .Values.shortener.replicaCount }}
-# → replicas: 1
-```
-
-Дефис убирает пробелы вокруг блока:
-```yaml
-{{- .Values.name -}}   # убрать пробел/перенос до и после
-{{- .Values.name }}    # убрать только слева
-```
-
-### Объекты в контексте шаблона
-
-```yaml
-# .Values — значения из values.yaml (и переопределений)
-image: "{{ .Values.shortener.image.repository }}:{{ .Values.shortener.image.tag }}"
-# → image: "sandbox-url-shortener/shortener:local"
-
-# .Release — информация о release
-name: {{ .Release.Name }}         # имя release (задаётся при helm install)
-namespace: {{ .Release.Namespace }}
-service: {{ .Release.Service }}   # "Helm"
-
-# .Chart — данные из Chart.yaml
-version: {{ .Chart.Version }}     # "0.1.0"
-appVersion: {{ .Chart.AppVersion }}
-
-# .Files — доступ к файлам в чарте (не шаблонам)
-config: {{ .Files.Get "config/app.json" }}
-```
-
-### Пайплайны и функции
-
-Пайплайн — передача значения через функции с помощью `|`:
-
-```yaml
-# quote — обернуть в кавычки (строка → "строка")
-name: {{ .Values.shortener.env.LOG_LEVEL | quote }}
-# → name: "INFO"
-
-# nindent N — добавить N пробелов отступа перед каждой строкой (+ перенос в начале)
-labels:
-  {{- include "url-shortener.labels" . | nindent 4 }}
-# → labels:
-#       helm.sh/chart: url-shortener-0.1.0
-#       app.kubernetes.io/name: url-shortener
-#       ...
-
-# indent N — то же но без переноса в начале
-# upper / lower — изменить регистр
-# default — значение по умолчанию если пустое
-port: {{ .Values.shortener.service.port | default 8080 }}
-
-# toYaml — сериализовать объект в YAML (нужно для вложенных структур)
 resources:
-  {{- toYaml .Values.shortener.resources | nindent 12 }}
-# Если resources: {limits: {cpu: "1", memory: "512Mi"}}
-# →   resources:
-#       limits:
-#         cpu: "1"
-#         memory: 512Mi
+  requests:
+    cpu: 200m
+    memory: 256Mi
+  limits:
+    memory: 512Mi
 
-# trunc — обрезать строку
-{{ .Release.Name | trunc 63 }}  # имена в K8s ограничены 63 символами
-
-# trimSuffix — убрать суффикс
-{{ "my-name-" | trimSuffix "-" }}  # → "my-name"
-
-# contains — проверить вхождение
-{{ contains "shortener" .Release.Name }}  # true/false
-
-# printf — форматирование строки
-{{ printf "%s-%s" .Release.Name "shortener" }}  # → "sandbox-url-shortener-shortener"
+config:
+  logLevel: info
 ```
 
-### if / else
+Приоритет возрастает слева направо:
+
+```text
+values.yaml
+  < parent chart values
+  < -f values-prod.yaml
+  < -f values-region.yaml
+  < --set / --set-string / --set-file
+```
+
+Если `-f` указан несколько раз, более правый файл имеет больший приоритет. Финальные values полезно проверять через `helm get values --all` после установки.
+
+`values.schema.json` позволяет до рендера проверить required fields, типы и допустимые значения. Это надёжнее, чем узнавать об ошибке только от Kubernetes API.
+
+<details>
+<summary>Пример environment override</summary>
+
+`values-prod.yaml` содержит только отличия от defaults:
 
 ```yaml
-# Простое условие
-{{- if .Values.shortener.service.nodePort }}
-nodePort: {{ .Values.shortener.service.nodePort }}
-{{- end }}
+replicaCount: 5
 
-# Условие с and/eq/not
-{{- if and (eq .Values.shortener.service.type "NodePort") .Values.shortener.service.nodePort }}
-nodePort: {{ .Values.shortener.service.nodePort }}
-{{- end }}
+image:
+  tag: "1.8.4"
 
-# eq — равенство, ne — неравенство, lt/le/gt/ge — сравнение чисел
-# and / or / not — логические операторы
+resources:
+  requests:
+    cpu: 500m
+    memory: 512Mi
+  limits:
+    memory: 1Gi
 
-{{- if not .Values.shortener.service.nodePort }}
-# nodePort не задан
-{{- end }}
+config:
+  logLevel: warn
+
+existingSecret: api-runtime-secrets
 ```
 
-### range — итерация
+```bash
+helm template api ./api-chart -f values-prod.yaml
+```
+
+Не нужно копировать весь `values.yaml`: короткий override легче сравнивать и меньше рискует случайно заморозить устаревший default.
+
+</details>
+
+## Минимум template-синтаксиса
+
+Чаще всего достаточно нескольких конструкций:
 
 ```yaml
-# range по map — $key и $value
-data:
-  APP_ENV: {{ .Values.global.appEnv | quote }}
-  {{- range $key, $value := .Values.shortener.env }}
-  {{ $key }}: {{ $value | quote }}
-  {{- end }}
-# Итерирует по всем ключам shortener.env и выводит их как поля ConfigMap
+replicas: {{ .Values.replicaCount }}
+imagePullPolicy: {{ .Values.image.pullPolicy }}
 
-# range по списку
-{{- range .Values.shortener.volumeMounts }}
-- name: {{ .name }}
-  mountPath: {{ .mountPath }}
-{{- end }}
+env:
+  - name: LOG_LEVEL
+    value: {{ .Values.config.logLevel | quote }}
+
+resources:
+  {{- toYaml .Values.resources | nindent 10 }}
 ```
 
-### Переменные
+- `.Values` — пользовательские values;
+- `.Release.Name` и `.Release.Namespace` — текущий release;
+- `.Chart.Name` и `.Chart.Version` — metadata chart;
+- `quote` защищает строковое значение YAML;
+- `toYaml | nindent N` выводит вложенный объект с корректным отступом;
+- `required "message" value` останавливает render для обязательного значения;
+- `with` меняет текущий context, `range` перебирает list/map.
 
-```yaml
-# Присвоить значение переменной
-{{- $name := include "url-shortener.fullname" . -}}
-name: {{ $name }}-config
+Для повторяемых names и labels используют `_helpers.tpl`:
 
-# Переменная из range
-{{- range $key, $value := .Values.env }}
-  {{ $key }}: {{ $value | quote }}
-{{- end }}
-```
-
----
-
-## _helpers.tpl — переиспользуемые шаблоны
-
-`_helpers.tpl` содержит именованные шаблоны — фрагменты которые можно вызывать из любого шаблона чарта. Файл начинается с `_` чтобы Helm не рендерил его напрямую.
-
-```go
-{{/*
-  Именованный шаблон определяется через define.
-  Вызывается через include.
-  Комментарии: {{/* ... */}}
-*/}}
-
-{{- define "url-shortener.name" -}}
-{{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" -}}
+```gotemplate
+{{- define "api.fullname" -}}
+{{- printf "%s-%s" .Release.Name .Chart.Name | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
-```
 
-Разбор построчно:
-```
-{{- define "url-shortener.name" -}}
-  │                                │
-  └── начало именованного шаблона  └── дефис убирает пробелы/переносы
-
-{{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" -}}
-            │            │                      │              │
-            │            └── если задан nameOverride в values — использовать его
-            └── иначе использовать Chart.Name ("url-shortener")
-                                                  └── обрезать до 63 символов
-                                                                 └── убрать trailing "-"
-{{- end -}}
-  └── конец определения
-```
-
-```go
-{{- define "url-shortener.fullname" -}}
-{{- if .Values.fullnameOverride -}}
-  {{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" -}}
-{{- else -}}
-  {{- $name := default .Chart.Name .Values.nameOverride -}}
-  {{- if contains $name .Release.Name -}}
-    {{- .Release.Name | trunc 63 | trimSuffix "-" -}}
-    {{/*
-      Если release уже содержит имя чарта — не дублировать.
-      Release "url-shortener" + chart "url-shortener" → просто "url-shortener"
-      а не "url-shortener-url-shortener"
-    */}}
-  {{- else -}}
-    {{- printf "%s-%s" .Release.Name $name | trunc 63 | trimSuffix "-" -}}
-    {{/*
-      Иначе: "sandbox-url-shortener" + "url-shortener" → "sandbox-url-shortener-url-shortener"
-      (обрезается до 63 символов)
-    */}}
-  {{- end -}}
-{{- end -}}
-{{- end -}}
-```
-
-```go
-{{- define "url-shortener.labels" -}}
-helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
-app.kubernetes.io/name: {{ include "url-shortener.name" . }}
+{{- define "api.selectorLabels" -}}
+app.kubernetes.io/name: {{ .Chart.Name }}
 app.kubernetes.io/instance: {{ .Release.Name }}
-app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- end -}}
 ```
 
-Стандартные Kubernetes labels. `replace "+" "_"` — потому что `+` не допустим в label values.
-
-```go
-{{/*
-  Кастомный шаблон с параметром.
-  Вызывается через: include "url-shortener.serviceName" (dict "root" . "service" "shortener")
-  dict создаёт map: {"root": <текущий контекст>, "service": "shortener"}
-*/}}
-{{- define "url-shortener.serviceName" -}}
-{{- printf "%s-%s" (include "url-shortener.fullname" .root) .service | trunc 63 | trimSuffix "-" -}}
-{{- end -}}
-```
-
-Вызов:
-```yaml
-# В шаблоне:
-name: {{ include "url-shortener.serviceName" (dict "root" . "service" "shortener") }}
-
-# Что происходит:
-# 1. (dict "root" . "service" "shortener") создаёт map {"root": ., "service": "shortener"}
-# 2. Этот map становится контекстом (.) внутри serviceName
-# 3. .root = исходный контекст чарта, .service = "shortener"
-# 4. include "url-shortener.fullname" .root — вызвать fullname с исходным контекстом
-
-# Результат (при release name "sandbox-url-shortener"):
-# → "sandbox-url-shortener-shortener"
-```
-
-Почему `(dict "root" . "service" "shortener")` а не просто `.`:
-В Helm именованный шаблон принимает один аргумент — контекст `.`. Если нужно передать несколько параметров — упаковать их в `dict`.
-
-### include vs template
+`include` возвращает строку, поэтому результат можно передать в pipeline:
 
 ```yaml
-# include — вернуть строку (можно пайплайнить дальше)
 labels:
-  {{- include "url-shortener.labels" . | nindent 4 }}
-
-# template — вывести напрямую (нельзя пайплайнить)
-# template "url-shortener.labels" .  ← так не получится пропустить через nindent
+  {{- include "api.selectorLabels" . | nindent 4 }}
 ```
 
-Правило: всегда `include`, не `template`.
+<details>
+<summary>Примеры if, with и range</summary>
 
----
+```gotemplate
+{{- if .Values.podAnnotations }}
+annotations:
+  {{- toYaml .Values.podAnnotations | nindent 2 }}
+{{- end }}
 
-## ConfigMap и Secret
+{{- with .Values.nodeSelector }}
+nodeSelector:
+  {{- toYaml . | nindent 8 }}
+{{- end }}
 
-### ConfigMap — незащищённые конфигурации
-
-ConfigMap хранит конфигурацию в открытом виде (не для паролей).
-
-```yaml
-# templates/shortener-config.yaml
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: {{ include "url-shortener.serviceName" (dict "root" . "service" "shortener") }}-config
-  # → "sandbox-url-shortener-shortener-config"
-  labels:
-    {{- include "url-shortener.labels" . | nindent 4 }}
-    app.kubernetes.io/component: shortener
-data:
-  APP_ENV: {{ .Values.global.appEnv | quote }}
-  {{- range $key, $value := .Values.shortener.env }}
-  {{ $key }}: {{ $value | quote }}
+env:
+  {{- range $name, $value := .Values.extraEnv }}
+  - name: {{ $name }}
+    value: {{ $value | quote }}
   {{- end }}
 ```
 
-Что рендерится при `helm template`:
-```yaml
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: sandbox-url-shortener-shortener-config
-  labels:
-    helm.sh/chart: url-shortener-0.1.0
-    app.kubernetes.io/name: url-shortener
-    app.kubernetes.io/instance: sandbox-url-shortener
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/component: shortener
-data:
-  APP_ENV: "local"
-  APP_PORT: "8080"
-  LOG_LEVEL: "INFO"
-  BASE_URL: "http://localhost:18080"
-  REDIS_ADDR: "host.docker.internal:6379"
-  # ... все ключи из shortener.env
-```
+Внутри `with` точка указывает на выбранный объект. Если нужен корневой context, используют `$`, например `$.Release.Name`.
 
-### Secret — защищённые конфигурации
+</details>
 
-Secret отличается от ConfigMap двумя вещами:
-1. Kubernetes хранит значения в base64 (но это не шифрование — просто кодирование)
-2. Kubernetes не логирует их содержимое при `describe`
+## Практический template
 
-```yaml
-# Продолжение того же файла shortener-config.yaml (после ---)
----
-apiVersion: v1
-kind: Secret
-metadata:
-  name: {{ include "url-shortener.serviceName" (dict "root" . "service" "shortener") }}-secret
-  labels:
-    {{- include "url-shortener.labels" . | nindent 4 }}
-    app.kubernetes.io/component: shortener
-type: Opaque   # Opaque = произвольные данные (в отличие от kubernetes.io/tls и др.)
-stringData:    # stringData — передать строки, Kubernetes сам закодирует в base64
-  {{- range $key, $value := .Values.shortener.secretEnv }}
-  {{ $key }}: {{ $value | quote }}
-  {{- end }}
-```
-
-**stringData vs data:**
-
-```yaml
-# stringData — передать строку как есть, K8s сохранит в base64
-stringData:
-  DB_DSN: "postgres://user:pass@host/db"
-
-# data — передать уже закодированное в base64 значение
-data:
-  DB_DSN: cG9zdGdyZXM6Ly91c2VyOnBhc3NAaG9zdC9kYg==
-
-# В шаблонах удобнее stringData — читается и не требует ручного кодирования
-```
-
-При `helm template` Secret со stringData выглядит так:
-```yaml
-apiVersion: v1
-kind: Secret
-metadata:
-  name: sandbox-url-shortener-shortener-secret
-type: Opaque
-stringData:
-  DB_DSN: "postgres://shortener:shortener@host.docker.internal:5432/shortener?sslmode=disable"
-```
-
-После `kubectl apply` Kubernetes конвертирует stringData → data (base64).
-
----
-
-## Deployment
-
-Deployment — основной объект для запуска приложений. Описывает желаемое состояние: сколько реплик, какой образ, как проверять готовность.
-
-```yaml
-# templates/shortener-deployment.yaml (полная аннотированная версия)
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: {{ include "url-shortener.serviceName" (dict "root" . "service" "shortener") }}
-  # → "sandbox-url-shortener-shortener"
-  labels:
-    {{- include "url-shortener.labels" . | nindent 4 }}
-    app.kubernetes.io/component: shortener   # дополнительный label для этого сервиса
-spec:
-  replicas: {{ .Values.shortener.replicaCount }}
-  # → replicas: 1
-
-  selector:
-    matchLabels:
-      {{- include "url-shortener.selectorLabels" . | nindent 6 }}
-      app.kubernetes.io/component: shortener
-  # selector — по каким labels Deployment находит свои Pods.
-  # Должен совпадать с template.metadata.labels ниже.
-  # selectorLabels содержит только app.kubernetes.io/name и app.kubernetes.io/instance —
-  # достаточно уникальная пара для этого release.
-
-  template:             # шаблон Pod'а — каждая реплика создаётся по этому шаблону
-    metadata:
-      labels:
-        {{- include "url-shortener.selectorLabels" . | nindent 8 }}
-        app.kubernetes.io/component: shortener
-    spec:
-      containers:
-        - name: shortener   # имя контейнера внутри Pod'а
-          image: "{{ .Values.shortener.image.repository }}:{{ .Values.shortener.image.tag }}"
-          # → image: "sandbox-url-shortener/shortener:local"
-
-          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
-          # IfNotPresent — использовать локальный образ если есть (нужно для kind)
-          # Always       — всегда тянуть из registry (для prod)
-          # Never        — только локальный, никогда не тянуть
-
-          ports:
-            - name: http                  # имя порта — используется в probes и Service
-              containerPort: {{ .Values.shortener.service.port }}
-              # containerPort — информационное поле, не открывает порт сам по себе
-              # (все порты контейнера всегда открыты внутри кластера)
-
-          envFrom:                        # загрузить env vars из ресурсов K8s
-            - configMapRef:
-                name: {{ include "url-shortener.serviceName" (dict "root" . "service" "shortener") }}-config
-                # загрузить все ключи ConfigMap как env переменные
-            - secretRef:
-                name: {{ include "url-shortener.serviceName" (dict "root" . "service" "shortener") }}-secret
-                # загрузить все ключи Secret как env переменные
-
-          # После этого в контейнере будут доступны DB_DSN, APP_PORT, LOG_LEVEL и т.д.
-
-          livenessProbe:
-            httpGet:
-              path: {{ .Values.shortener.probes.liveness.path }}   # /health/live
-              port: http   # ссылка на именованный порт выше
-            initialDelaySeconds: {{ .Values.shortener.probes.liveness.initialDelaySeconds }}
-            # initialDelaySeconds — ждать N секунд после старта контейнера перед первой проверкой
-            periodSeconds: {{ .Values.shortener.probes.liveness.periodSeconds }}
-            # periodSeconds — интервал между проверками
-            timeoutSeconds: {{ .Values.shortener.probes.liveness.timeoutSeconds }}
-            # timeoutSeconds — максимальное время ожидания ответа
-            failureThreshold: {{ .Values.shortener.probes.liveness.failureThreshold }}
-            # failureThreshold — сколько раз можно провалить проверку перед рестартом
-            # При failureThreshold=3: 3 ошибки подряд → контейнер перезапускается
-
-          readinessProbe:
-            httpGet:
-              path: {{ .Values.shortener.probes.readiness.path }}  # /health/ready
-              port: http
-            initialDelaySeconds: {{ .Values.shortener.probes.readiness.initialDelaySeconds }}
-            periodSeconds: {{ .Values.shortener.probes.readiness.periodSeconds }}
-            timeoutSeconds: {{ .Values.shortener.probes.readiness.timeoutSeconds }}
-            failureThreshold: {{ .Values.shortener.probes.readiness.failureThreshold }}
-            # При failureThreshold=6: 6 ошибок → Pod убирается из Service endpoints
-            # (трафик не идёт, но контейнер НЕ перезапускается)
-
-          resources:
-            {{- toYaml .Values.shortener.resources | nindent 12 }}
-            # resources: {} → рендерится как пустой блок (нет limits/requests)
-            # В prod стоит задать:
-            # resources:
-            #   requests: { cpu: "100m", memory: "128Mi" }
-            #   limits:   { cpu: "500m", memory: "512Mi" }
-```
-
-Что получается после `helm template` (с values-kind.yaml):
 ```yaml
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: sandbox-url-shortener-shortener
-  labels:
-    helm.sh/chart: url-shortener-0.1.0
-    app.kubernetes.io/name: url-shortener
-    app.kubernetes.io/instance: sandbox-url-shortener
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/component: shortener
+  name: {{ include "api.fullname" . }}
 spec:
-  replicas: 1
+  replicas: {{ .Values.replicaCount }}
   selector:
     matchLabels:
-      app.kubernetes.io/name: url-shortener
-      app.kubernetes.io/instance: sandbox-url-shortener
-      app.kubernetes.io/component: shortener
+      {{- include "api.selectorLabels" . | nindent 6 }}
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: url-shortener
-        app.kubernetes.io/instance: sandbox-url-shortener
-        app.kubernetes.io/component: shortener
+        {{- include "api.selectorLabels" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
     spec:
       containers:
-        - name: shortener
-          image: "sandbox-url-shortener/shortener:local"
-          imagePullPolicy: IfNotPresent
+        - name: api
+          {{- if .Values.image.digest }}
+          image: "{{ .Values.image.repository }}@{{ .Values.image.digest }}"
+          {{- else }}
+          image: "{{ .Values.image.repository }}:{{ required "image.tag is required" .Values.image.tag }}"
+          {{- end }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
             - name: http
-              containerPort: 8080
-          envFrom:
-            - configMapRef:
-                name: sandbox-url-shortener-shortener-config
-            - secretRef:
-                name: sandbox-url-shortener-shortener-secret
-          livenessProbe:
-            httpGet:
-              path: /health/live
-              port: http
-            initialDelaySeconds: 5
-            periodSeconds: 10
-            timeoutSeconds: 2
-            failureThreshold: 3
-          readinessProbe:
-            httpGet:
-              path: /health/ready
-              port: http
-            initialDelaySeconds: 5
-            periodSeconds: 10
-            timeoutSeconds: 2
-            failureThreshold: 6
-          resources: {}
-```
-
-### Связка selector / template / labels
-
-Это критически важно понять:
-
-```
-Deployment.spec.selector.matchLabels = { app: myapp }
-                │
-                └── Deployment управляет Pod'ами с этими labels
-                    (находит их по selector)
-
-Deployment.spec.template.metadata.labels = { app: myapp }
-                │
-                └── Все Pod'ы создаются с этими labels
-                    (должны совпадать с selector!)
-
-# Если labels в template не совпадают с selector — Deployment не сможет
-# найти свои Pod'ы и будет создавать новые бесконечно.
-```
-
-В чарте используются отдельные `selectorLabels` (name + instance) — они уникальны для release и не меняются. Полные `labels` включают также версию чарта и managed-by, которые могут меняться — их нельзя использовать в selector (нельзя менять selector после создания Deployment).
-
+              containerPort: {{ .Values.service.targetPort }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
 ---
-
-## Service
-
-Service — абстракция над Pod'ами. Даёт стабильный DNS-адрес и балансировку нагрузки между репликами.
-
-```yaml
-# templates/shortener-service.yaml (аннотированный)
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ include "url-shortener.serviceName" (dict "root" . "service" "shortener") }}
-  # → "sandbox-url-shortener-shortener"
-  labels:
-    {{- include "url-shortener.labels" . | nindent 4 }}
-    app.kubernetes.io/component: shortener
+  name: {{ include "api.fullname" . }}
 spec:
-  type: {{ .Values.shortener.service.type }}
-  # ClusterIP — доступен только внутри кластера (по умолчанию)
-  # NodePort   — доступен на порту каждой ноды кластера (для локальной разработки)
-  # LoadBalancer — создаёт внешний балансировщик (для облачных кластеров)
-
   selector:
-    {{- include "url-shortener.selectorLabels" . | nindent 4 }}
-    app.kubernetes.io/component: shortener
-  # selector — по каким labels Service находит Pod'ы для балансировки
-  # Должен совпадать с labels Pod'ов из Deployment
-
+    {{- include "api.selectorLabels" . | nindent 4 }}
   ports:
     - name: http
-      port: {{ .Values.shortener.service.port }}
-      # port — порт самого Service (на котором он принимает трафик внутри кластера)
+      port: {{ .Values.service.port }}
       targetPort: http
-      # targetPort — порт контейнера куда перенаправить трафик
-      # "http" — ссылка на именованный порт контейнера (containerPort с name: http)
-
-      {{- if and (eq .Values.shortener.service.type "NodePort") .Values.shortener.service.nodePort }}
-      nodePort: {{ .Values.shortener.service.nodePort }}
-      # nodePort — только для type: NodePort
-      # Если указан — использовать этот конкретный порт (30080)
-      # Если не указан — Kubernetes назначит случайный из диапазона 30000-32767
-      {{- end }}
 ```
 
-### ClusterIP vs NodePort в локальном kind-окружении
+Selector содержит только стабильные labels. Версию chart или image нельзя включать в Deployment selector: selector immutable и должен совпадать с labels Pod template.
 
-В `values.yaml` (по умолчанию) — `ClusterIP`: сервис доступен только внутри кластера.
+Annotation `checksum/config` меняет Pod template при изменении отрендеренного ConfigMap и тем самым запускает rollout. Само изменение ConfigMap Deployment не перезапускает.
 
-В `values-kind.yaml` — `NodePort: 30080`: сервис доступен на каждой ноде по порту 30080. Kind пробрасывает `containerPort: 30080 → hostPort: 18080` в `cluster.yaml`.
+<details>
+<summary>Фрагмент результата helm template</summary>
 
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prod-api
+spec:
+  replicas: 5
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: api
+      app.kubernetes.io/instance: prod
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: api
+        app.kubernetes.io/instance: prod
+      annotations:
+        checksum/config: 4e843d8c7d5b...
+    spec:
+      containers:
+        - name: api
+          image: registry.example/api:1.8.4
+          resources:
+            requests:
+              cpu: 500m
+              memory: 512Mi
+            limits:
+              memory: 1Gi
 ```
-Запрос:  curl localhost:18080
-           │
-           └── kind extraPortMapping: host:18080 → node:30080
-                                                      │
-                                                      └── NodePort Service: node:30080 → pod:8080
-                                                                                           │
-                                                                                           └── приложение
+
+Именно этот YAML проверяет Kubernetes API. Если rendered manifest выглядит неожиданно, проблему нужно исправить до `helm upgrade`.
+
+</details>
+
+## ConfigMap и Secret
+
+ConfigMap template может безопасно содержать неконфиденциальные values:
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "api.fullname" . }}
+data:
+  LOG_LEVEL: {{ .Values.config.logLevel | quote }}
 ```
 
-### DNS внутри кластера
+Настоящий secret не стоит передавать через обычный values file или `--set`:
 
-Сервисы доступны по DNS-имени из других Pod'ов:
+- values могут попасть в Git, shell history и CI logs;
+- `helm template`/`--dry-run` способен вывести rendered Secret;
+- Helm хранит release metadata в Kubernetes Secret, включая rendered manifests.
 
+Предпочтительный chart contract — принять имя уже существующего Secret:
+
+```yaml
+existingSecret: api-runtime-secrets
 ```
-<service-name>.<namespace>.svc.cluster.local
-# или просто <service-name> если Pod в том же namespace
 
-sandbox-url-shortener-shortener.sandbox-url-shortener.svc.cluster.local
-# или: sandbox-url-shortener-shortener (если из того же namespace)
+```yaml
+envFrom:
+  - secretRef:
+      name: {{ required "existingSecret is required" .Values.existingSecret }}
 ```
 
----
+Сам Secret создаёт отдельный secret-delivery механизм: External Secrets, Secrets Store CSI Driver, SOPS-based pipeline или управляемая platform integration. Важно понимать различие: External Secrets Operator обычно синхронизирует значение в Kubernetes Secret, а CSI mount может доставлять его без такого объекта — модель риска разная.
 
-## Helm команды
+При preview используйте `--hide-secret`, если эта возможность есть в вашей версии Helm, и всё равно считайте CI output чувствительным.
 
-### helm template — рендерить без применения
+<details>
+<summary>Пример chart contract для существующего Secret</summary>
+
+`values.yaml`:
+
+```yaml
+existingSecret: ""
+```
+
+Deployment template:
+
+```yaml
+env:
+  - name: DATABASE_URL
+    valueFrom:
+      secretKeyRef:
+        name: {{ required "existingSecret is required" .Values.existingSecret }}
+        key: database-url
+```
+
+Environment override содержит только имя:
+
+```yaml
+existingSecret: payments-api-runtime
+```
+
+Chart не знает secret value и не включает его в rendered manifest или release metadata.
+
+</details>
+
+## Основной workflow
+
+### До кластера
 
 ```bash
-# Рендерить чарт и вывести на stdout (ничего не применяет к кластеру)
-helm template sandbox-url-shortener ./deploy/helm/url-shortener
+helm lint ./api-chart -f values-prod.yaml
 
-# С override values
-helm template sandbox-url-shortener ./deploy/helm/url-shortener \
-  -f ./deploy/helm/url-shortener/values-kind.yaml
+helm template api ./api-chart \
+  --namespace payments \
+  -f values-prod.yaml > /tmp/api-rendered.yaml
 
-# Рендерить конкретный шаблон
-helm template sandbox-url-shortener ./deploy/helm/url-shortener \
-  --show-only templates/shortener-deployment.yaml
-
-# С указанием namespace (влияет на .Release.Namespace в шаблонах)
-helm template sandbox-url-shortener ./deploy/helm/url-shortener \
-  --namespace sandbox-url-shortener
+kubectl apply --dry-run=server -f /tmp/api-rendered.yaml
 ```
 
-`helm template` — главный инструмент отладки: показывает реальные YAML, которые будут применены.
+`helm lint` проверяет chart conventions и schema, `helm template` показывает реальный YAML, а server dry-run добавляет Kubernetes schema и admission checks. Ни одна из этих проверок полностью не моделирует работающие controllers и external systems.
 
-### helm upgrade --install
+### Install или upgrade
 
 ```bash
-# Установить или обновить release
-helm upgrade --install \
-  sandbox-url-shortener \               # имя release
-  ./deploy/helm/url-shortener \         # путь к чарту
-  --namespace sandbox-url-shortener \   # namespace в K8s
-  --create-namespace \                  # создать namespace если не существует
-  -f ./deploy/helm/url-shortener/values-kind.yaml  # override values
-
-# Передать одно значение без файла
-helm upgrade --install myapp ./chart \
-  --set shortener.replicaCount=3 \
-  --set shortener.image.tag=v1.2.0
-
-# Дождаться готовности (ждёт пока все Pod'ы пройдут readiness probe)
-helm upgrade --install myapp ./chart --wait --timeout 5m
+helm upgrade --install api ./api-chart \
+  --namespace payments \
+  --create-namespace \
+  -f values-prod.yaml \
+  --wait \
+  --timeout 5m
 ```
 
-`upgrade --install` = установить если не существует, обновить если существует. Удобно для CI/CD — не нужно разделять первую установку и обновления.
+`--wait` ждёт готовности поддерживаемых resources до timeout. Для CI часто используют `--atomic`: при неуспешном upgrade Helm пытается откатить release. Это удобно, но не отменяет внешние side effects hooks, Jobs или database migrations.
 
-### Просмотр состояния
+### Диагностика release
 
 ```bash
-# Список всех release в кластере
-helm list
-helm list -n sandbox-url-shortener   # только в этом namespace
 helm list --all-namespaces
-
-# Статус release
-helm status sandbox-url-shortener -n sandbox-url-shortener
-
-# Посмотреть values с которыми установлен release
-helm get values sandbox-url-shortener -n sandbox-url-shortener
-helm get values sandbox-url-shortener -n sandbox-url-shortener --all  # включая defaults
-
-# Посмотреть реальные YAML которые Helm применил
-helm get manifest sandbox-url-shortener -n sandbox-url-shortener
-
-# История release (версии)
-helm history sandbox-url-shortener -n sandbox-url-shortener
+helm status api -n payments
+helm get values api -n payments --all
+helm get manifest api -n payments
+helm history api -n payments
 ```
 
-### Откат
+<details>
+<summary>Пример истории release</summary>
+
+```text
+REVISION  UPDATED                   STATUS      CHART      APP VERSION  DESCRIPTION
+1         2026-07-10 09:20 +0400    superseded  api-0.2.0  1.8.1        Install complete
+2         2026-07-10 14:05 +0400    superseded  api-0.3.0  1.8.2        Upgrade complete
+3         2026-07-11 11:40 +0400    deployed    api-0.3.1  1.8.4        Upgrade complete
+```
+
+Revision относится к release, а не совпадает с `Chart.version` или `appVersion`.
+
+</details>
+
+## Rollback и ограничения
 
 ```bash
-# Откатить к предыдущей версии
-helm rollback sandbox-url-shortener -n sandbox-url-shortener
-
-# Откатить к конкретной версии
-helm rollback sandbox-url-shortener 2 -n sandbox-url-shortener
-# 2 — номер revision из helm history
+helm rollback api 3 -n payments --wait --timeout 5m
+helm uninstall api -n payments
 ```
 
-### Удаление
+Rollback рендерит состояние выбранной revision и создаёт новую revision. Он не гарантирует откат:
 
-```bash
-# Удалить release (удаляет все K8s ресурсы созданные Helm)
-helm uninstall sandbox-url-shortener -n sandbox-url-shortener
-```
+- schema/data migration;
+- внешнего cloud resource;
+- данных в PersistentVolume;
+- side effect hook или Job;
+- несовместимого client/server protocol.
 
----
+`helm uninstall` удаляет resources release согласно manifests и policies, но resource с `helm.sh/resource-policy: keep` или внешнее состояние может остаться.
 
-## Releases и namespaces
+## Практические правила
 
-**Release** — установленный экземпляр чарта. Helm хранит метаданные release как Secret в том же namespace.
+| Правило | Зачем |
+| --- | --- |
+| pin image immutable tag или digest | одинаковый release запускает одинаковый код |
+| держать selector labels стабильными | Deployment selector нельзя менять |
+| использовать values schema и `required` | ошибка обнаруживается до rollout |
+| рендерить chart в CI | виден итоговый manifest, а не только template |
+| не хранить secret material в values | меньше утечек через Git, history и release metadata |
+| ограничивать template-логику | сложный branching трудно тестировать и сопровождать |
+| передавать структурные блоки через `toYaml` | меньше ручного дублирования Kubernetes schema |
 
-```bash
-# Два release из одного чарта в разных namespaces
-helm upgrade --install myapp-dev  ./chart --namespace dev
-helm upgrade --install myapp-prod ./chart --namespace prod
+`imagePullPolicy: Always` не заменяет immutable image. Он заставляет kubelet проверять registry reference, но mutable tag всё равно делает результат зависимым от времени. Digest даёт более сильную гарантию.
 
-# helm list покажет оба
-helm list --all-namespaces
-# NAME        NAMESPACE  REVISION  STATUS
-# myapp-dev   dev        3         deployed
-# myapp-prod  prod       1         deployed
-```
-
-**Namespace** — логическое разделение ресурсов внутри кластера. Ресурсы в разных namespace изолированы (разные RBAC права, разные ConfigMap/Secret и т.д.).
-
-```bash
-# Создать namespace
-kubectl create namespace sandbox-url-shortener
-# или при helm: --create-namespace
-
-# Посмотреть ресурсы в namespace
-kubectl -n sandbox-url-shortener get all
-kubectl -n sandbox-url-shortener get pods,svc,deploy,configmap,secret
-```
-
----
-
-## Антипаттерны
-
-**Хранить настоящие секреты в values.yaml**
-
-```yaml
-# values.yaml — ПЛОХО
-secretEnv:
-  DB_DSN: "postgres://admin:real-password@prod-db:5432/app"
-  # Этот файл в git → пароль утёк
-```
-
-Решения:
-- helm-secrets (шифрование через SOPS)
-- External Secrets Operator (читать из Secret Manager)
-- передавать при деплое через `--set` из CI/CD переменных (не коммитить)
-
-**Одинаковые labels в selector и полных labels**
-
-```yaml
-# ПЛОХО — version в selector
-selector:
-  matchLabels:
-    app: myapp
-    version: "1.0"  # при обновлении версии → конфликт (нельзя изменить selector)
-```
-
-**Не задавать resources в prod**
-
-```yaml
-# ПЛОХО для prod
-resources: {}
-
-# ХОРОШО — K8s знает сколько ресурсов выделить поду
-resources:
-  requests:
-    cpu: "100m"
-    memory: "128Mi"
-  limits:
-    cpu: "500m"
-    memory: "512Mi"
-```
-
-**imagePullPolicy: IfNotPresent в prod**
-
-В kind нужен `IfNotPresent` (образы загружены через `kind load`). В prod нужен `Always` — иначе обновление тега `:latest` не приведёт к обновлению образа.
-
-**Не использовать `helm template` перед apply**
-
-`helm template` перед `helm upgrade --install` показывает ошибки шаблонов до применения к кластеру — пропуск этого шага означает отладку прямо на кластере.
-
----
+Namespace задаёт scope имён и RBAC, но сам по себе не создаёт network isolation. Для неё нужны NetworkPolicy и поддерживающий их dataplane.
 
 ## Interview-ready answer
 
 **1. Что такое chart, values и release?**
 
-- Chart — пакет шаблонов манифестов; values — входные параметры (values.yaml + переопределения `-f`/`--set`, мержатся поверх); release — конкретная установка чарта в кластер со своей историей ревизий (метаданные Helm хранит как Secret в namespace). Один чарт → много releases с разными values.
+Chart — пакет templates и defaults, values — входные параметры рендера, release — установленный экземпляр chart в namespace со своей историей revisions. Один chart можно установить несколько раз.
 
-**2. Чем `version` отличается от `appVersion` в Chart.yaml?**
+**2. Как безопасно проверить upgrade?**
 
-- `version` — версия самого чарта (меняется при изменении шаблонов, SemVer), `appVersion` — версия деплоящегося приложения, чисто информационное поле. Bump-ается независимо.
+Запускаю `helm lint`, рендерю `helm template` с теми же values и namespace, затем проверяю manifest server-side dry-run. В deployment pipeline использую `helm upgrade --install --wait --timeout`, а результат дополнительно проверяю по rollout и метрикам.
 
-**3. Чем `include` отличается от `template` и зачем `dict`?**
+**3. Почему Secret не стоит хранить в values?**
 
-- Оба вызывают именованный шаблон, но `include` возвращает строку, которую можно пайплайнить (`| nindent 4`), а `template` выводит напрямую — поэтому используется только `include`. Именованный шаблон принимает один аргумент-контекст; несколько параметров передаются упаковкой в `dict "root" . "service" "x"`.
+Values и rendered manifests могут попасть в Git, CI output и Helm release metadata. Лучше передавать chart имя существующего Secret, а доставку значения выполнять отдельным secret-management механизмом.
 
-**4. Почему нельзя менять labels в selector?**
+**4. Что реально откатывает `helm rollback`?**
 
-- `spec.selector` Deployment immutable: если полные labels (с версией чарта) попадут в selector, любое обновление версии сломает деплой. Поэтому в selector идут только стабильные `selectorLabels` (name + instance), а изменяемые labels — только в metadata.
+Kubernetes manifests выбранной revision. Он не откатывает автоматически БД, PersistentVolume и внешние side effects, поэтому rollback должен быть частью совместимой release strategy.
 
-**5. Как Helm работает с секретами?**
+## Официальные источники
 
-- Настоящие секреты в values.yaml — антипаттерн (файл в git). Варианты: helm-secrets (SOPS-шифрование values), External Secrets Operator (подтягивает из Vault/Secret Manager), передача через `--set` из переменных CI/CD.
+- [Helm charts](https://helm.sh/docs/topics/charts/)
+- [Chart template guide](https://helm.sh/docs/chart_template_guide/)
+- [Chart best practices](https://helm.sh/docs/chart_best_practices/)
+- [helm upgrade](https://helm.sh/docs/helm/helm_upgrade/)

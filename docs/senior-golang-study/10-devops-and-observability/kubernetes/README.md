@@ -1,30 +1,47 @@
-# Kubernetes
+# Kubernetes для backend-разработчика
 
-Этот раздел про практическую сторону `Kubernetes` для backend-разработчика: не "как стать cluster admin", а как понимать деплой, отказоустойчивость и runtime-поведение Go-сервиса.
+Раздел объясняет не администрирование кластера, а поведение приложения внутри Kubernetes: как Pod получает трафик, что происходит при rollout и отказе ноды, как диагностировать проблемы и корректно завершать Go-сервис.
 
 ## Как читать
 
-1. Сначала понять, какие проблемы `Kubernetes` решает по сравнению с Docker-only.
-2. Разобраться с базовыми сущностями: Pod, Deployment, Service, ConfigMap.
-3. Понять failover, rolling update и работу с конфигами.
-4. Изучить probes и graceful shutdown — Go-специфичная часть, которую спрашивают на интервью.
+| Шаг | Материал | Результат |
+| --- | --- | --- |
+| 1 | [Зачем нужен Kubernetes](./01-kubernetes-basics-for-backend.md) | понимать границы оркестратора и цену его внедрения |
+| 2 | [Основные объекты и deployment flow](./02-core-objects-and-deployment-flow.md) | связать Deployment, ReplicaSet, Pod, Service и EndpointSlice |
+| 3 | [Pod и container](./03-pod-vs-container.md) | не путать жизненный цикл Pod и отдельных контейнеров |
+| 4 | [kubectl](./04-kubectl-commands.md) | диагностировать Pod, rollout и сетевой маршрут |
+| 5 | [Helm](./05-helm.md) | безопасно параметризовать и обновлять манифесты |
+| 6 | [Probes и graceful shutdown](./06-probes-and-graceful-shutdown.md) | реализовать корректный lifecycle Go-сервиса |
+| 7 | [Node failure, rollout и config delivery](./07-node-failure-rollout-and-config-delivery.md) | понимать реальные гарантии высокой доступности |
 
-## Материалы
+## Сквозная модель
 
-- [01. Kubernetes: зачем нужен backend-разработчику](./01-kubernetes-basics-for-backend.md)
-- [02. Core Objects And Deployment Flow](./02-core-objects-and-deployment-flow.md)
-- [03. Pod vs Container](./03-pod-vs-container.md)
-- [04. kubectl: команды с примерами](./04-kubectl-commands.md) — контексты/GKE, pods, logs, exec, deployments, port-forward, secrets, top, events, troubleshooting
-- [05. Helm](./05-helm.md) — чарты, values, шаблонный синтаксис, ConfigMap/Secret/Deployment/Service паттерны, команды
-- [06. Probes и Graceful Shutdown в Go](./06-probes-and-graceful-shutdown.md)
-- [07. Node Failure, Rollout And Config Delivery](./07-node-failure-rollout-and-config-delivery.md)
+```mermaid
+flowchart LR
+    CD["CI/CD"] --> Deployment
+    Deployment --> ReplicaSet
+    ReplicaSet --> Pod
+    Service --> EndpointSlice
+    EndpointSlice -->|"ready endpoints"| Pod
+    Scheduler["Scheduler"] -->|"выбирает Node"| Pod
+    Kubelet["kubelet на Node"] -->|"управляет контейнерами"| Pod
+```
 
-## Что важно уметь объяснить
+Kubernetes работает как система контроллеров: сравнивает желаемое состояние из API с наблюдаемым и постепенно устраняет расхождение. Это **eventual reconciliation**, а не одна атомарная операция.
 
-- зачем `Kubernetes` нужен поверх контейнеров и когда он избыточен;
-- как связаны `Deployment`, `ReplicaSet`, `Pod` и `Service`;
-- что происходит при падении ноды и почему нужно несколько реплик на разных нодах;
-- в чем разница между readiness и liveness probe и что будет если их перепутать;
-- как реализовать graceful shutdown в Go при получении SIGTERM;
-- как `resources.requests/limits` влияют на Go runtime (GOMEMLIMIT, GOMAXPROCS);
-- как CI/CD должен обращаться с image, ConfigMap и rollout.
+## Что должен уметь объяснить senior backend
+
+- почему container image и оркестратор решают разные задачи;
+- чем Pod отличается от container и кто именно перезапускается;
+- как readiness влияет на EndpointSlice и rollout;
+- почему `maxUnavailable: 0` ещё не гарантирует отсутствие ошибок;
+- как Go-сервис обрабатывает `SIGTERM` и завершает in-flight requests;
+- как CPU/memory requests и limits связаны с scheduling, throttling и Go runtime;
+- как пройти путь диагностики `Pod → events → logs → Service → EndpointSlice`.
+
+## Официальные источники
+
+- [Kubernetes Concepts](https://kubernetes.io/docs/concepts/)
+- [Kubernetes API reference](https://kubernetes.io/docs/reference/kubernetes-api/)
+- [kubectl reference](https://kubernetes.io/docs/reference/kubectl/)
+- [Helm documentation](https://helm.sh/docs/)

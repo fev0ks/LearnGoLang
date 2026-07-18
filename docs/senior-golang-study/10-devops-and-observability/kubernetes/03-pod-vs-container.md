@@ -1,141 +1,130 @@
-# Pod vs Container
+# Pod и container: в чём разница
 
-Это вопрос, на котором часто сыпятся даже люди, которые "работали с Kubernetes".
+Container — запускаемый изолированный процесс, а Pod — минимальная единица размещения и жизненного цикла в Kubernetes. Один Pod обычно содержит один основной container, но может объединять несколько тесно связанных процессов.
 
 ## Содержание
 
-- [Container: единица запуска](#container-единица-запуска)
-- [Pod: единица оркестрации](#pod-единица-оркестрации)
-- [Что контейнеры внутри Pod делят](#что-контейнеры-внутри-pod-делят)
-- [Multi-container Pod: когда нужен](#multi-container-pod-когда-нужен)
+- [Короткое сравнение](#короткое-сравнение)
+- [Что разделяют containers внутри Pod](#что-разделяют-containers-внутри-pod)
+- [Кто и что перезапускает](#кто-и-что-перезапускает)
+- [Multi-container Pod](#multi-container-pod)
 - [Init containers](#init-containers)
-- [Жизненный цикл Pod](#жизненный-цикл-pod)
+- [Pod phase и container state](#pod-phase-и-container-state)
 - [Interview-ready answer](#interview-ready-answer)
 
-## Container: единица запуска
+## Короткое сравнение
 
-Контейнер — runtime unit: изолированный процесс с собственным filesystem view, env vars и resource limits.
+| | Container | Pod |
+| --- | --- | --- |
+| Что это | процесс с filesystem view, env и resource controls | один или несколько containers с общей сетевой identity |
+| Кто запускает | container runtime | kubelet через container runtime |
+| Единица scheduling | нет | да, scheduler выбирает Node для Pod |
+| IP в Kubernetes | использует сеть Pod | Pod получает IP |
+| Жизненный цикл | может быть перезапущен внутри Pod | конкретный Pod не переносится на другую Node; создаётся новый |
 
-В Docker работа идёт напрямую с контейнерами. В Kubernetes контейнер никогда не создается напрямую — только Pod, который их оборачивает.
+Kubernetes не создаёт standalone container как workload API object: container описывается внутри `PodSpec`. На практике Pod stateless-сервиса создаёт Deployment через ReplicaSet.
 
-## Pod: единица оркестрации
+## Что разделяют containers внутри Pod
 
-`Pod` — минимальная deployable единица в Kubernetes. Именно Pod, а не контейнер:
+Containers одного Pod:
 
-- получает IP-адрес в кластере;
-- является единицей планирования (scheduler размещает Pod на Node);
-- перезапускается и заменяется Kubernetes;
-- умирает целиком — нельзя перезапустить один контейнер внутри Pod независимо.
+- используют один network namespace, IP и пространство портов;
+- обращаются друг к другу через `localhost`;
+- могут монтировать одни и те же Pod volumes;
+- планируются на одну Node и живут в рамках одного Pod lifecycle.
 
-Упрощенная spec Pod'а для Go-сервиса:
+При этом у каждого container собственные image filesystem, environment, security context и resource requests/limits. Process namespace по умолчанию не общий; его можно включить через `shareProcessNamespace`.
 
-```yaml
-apiVersion: v1
-kind: Pod
-metadata:
-  name: api-server
-spec:
-  containers:
-    - name: api
-      image: myrepo/api-server:v1.2.3
-      ports:
-        - containerPort: 8080
-      env:
-        - name: DB_DSN
-          valueFrom:
-            secretKeyRef:
-              name: api-secrets
-              key: db_dsn
-```
+Общий network namespace позволяет sidecar proxy видеть трафик приложения, но само перенаправление обычно настраивается через iptables, eBPF или другой dataplane, а не возникает автоматически из-за `localhost`.
 
-На практике Pod не создают напрямую — используют Deployment, который управляет Pod'ами через ReplicaSet.
+## Кто и что перезапускает
 
-## Что контейнеры внутри Pod делят
+Здесь важно разделять два механизма:
 
-Контейнеры в одном Pod разделяют:
+1. **Kubelet перезапускает отдельный container** внутри того же Pod согласно container restart policy.
+2. **Workload controller создаёт новый Pod**, если Pod удалён, потерян вместе с Node или больше не соответствует желаемому template.
 
-- **network namespace**: один IP-адрес, одни порты; контейнеры общаются по `localhost`;
-- **UTS namespace**: одно hostname;
-- **volumes**: Pod-level volume монтируется во все контейнеры, которым он нужен.
+Новый Pod получает другой UID и обычно другой IP. Kubernetes не «переносит» существующий Pod между Node.
 
-Они НЕ делят:
-- filesystem (у каждого контейнера свой);
-- process namespace (по умолчанию).
+Поэтому утверждение «при падении container всегда пересоздаётся весь Pod» неверно. Например, `CrashLoopBackOff` обычно означает повторные перезапуски одного container kubelet-ом с увеличивающейся задержкой.
 
-Именно из-за общего network namespace sidecar-прокси (Envoy, Linkerd) работает прозрачно: основной контейнер слушает порт, прокси перехватывает трафик через localhost без изменений в коде приложения.
+## Multi-container Pod
 
-## Multi-container Pod: когда нужен
+Дополнительный container оправдан, когда он должен разделять сеть или volume и иметь общий lifecycle с основным приложением:
 
-Один Pod — один основной контейнер. Второй контейнер добавляется только если логика тесно связана с жизненным циклом основного.
+- proxy или service-mesh sidecar;
+- агент, преобразующий или отправляющий локальные данные;
+- вспомогательный процесс, обслуживающий только этот Pod.
 
-**Sidecar pattern** — наиболее частый случай:
+Не стоит помещать в один Pod два независимо масштабируемых сервиса. Их нельзя отдельно разместить, масштабировать или обновить.
 
-```yaml
-spec:
-  containers:
-    - name: api
-      image: myrepo/api-server:v1.2.3
-    - name: log-forwarder
-      image: fluent/fluent-bit:latest
-      volumeMounts:
-        - name: log-volume
-          mountPath: /var/log/app
-  volumes:
-    - name: log-volume
-      emptyDir: {}
-```
-
-Sidecar запускается и останавливается вместе с основным контейнером, имеет доступ к тем же volumes и сети.
-
-**Ambassador / proxy**: Envoy-sidecar в service mesh (Istio, Linkerd) — перехватывает сетевой трафик к основному контейнеру и от него.
+Kubernetes также поддерживает **native sidecar containers**: они описываются в `initContainers` с `restartPolicy: Always`, запускаются до основных containers и продолжают работать вместе с ними. Kubelet учитывает их порядок при завершении Pod. Обычные containers в `spec.containers` такой специальной гарантии порядка shutdown не дают.
 
 ## Init containers
 
-Init container — специальный контейнер, который запускается и завершается до запуска основных контейнеров. Следующий init container стартует только после успешного завершения предыдущего.
-
-Типичное применение:
-- проверить доступность зависимостей (DB, другой сервис);
-- накатить database migration;
-- сгенерировать или скопировать конфиг-файлы.
+Обычный init container должен успешно завершиться до запуска следующего init container и основных containers:
 
 ```yaml
 spec:
   initContainers:
-    - name: wait-for-db
-      image: busybox
-      command: ['sh', '-c', 'until nc -z postgres:5432; do sleep 2; done']
+    - name: prepare-config
+      image: registry.example/config-renderer:v2
+      command: ["/app/render", "--output=/work/config.yaml"]
+      volumeMounts:
+        - name: work
+          mountPath: /work
   containers:
     - name: api
-      image: myrepo/api-server:v1.2.3
+      image: registry.example/api:v1.2.3
+      volumeMounts:
+        - name: work
+          mountPath: /etc/app
+  volumes:
+    - name: work
+      emptyDir: {}
 ```
 
-Если init container завершается с ошибкой, Pod не стартует, и Kubernetes перезапускает init container согласно `restartPolicy`.
+Хорошие применения: подготовить файлы, проверить локальные prerequisites, получить одноразовый bootstrap artifact.
 
-## Жизненный цикл Pod
+Миграцию общей базы опасно запускать в init container каждой реплики: несколько Pod могут выполнять её одновременно, а rollout блокируется до завершения. Обычно миграции оформляют отдельным `Job` с контролируемой совместимостью схемы.
 
-```text
-Pending -> Running -> Succeeded / Failed
-                  \-> (при ошибке) -> CrashLoopBackOff
-```
+## Pod phase и container state
 
-- `Pending`: Pod принят, ждет размещения на Node или загрузки image.
-- `Running`: хотя бы один контейнер запущен.
-- `Succeeded`: все контейнеры завершились с кодом 0 (для Job/CronJob).
-- `Failed`: контейнер завершился с ненулевым кодом.
-- `CrashLoopBackOff`: контейнер многократно падает, Kubernetes увеличивает backoff между перезапусками.
+Pod phase — грубое итоговое состояние:
 
-`CrashLoopBackOff` — первое, что смотреть при `kubectl get pods`, если что-то не стартует.
+| Phase | Смысл |
+| --- | --- |
+| `Pending` | Pod принят API, но один или несколько containers ещё не готовы к запуску |
+| `Running` | Pod назначен Node, containers созданы, хотя бы один основной container работает или стартует повторно |
+| `Succeeded` | все containers завершились успешно и не будут перезапущены |
+| `Failed` | все containers завершились, и хотя бы один завершился неуспешно либо Pod завершён системой как failed |
+| `Unknown` | состояние Pod не удалось получить, обычно из-за связи с Node |
+
+У container отдельно есть state: `Waiting`, `Running` или `Terminated`, а также `reason`, restart count и last termination state.
+
+`CrashLoopBackOff`, `ImagePullBackOff` и `Terminating` — не Pod phases. Это отображаемые `kubectl` причины/состояния, собранные из нескольких полей. Поэтому для диагностики нужны `kubectl describe pod` и `kubectl logs --previous`, а не только колонка `STATUS`.
 
 ## Interview-ready answer
 
-**1. Чем Pod отличается от контейнера?**
+**1. Чем Pod отличается от container?**
 
-- Container — runtime unit: изолированный процесс. Pod — orchestration unit Kubernetes: получает IP, является единицей планирования и заменяется целиком (нельзя перезапустить один контейнер Pod-а независимо). Pod напрямую не создают — им управляет Deployment через ReplicaSet.
+Container — изолированный процесс, а Pod — единица scheduling и lifecycle Kubernetes. Containers одного Pod используют общий IP и могут делить volumes; scheduler всегда размещает их вместе.
 
-**2. Что делят контейнеры внутри одного Pod?**
+**2. Перезапускается container или весь Pod?**
 
-- Network namespace (один IP, общение через localhost — на этом работают sidecar-прокси вроде Envoy), UTS (hostname) и volumes. Не делят filesystem и по умолчанию process namespace.
+Kubelet может перезапустить упавший container внутри того же Pod. Если нужна замена Pod целиком, Deployment/ReplicaSet создаёт новый объект с новым UID; существующий Pod между Node не переносится.
 
-**3. Когда нужен multi-container Pod и init containers?**
+**3. Когда нужен multi-container Pod?**
 
-- Второй контейнер — только если его жизненный цикл жёстко связан с основным: sidecar (лог-форвардер, service-mesh прокси). Init containers выполняются последовательно до старта основных: дождаться зависимости, накатить миграцию, подготовить конфиг; при ошибке Pod не стартует.
+Когда процессы тесно связаны сетью, volume и lifecycle, например приложение и proxy sidecar. Независимо масштабируемые сервисы должны быть разными workload.
+
+**4. Является ли `CrashLoopBackOff` фазой Pod?**
+
+Нет. Это причина ожидания container между повторными запусками. Pod phase при этом часто остаётся `Running` или `Pending`; точную причину смотрят в container status, events и предыдущих logs.
+
+## Официальные источники
+
+- [Pods](https://kubernetes.io/docs/concepts/workloads/pods/)
+- [Pod lifecycle](https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/)
+- [Init containers](https://kubernetes.io/docs/concepts/workloads/pods/init-containers/)
+- [Sidecar containers](https://kubernetes.io/docs/concepts/workloads/pods/sidecar-containers/)

@@ -1,178 +1,150 @@
-# Core Objects And Deployment Flow
+# Основные объекты и deployment flow
+
+Kubernetes удобнее изучать не как список YAML-полей, а как цепочку ответственности: Deployment управляет ReplicaSet, ReplicaSet создаёт Pod, Service выбирает готовые endpoints.
 
 ## Содержание
 
-- [Deployment](#deployment)
-- [ReplicaSet](#replicaset)
-- [Service](#service)
+- [Карта объектов](#карта-объектов)
+- [Deployment, ReplicaSet и Pod](#deployment-replicaset-и-pod)
+- [Service и EndpointSlice](#service-и-endpointslice)
 - [ConfigMap и Secret](#configmap-и-secret)
 - [HPA](#hpa)
 - [PodDisruptionBudget](#poddisruptionbudget)
-- [Deployment flow](#deployment-flow)
+- [Что происходит при rollout](#что-происходит-при-rollout)
 - [Interview-ready answer](#interview-ready-answer)
 
-## Deployment
+## Карта объектов
 
-`Deployment` — основной объект для stateless сервиса. Описывает желаемое состояние: image, число реплик, resource limits, probes, стратегию обновления.
+| Объект | Роль | Чего не делает |
+| --- | --- | --- |
+| `Pod` | запускает один или несколько тесно связанных containers | не восстанавливает себя на другой Node |
+| `Deployment` | описывает rollout stateless workload | не маршрутизирует трафик |
+| `ReplicaSet` | поддерживает число одинаковых Pod | обычно не создаётся вручную |
+| `Service` | даёт стабильный адрес и выбирает Pod по labels | не создаёт Pod |
+| `EndpointSlice` | хранит backend endpoints Service и их conditions | не заменяет readiness probe |
+| `ConfigMap` | хранит неконфиденциальную конфигурацию | не перезапускает Pod при изменении |
+| `Secret` | хранит чувствительные значения с отдельным RBAC-контролем | base64 не шифрует данные |
+| `HPA` | меняет число реплик по метрикам | не ускоряет запуск новых Pod |
+| `PDB` | ограничивает voluntary disruptions | не защищает от падения Node |
+
+Для batch-задач используют `Job`/`CronJob`, а workload со стабильной identity или storage часто требует `StatefulSet`.
+
+## Deployment, ReplicaSet и Pod
+
+Минимальный production-oriented фрагмент Deployment:
 
 ```yaml
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: api-server
+  name: api
 spec:
   replicas: 3
   selector:
     matchLabels:
-      app: api-server
+      app: api
   strategy:
     type: RollingUpdate
     rollingUpdate:
-      maxSurge: 1        # сколько Pod'ов можно добавить сверх replicas во время rollout
-      maxUnavailable: 0  # ни один Pod не должен пропасть во время rollout
+      maxSurge: 1
+      maxUnavailable: 0
   template:
     metadata:
       labels:
-        app: api-server
+        app: api
     spec:
+      terminationGracePeriodSeconds: 30
       containers:
         - name: api
-          image: myrepo/api-server:v1.2.3
+          image: registry.example/api:v1.2.3
           ports:
-            - containerPort: 8080
+            - name: http
+              containerPort: 8080
           resources:
             requests:
-              cpu: "100m"
-              memory: "128Mi"
+              cpu: 200m
+              memory: 256Mi
             limits:
-              cpu: "500m"
-              memory: "256Mi"
+              memory: 512Mi
           readinessProbe:
             httpGet:
               path: /readyz
-              port: 8080
-            initialDelaySeconds: 5
+              port: http
             periodSeconds: 5
-          livenessProbe:
-            httpGet:
-              path: /healthz
-              port: 8080
-            initialDelaySeconds: 15
-            periodSeconds: 10
-          env:
-            - name: DB_DSN
-              valueFrom:
-                secretKeyRef:
-                  name: api-secrets
-                  key: db_dsn
-            - name: APP_ENV
-              valueFrom:
-                configMapKeyRef:
-                  name: api-config
-                  key: app_env
-      terminationGracePeriodSeconds: 30
 ```
 
-Ключевые параметры:
-- `replicas` — желаемое число Pod'ов;
-- `maxUnavailable: 0` — zero-downtime rollout: новый Pod поднимается и проходит readiness, потом убивается старый;
-- `resources.requests` — минимальные ресурсы для планировщика (без этого HPA не работает);
-- `resources.limits` — жесткий потолок (превышение memory = `OOMKilled`);
-- `terminationGracePeriodSeconds` — время на graceful shutdown перед SIGKILL.
+Ключевые связи:
 
-## ReplicaSet
+- изменение `spec.template` создаёт новую ревизию Deployment и новый ReplicaSet;
+- ReplicaSet поддерживает заданное число Pod конкретного template;
+- scheduler использует `requests` при выборе Node;
+- CPU request влияет на scheduling и QoS, но не резервирует отдельное физическое ядро;
+- memory limit ограничивает cgroup: превышение может закончиться `OOMKilled`;
+- старые ReplicaSet обычно сохраняются с нулём реплик в пределах `revisionHistoryLimit`.
 
-`ReplicaSet` создается Deployment автоматически. Держит нужное число Pod'ов живыми. Каждый новый deploy (изменение template) создает новый ReplicaSet — старый сохраняется с `replicas: 0` для возможности rollback.
+`maxUnavailable: 0` запрещает Deployment добровольно уменьшать число available replicas во время rollout, но не гарантирует zero downtime. Нужны корректная readiness, свободная capacity для surge Pod, совместимые версии и graceful termination.
 
-Прямое создание ReplicaSet не нужно — рабочий уровень абстракции это Deployment.
+## Service и EndpointSlice
 
-## Service
-
-`Service` дает стабильную точку доступа к Pod'ам. Pod'ы могут пересоздаваться с новыми IP — Service скрывает эту нестабильность.
+Pod получает новый IP при замене. Service скрывает эту нестабильность:
 
 ```yaml
 apiVersion: v1
 kind: Service
 metadata:
-  name: api-server
+  name: api
 spec:
   selector:
-    app: api-server
+    app: api
   ports:
-    - port: 80
-      targetPort: 8080
+    - name: http
+      port: 80
+      targetPort: http
   type: ClusterIP
 ```
 
-Типы Service:
-- `ClusterIP` — доступен только внутри кластера (default, для межсервисного взаимодействия);
-- `NodePort` — открывает порт на каждой ноде;
-- `LoadBalancer` — запрашивает облачный LB для внешнего трафика.
+`ClusterIP` используется внутри кластера, `LoadBalancer` обычно интегрируется с внешним cloud load balancer, а `NodePort` открывает порт на Node и чаще служит строительным блоком для других решений.
 
-Внутри кластера Service доступен по DNS: `api-server.namespace.svc.cluster.local` или просто `api-server` в том же namespace.
+Flow трафика:
+
+```mermaid
+flowchart LR
+    Client -->|"api.namespace.svc"| Service
+    Service --> Slice["EndpointSlice"]
+    Slice -->|"ready: true"| Pod1["Pod A"]
+    Slice -->|"ready: true"| Pod2["Pod B"]
+    Slice -.->|"ready: false"| Pod3["Pod C"]
+```
+
+EndpointSlice API заменяет устаревший Endpoints API. Если Service не имеет ready endpoints, проверяют selector, labels и readiness Pod.
 
 ## ConfigMap и Secret
 
-`ConfigMap` хранит non-secret конфигурацию. `Secret` — чувствительные данные (base64-encoded; в etcd без дополнительной настройки хранятся как plaintext — для production рекомендуется encryption at rest или внешний vault).
+| Способ | Обновление существующего процесса | Trade-off |
+| --- | --- | --- |
+| environment variable | не обновляется; нужен новый Pod | просто читать, легко получить смешанные версии при частичном rollout |
+| volume projection | файл обновляется асинхронно | приложение должно перечитать файл; `subPath` mount не обновляется |
 
-```yaml
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: api-config
-data:
-  app_env: "production"
-  log_level: "info"
-  max_connections: "50"
-```
+Обновление ConfigMap само по себе не меняет Pod template и не запускает Deployment rollout. Частый паттерн в Helm — добавлять checksum конфигурации в annotation Pod template: изменение checksum создаёт новую ревизию.
 
-```yaml
-apiVersion: v1
-kind: Secret
-metadata:
-  name: api-secrets
-type: Opaque
-data:
-  db_dsn: cG9zdGdyZXM6Ly91c2VyOnBhc3NAaG9zdC9kYg==  # base64
-```
-
-Два способа пробросить в контейнер:
-
-**Как env vars** (как в примере Deployment выше) — просто, сразу видны в `kubectl exec`. Минус: смена значения требует rollout Pod'ов.
-
-**Как volume mount** — файл в контейнере; при обновлении ConfigMap файл обновляется в живом Pod без rollout (задержка ~1 минута), но приложение должно уметь его перечитывать.
-
-```yaml
-spec:
-  containers:
-    - name: api
-      volumeMounts:
-        - name: config-volume
-          mountPath: /etc/app/config
-  volumes:
-    - name: config-volume
-      configMap:
-        name: api-config
-```
-
-Правило: image должен быть immutable — никаких hardcoded env-specific значений в образе.
+Secret требует строгого RBAC и encryption at rest либо интеграции с внешним secret store. Значения Secret доступны тому, кто может читать объект или процесс/container, поэтому не следует печатать их в logs или рендерить в CI output.
 
 ## HPA
 
-`HorizontalPodAutoscaler` автоматически меняет число реплик на основе метрик.
+HPA периодически рассчитывает желаемое число реплик:
 
 ```yaml
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
-  name: api-server
+  name: api
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
     kind: Deployment
-    name: api-server
-  minReplicas: 2
-  maxReplicas: 10
+    name: api
+  minReplicas: 3
+  maxReplicas: 20
   metrics:
     - type: Resource
       resource:
@@ -182,68 +154,75 @@ spec:
           averageUtilization: 70
 ```
 
-HPA работает только если Pod'ы имеют `resources.requests`. Без requests метрика утилизации не считается.
+Для CPU/memory `Utilization` значение считается относительно соответствующего request. Без request эта метрика для Pod не определена. Custom и external metrics, например длина очереди, не обязаны использовать resource requests.
 
-Ограничение: при резком spike задержка на spin-up новых Pod'ов составляет ~30–60 секунд — Go-сервисы с быстрым стартом справляются лучше, чем JVM-приложения.
+HPA реагирует после измерения нагрузки и не заменяет запас capacity. При резком spike важны время старта Pod, скорость получения метрик, stabilization policy и способность зависимостей выдержать дополнительные реплики.
 
 ## PodDisruptionBudget
-
-`PodDisruptionBudget` (PDB) ограничивает число Pod'ов, которые можно одновременно убрать при voluntary disruption — drain ноды, обновление кластера, eviction.
 
 ```yaml
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
-  name: api-server-pdb
+  name: api
 spec:
   minAvailable: 2
   selector:
     matchLabels:
-      app: api-server
+      app: api
 ```
 
-Без PDB при `kubectl drain node` все Pod'ы на ноде могут быть убраны одновременно — даже при 3 репликах, 2 из которых оказались на этой ноде.
+PDB ограничивает API-initiated voluntary disruptions, например `drain`. Он не защищает от аппаратного отказа Node, network partition или прямого удаления Pod. Слишком строгий PDB может заблокировать обслуживание кластера, особенно если новые Pod не становятся Ready.
 
-## Deployment flow
+## Что происходит при rollout
 
 ```mermaid
-flowchart TD
-    Apply["kubectl apply / CD push"] --> D["Deployment"]
-    D -->|"создает"| NewRS["ReplicaSet (новый)"]
-    NewRS -->|"создает"| Pods["Pod'ы (новые)"]
-    Pods -->|"проходит readiness probe"| Svc["Service переключает трафик"]
-    D -->|"уменьшает до 0"| OldRS["ReplicaSet (старый, хранится для rollback)"]
+sequenceDiagram
+    participant CD
+    participant D as Deployment controller
+    participant RS as New ReplicaSet
+    participant P as New Pod
+    participant E as EndpointSlice
+
+    CD->>D: изменить spec.template
+    D->>RS: создать / масштабировать
+    RS->>P: создать Pod
+    P->>P: pull image, startup, readiness
+    P->>E: Ready condition становится true
+    D->>D: уменьшить старый ReplicaSet
 ```
 
-При rolling update (`maxUnavailable: 0`, `maxSurge: 1`):
-1. Создается новый ReplicaSet.
-2. Стартует один новый Pod.
-3. Kubernetes ждет, пока readiness probe успешно пройдет.
-4. Только после этого удаляется один старый Pod.
-5. Повторять до полной замены.
-
-Откат:
+Для проверки и отката:
 
 ```bash
-kubectl rollout undo deployment/api-server
-kubectl rollout undo deployment/api-server --to-revision=3
-kubectl rollout history deployment/api-server
+kubectl rollout status deployment/api -n production
+kubectl rollout history deployment/api -n production
+kubectl rollout undo deployment/api -n production
 ```
+
+Rollback восстанавливает предыдущий Pod template. Он не откатывает внешнюю миграцию БД или несовместимое состояние, поэтому backward-compatible changes остаются обязанностью приложения и delivery process.
 
 ## Interview-ready answer
 
 **1. Как связаны Deployment, ReplicaSet, Pod и Service?**
 
-- Deployment управляет ReplicaSet-ами (новый на каждый deploy, старый хранится для rollback), ReplicaSet держит нужное число Pod-ов живыми. Service даёт стабильный DNS и балансирует трафик — Pod-ы пересоздаются с новыми IP, Service это скрывает через label selector.
+Deployment управляет ревизиями ReplicaSet, ReplicaSet поддерживает число Pod, а Service выбирает Pod по labels. Готовые адреса публикуются через EndpointSlice; readiness определяет, считается ли endpoint готовым к обычному трафику.
 
-**2. Как устроен zero-downtime rolling update?**
+**2. Гарантирует ли `maxUnavailable: 0` zero downtime?**
 
-- `maxUnavailable: 0` + `maxSurge: 1`: создаётся новый ReplicaSet, поднимается новый Pod, Kubernetes ждёт прохождения readiness probe и только потом удаляет старый Pod — и так до полной замены. Без readiness probe трафик пойдёт в неготовый Pod — 502/503 на каждом деплое. Откат — `kubectl rollout undo`.
+Нет. Он управляет числом available replicas во время rollout. Ещё нужны правильная readiness probe, capacity для `maxSurge`, совместимость старой и новой версии и корректный traffic draining.
 
-**3. Что нужно для работы HPA и зачем PDB?**
+**3. Когда HPA нужны requests?**
 
-- HPA масштабирует реплики по метрикам, но утилизация считается от `resources.requests` — без них HPA не работает. PDB ограничивает, сколько Pod-ов можно одновременно убрать при voluntary disruption (drain, обновление кластера): без него drain ноды может снести большинство реплик разом.
+Для resource metric с `target.type: Utilization`, потому что utilization считается относительно request. HPA по raw, custom или external metric может работать без такого расчёта.
 
-**4. Env vars или volume mount для ConfigMap?**
+**4. От чего защищает PDB?**
 
-- Env — просто и видно в `kubectl exec`, но смена значения требует rollout. Volume mount обновляется в живом Pod (~1 мин задержки) без rollout, но приложение должно уметь перечитывать файл. Секреты в etcd по умолчанию не шифруются — для production нужен encryption at rest или внешний manager.
+От слишком большого числа одновременных voluntary disruptions через Eviction API. Он не является защитой от падения Node и может блокировать drain, если budget нельзя соблюсти.
+
+## Официальные источники
+
+- [Deployments](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/)
+- [Services and EndpointSlices](https://kubernetes.io/docs/concepts/services-networking/service/)
+- [Horizontal Pod Autoscaling](https://kubernetes.io/docs/concepts/workloads/autoscaling/horizontal-pod-autoscale/)
+- [Pod Disruption Budgets](https://kubernetes.io/docs/tasks/run-application/configure-pdb/)

@@ -1,847 +1,426 @@
-# kubectl: команды с примерами вывода
+# kubectl: практическая шпаргалка
 
-Практический справочник команд kubectl для повседневной работы. Каждая команда — с реальным примером вывода.
+`kubectl` — клиент Kubernetes API. Полезнее запомнить не сотни команд, а маршрут диагностики: проверить контекст, найти объект, изучить его состояние и events, затем перейти к logs или сетевому пути.
 
 ## Содержание
 
-- [Контексты и кластеры](#контексты-и-кластеры)
-- [Namespace](#namespace)
-- [Pods: просмотр и статус](#pods-просмотр-и-статус)
-- [Pods: логи](#pods-логи)
-- [Pods: exec и отладка](#pods-exec-и-отладка)
-- [Deployments и rollout](#deployments-и-rollout)
-- [Services и port-forward](#services-и-port-forward)
-- [ConfigMap и Secret](#configmap-и-secret)
-- [Ресурсы: top и requests/limits](#ресурсы-top-и-requestslimits)
-- [Events: что происходит в кластере](#events-что-происходит-в-кластере)
-- [Labels и selectors](#labels-и-selectors)
-- [Apply, delete, scale](#apply-delete-scale)
-- [Полезные флаги и алиасы](#полезные-флаги-и-алиасы)
-- [Быстрый troubleshooting workflow](#быстрый-troubleshooting-workflow)
+- [Безопасный контекст](#безопасный-контекст)
+- [Просмотр ресурсов](#просмотр-ресурсов)
+- [Диагностика Pod](#диагностика-pod)
+- [Logs, exec и debug](#logs-exec-и-debug)
+- [Deployment и rollout](#deployment-и-rollout)
+- [Service и EndpointSlice](#service-и-endpointslice)
+- [Resources и events](#resources-и-events)
+- [Применение изменений](#применение-изменений)
+- [Troubleshooting workflows](#troubleshooting-workflows)
 - [Interview-ready answer](#interview-ready-answer)
 
----
+## Безопасный контекст
 
-## Контексты и кластеры
-
-Контекст = (кластер + пользователь + namespace). Переключение между кластерами — через контексты.
+Большинство опасных ошибок `kubectl` — правильная команда в неправильном кластере или namespace.
 
 ```bash
-# Посмотреть все доступные контексты
-kubectl config get-contexts
-```
-```
-CURRENT   NAME                                    CLUSTER                              AUTHINFO                            NAMESPACE
-          docker-desktop                          docker-desktop                       docker-desktop
-*         gke_mycompany_europe-west4_prod     gke_mycompany_europe-west4_prod  gke_mycompany_europe-west4_prod
-          minikube                                minikube                             minikube                            default
-```
-Звёздочка — текущий активный контекст.
-
-```bash
-# Переключить контекст
-kubectl config use-context gke_mycompany_europe-west4_prod
-```
-```
-Switched to context "gke_mycompany_europe-west4_prod".
-```
-
-```bash
-# Посмотреть текущий контекст
 kubectl config current-context
-```
-```
-gke_mycompany_europe-west4_prod
-```
-
-```bash
-# Получить credentials для GKE кластера (Google Cloud)
-export KUBECONFIG=~/.kube/config
-gcloud container clusters get-credentials prod --region europe-west4 --project mycompany
-```
-```
-Fetching cluster endpoint and auth data.
-kubeconfig entry generated for prod.
-```
-
-```bash
-# Посмотреть полный kubeconfig
-kubectl config view
-
-# Посмотреть только текущий контекст с деталями
+kubectl config get-contexts
 kubectl config view --minify
 ```
 
-```bash
-# Временно использовать другой namespace для всех команд
-kubectl config set-context --current --namespace=my-namespace
-
-# Или использовать --namespace/-n флаг на каждую команду (предпочтительно)
-kubectl get pods -n production
-```
-
----
-
-## Namespace
+Для production-команд полезно указывать контекст и namespace явно:
 
 ```bash
-# Список всех namespace
-kubectl get namespaces
+kubectl --context=prod -n payments get pods
+kubectl --context=prod -n payments auth can-i delete pods
 ```
-```
-NAME              STATUS   AGE
-default           Active   45d
-kube-system       Active   45d
-kube-public       Active   45d
-kube-node-lease   Active   45d
-production        Active   30d
-staging           Active   30d
-monitoring        Active   20d
-```
+
+Переключить сохранённый контекст можно так:
 
 ```bash
-# Сокращение: ns вместо namespaces
-kubectl get ns
-
-# Посмотреть ресурсы во всех namespace одновременно
-kubectl get pods --all-namespaces
-# Или короче:
-kubectl get pods -A
-```
-```
-NAMESPACE     NAME                                     READY   STATUS    RESTARTS   AGE
-kube-system   coredns-565d847f94-8zvcj                 1/1     Running   0          45d
-kube-system   kube-proxy-j7g4s                         1/1     Running   0          45d
-production    my-service-7d6b8f9c4-xkp2m               1/1     Running   0          3h
-production    my-service-7d6b8f9c4-rtq8n               1/1     Running   0          3h
-staging       my-service-6c5b7d8e3-lmn4p               1/1     Running   1          1d
+kubectl config use-context staging
+kubectl config set-context --current --namespace=payments
 ```
 
----
+Явный `-n` лучше для runbook и скриптов: результат не зависит от локального default namespace.
 
-## Pods: просмотр и статус
+<details>
+<summary>Пример вывода списка контекстов</summary>
 
-```bash
-# Список podов в namespace (default)
-kubectl get pods
+```text
+CURRENT   NAME       CLUSTER        AUTHINFO       NAMESPACE
+          staging    staging        developer      payments
+*         prod       prod-eu        developer      payments
+          local      kind-local     kind-local     default
 ```
-```
-NAME                           READY   STATUS    RESTARTS   AGE
-api-server-7d6b8f9c4-xkp2m    1/1     Running   0          3h
-api-server-7d6b8f9c4-rtq8n    1/1     Running   0          3h
-worker-5c4d3e2f1-abc12         1/1     Running   2          1d
-postgres-0                     1/1     Running   0          10d
-```
+
+Звёздочка показывает активный context. Перед изменением production полезно ещё раз вывести `current-context` прямо в том же terminal session.
+
+</details>
+
+## Просмотр ресурсов
+
+Начать стоит с краткого состояния:
 
 ```bash
-# Список в конкретном namespace
-kubectl get pods -n production
+kubectl -n payments get deployment,replicaset,pod,service
+kubectl -n payments get pods -o wide
+kubectl -n payments get pods --show-labels
+kubectl -n payments get pods -w
+```
 
-# С дополнительной информацией: IP, нода
-kubectl get pods -o wide
-```
-```
-NAME                           READY   STATUS    RESTARTS   AGE   IP            NODE                    NOMINATED NODE
-api-server-7d6b8f9c4-xkp2m    1/1     Running   0          3h    10.96.1.14    gke-prod-pool-abc12   <none>
-api-server-7d6b8f9c4-rtq8n    1/1     Running   0          3h    10.96.1.15    gke-prod-pool-def34   <none>
-```
+`kubectl get all` не означает буквально все типы ресурсов: Secret, ConfigMap, Ingress и многие CRD туда не входят.
+
+Получить полное представление объекта или отдельное поле:
 
 ```bash
-# Детальная информация о pod
-kubectl describe pod api-server-7d6b8f9c4-xkp2m -n production
+kubectl -n payments get pod api-abc -o yaml
+kubectl -n payments get pod api-abc -o jsonpath='{.status.containerStatuses[*].restartCount}'
+kubectl explain deployment.spec.strategy.rollingUpdate
 ```
+
+YAML живого объекта содержит status и server defaults, поэтому его не следует без очистки копировать обратно как исходный manifest.
+
+## Диагностика Pod
+
+Базовый цикл:
+
+```bash
+kubectl -n payments get pod api-abc -o wide
+kubectl -n payments describe pod api-abc
+kubectl -n payments logs api-abc -c api --tail=200
 ```
-Name:             api-server-7d6b8f9c4-xkp2m
-Namespace:        production
-Priority:         0
-Node:             gke-prod-pool-abc12/10.132.0.5
-Start Time:       Mon, 22 Apr 2026 09:00:00 +0000
-Labels:           app=api-server
-                  pod-template-hash=7d6b8f9c4
-Status:           Running
-IP:               10.96.1.14
+
+`describe` показывает:
+
+- Node и Pod conditions;
+- state и last state каждого container;
+- exit code, reason и restart count;
+- probes, requests/limits и mounts;
+- связанные events внизу вывода.
+
+Колонка `STATUS` — удобная сводка, но не всегда Pod phase. `CrashLoopBackOff` и `ImagePullBackOff` обычно описывают состояние container.
+
+<details>
+<summary>Пример фрагмента kubectl describe pod</summary>
+
+```text
 Containers:
-  api-server:
-    Image:          gcr.io/mycompany/api-server:v1.2.3
-    Port:           8080/TCP
-    Limits:
-      cpu:     500m
-      memory:  512Mi
-    Requests:
-      cpu:     100m
-      memory:  128Mi
-    Liveness:   http-get http://:8080/healthz delay=30s timeout=5s period=10s
-    Readiness:  http-get http://:8080/ready delay=5s timeout=3s period=5s
-    Environment:
-      DATABASE_URL:  <set to the key 'database_url' in secret 'api-secrets'>
-      LOG_LEVEL:     info
-    Mounts:
-      /var/run/secrets/kubernetes.io/serviceaccount from default-token-xyz (ro)
-Conditions:
-  Type              Status
-  Initialized       True
-  Ready             True
-  ContainersReady   True
-  PodScheduled      True
+  api:
+    Image:          registry.example/api:v1.2.3
+    State:          Waiting
+      Reason:       CrashLoopBackOff
+    Last State:     Terminated
+      Reason:       Error
+      Exit Code:    1
+    Restart Count:  7
+    Readiness:      http-get http://:8080/readyz
 Events:
-  Type    Reason     Age   From               Message
-  ----    ------     ----  ----               -------
-  Normal  Scheduled  3h    default-scheduler  Successfully assigned production/api-server-7d6b8f9c4-xkp2m to gke-prod-pool-abc12
-  Normal  Pulled     3h    kubelet            Container image "gcr.io/mycompany/api-server:v1.2.3" already present on machine
-  Normal  Started    3h    kubelet            Started container api-server
+  Type     Reason   Message
+  Warning  BackOff  Back-off restarting failed container api
 ```
+
+Здесь важнее не слово `CrashLoopBackOff`, а предыдущий `Exit Code`, logs завершившегося процесса и событие, подтверждающее restart backoff.
+
+</details>
+
+| Наблюдение | Частая причина | Следующая проверка |
+| --- | --- | --- |
+| `Pending` | нет capacity, affinity/taint, unbound PVC | `describe pod` → `FailedScheduling` |
+| `ImagePullBackOff` | неверный image/tag или registry credentials | events и `imagePullSecrets` |
+| `CrashLoopBackOff` | процесс завершается после запуска | `logs --previous`, last state, exit code |
+| `OOMKilled` | cgroup memory limit или node OOM | last state, memory graph, limit и working set |
+| `0/1 Ready` | readiness не проходит | probe message, endpoint, timeout |
+| долго `Terminating` | process/preStop/finalizer/volume не завершились | deletion timestamp, events, owner и finalizers |
+
+Не удаляйте finalizers автоматически. Finalizer означает, что контроллер ещё должен завершить cleanup; ручное снятие может оставить внешний ресурс или storage в неконсистентном состоянии.
+
+## Logs, exec и debug
+
+### Logs
 
 ```bash
-# Наблюдать за изменениями в реальном времени
-kubectl get pods -n production -w
+kubectl -n payments logs api-abc -c api --tail=200
+kubectl -n payments logs api-abc -c api --since=30m
+kubectl -n payments logs api-abc -c api -f
+kubectl -n payments logs api-abc -c api --previous
+kubectl -n payments logs -l app=api --all-containers --prefix --tail=50
 ```
-```
-NAME                           READY   STATUS    RESTARTS   AGE
-api-server-7d6b8f9c4-xkp2m    1/1     Running   0          3h
-api-server-new-8e7c9d0b5-zyx1  0/1     Pending   0          0s
-api-server-new-8e7c9d0b5-zyx1  0/1     ContainerCreating   0          2s
-api-server-new-8e7c9d0b5-zyx1  1/1     Running   0          8s
-api-server-7d6b8f9c4-xkp2m    1/1     Terminating   0       3h
-```
+
+`--previous` особенно важен при restart loop: он показывает stdout/stderr предыдущего экземпляра container. `kubectl logs` не заменяет централизованное хранение — после удаления Pod или ротации локального файла часть истории может исчезнуть.
+
+<details>
+<summary>Пример поиска причины предыдущего restart</summary>
 
 ```bash
-# Вывести в JSON / YAML
-kubectl get pod api-server-7d6b8f9c4-xkp2m -o json
-kubectl get pod api-server-7d6b8f9c4-xkp2m -o yaml
+pod=api-7d8d6fcb9b-2px8m
 
-# Вытащить конкретное поле (jsonpath)
-kubectl get pod api-server-7d6b8f9c4-xkp2m -o jsonpath='{.status.podIP}'
-# → 10.96.1.14
-
-kubectl get pods -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.status.phase}{"\n"}{end}'
-# → api-server-7d6b8f9c4-xkp2m  Running
-#   worker-5c4d3e2f1-abc12       Running
+kubectl -n payments logs "$pod" -c api --previous --tail=100
+kubectl -n payments get pod "$pod" \
+  -o jsonpath='{.status.containerStatuses[?(@.name=="api")].lastState.terminated.reason}{"\n"}{.status.containerStatuses[?(@.name=="api")].lastState.terminated.exitCode}{"\n"}'
 ```
 
----
+```text
+level=error msg="configuration invalid" field=DATABASE_URL
+Error
+1
+```
 
-## Pods: логи
+</details>
 
-```bash
-# Логи пода (последние N строк)
-kubectl logs api-server-7d6b8f9c4-xkp2m --tail=100
-```
-```
-2026-04-22T09:00:01Z INFO  server started addr=:8080
-2026-04-22T09:00:05Z INFO  connected to database host=postgres port=5432
-2026-04-22T09:15:23Z INFO  request method=GET path=/api/users status=200 latency=12ms
-2026-04-22T09:15:24Z ERROR failed to process request error="context deadline exceeded"
-```
+### Exec и ephemeral container
 
 ```bash
-# Follow (stream) — как tail -f
-kubectl logs api-server-7d6b8f9c4-xkp2m -f
+kubectl -n payments exec api-abc -c api -- printenv APP_ENV
+kubectl -n payments exec -it api-abc -c api -- /bin/sh
 
-# Логи за последние 30 минут
-kubectl logs api-server-7d6b8f9c4-xkp2m --since=30m
-
-# Логи с конкретного времени
-kubectl logs api-server-7d6b8f9c4-xkp2m --since-time="2026-04-22T09:00:00Z"
-
-# Логи предыдущего контейнера (если pod перестартовал)
-kubectl logs api-server-7d6b8f9c4-xkp2m --previous
+kubectl -n payments debug -it api-abc \
+  --image=busybox:1.36.1 \
+  --target=api
 ```
 
-```bash
-# Pod с несколькими контейнерами — указать контейнер
-kubectl logs api-server-7d6b8f9c4-xkp2m -c api-server
-kubectl logs api-server-7d6b8f9c4-xkp2m -c sidecar-proxy
+`exec` работает только если нужная утилита есть в image. Ephemeral container полезен для distroless image, но требует RBAC и поддержки runtime; `--target` не на каждой платформе гарантирует видимость процессов другого container.
 
-# Логи всех pod с label app=api-server
-kubectl logs -l app=api-server --tail=50
-kubectl logs -l app=api-server -f  # stream со всех реплик
-```
+Временный сетевой клиент:
 
 ```bash
-# Логи deployment (все поды сразу)
-kubectl logs deployment/api-server --tail=20
-
-# Stern — удобная утилита для логов нескольких подов
-# brew install stern
-stern api-server -n production --tail=50
-# → показывает логи всех подов с префиксом имени пода и цветом
+kubectl -n payments run curl-debug \
+  --image=curlimages/curl:8.12.1 \
+  --restart=Never --rm -it -- \
+  curl -sv http://api:8080/readyz
 ```
 
----
+В production используйте разрешённый и закреплённый digest/tag debug image.
 
-## Pods: exec и отладка
+### Port-forward
 
 ```bash
-# Зайти в контейнер (shell)
-kubectl exec -it api-server-7d6b8f9c4-xkp2m -- /bin/sh
-kubectl exec -it api-server-7d6b8f9c4-xkp2m -- /bin/bash  # если есть bash
+kubectl -n payments port-forward service/api 8080:80
+kubectl -n payments port-forward pod/api-abc 8081:8080
+```
 
-# Выполнить команду без интерактивного режима
-kubectl exec api-server-7d6b8f9c4-xkp2m -- env
-kubectl exec api-server-7d6b8f9c4-xkp2m -- cat /etc/hosts
-kubectl exec api-server-7d6b8f9c4-xkp2m -- curl -s http://localhost:8080/healthz
-```
-```
-{"status":"ok","version":"v1.2.3"}
-```
+По умолчанию listener доступен только локально. `--address=0.0.0.0` открывает туннель другим машинам и может обойти обычный ingress/auth path — использовать его без явной защиты опасно.
+
+## Deployment и rollout
 
 ```bash
-# В pod с несколькими контейнерами
-kubectl exec -it api-server-7d6b8f9c4-xkp2m -c api-server -- /bin/sh
-
-# Скопировать файл из/в pod
-kubectl cp api-server-7d6b8f9c4-xkp2m:/app/config.yaml ./config-backup.yaml
-kubectl cp ./local-config.yaml api-server-7d6b8f9c4-xkp2m:/tmp/config.yaml
+kubectl -n payments get deployment api
+kubectl -n payments describe deployment api
+kubectl -n payments get replicaset -l app=api
+kubectl -n payments rollout status deployment/api --timeout=5m
+kubectl -n payments rollout history deployment/api
 ```
 
-```bash
-# Запустить временный pod для отладки сети (нет curl в основном образе?)
-kubectl run debug-pod --image=curlimages/curl:latest --restart=Never -it --rm -- \
-  curl -s http://api-server:8080/healthz
-```
-```
-{"status":"ok"}
-pod "debug-pod" deleted
-```
+Откатить Pod template:
 
 ```bash
-# Запустить netshoot для диагностики сети
-kubectl run netshoot --image=nicolaka/netshoot -it --rm --restart=Never -n production -- bash
-# Внутри: dig, nslookup, curl, tcpdump, ss, nmap — всё есть
+kubectl -n payments rollout undo deployment/api
+kubectl -n payments rollout undo deployment/api --to-revision=3
 ```
+
+Для разовой операции доступны:
 
 ```bash
-# Посмотреть что внутри запущенного контейнера без exec (если нет shell)
-kubectl debug -it api-server-7d6b8f9c4-xkp2m --image=busybox --target=api-server
-# Ephemeral container — K8s 1.23+ (GA с 1.25); нужен для distroless/scratch образов
+kubectl -n payments set image deployment/api api=registry.example/api:v1.2.4
+kubectl -n payments rollout restart deployment/api
 ```
 
----
+В GitOps/CD такие изменения лучше делать в source of truth: иначе следующий reconciliation вернёт состояние из Git, а live cluster получит труднообъяснимый drift.
 
-## Deployments и rollout
-
-```bash
-# Список deployments
-kubectl get deployments -n production
-```
-```
-NAME          READY   UP-TO-DATE   AVAILABLE   AGE
-api-server    3/3     3            3           30d
-worker        2/2     2            2           30d
-```
+Если rollout завис, проверяют новый ReplicaSet и его Pod, а не только Deployment:
 
 ```bash
-# Детали deployment
-kubectl describe deployment api-server -n production
+kubectl -n payments get replicaset
+kubectl -n payments get pods -l app=api
+kubectl -n payments describe deployment api
 ```
+
+<details>
+<summary>Пример нормального и зависшего rollout</summary>
+
+```text
+$ kubectl -n payments rollout status deployment/api --timeout=5m
+Waiting for deployment "api" rollout to finish: 2 of 3 updated replicas are available...
+deployment "api" successfully rolled out
 ```
-Name:                   api-server
-Namespace:              production
-Replicas:               3 desired | 3 updated | 3 total | 3 available | 0 unavailable
-StrategyType:           RollingUpdate
-MinReadySeconds:        0
-RollingUpdateStrategy:  25% max unavailable, 25% max surge
-Pod Template:
-  Labels:  app=api-server
-  Containers:
-   api-server:
-    Image:  gcr.io/mycompany/api-server:v1.2.3
-    ...
-OldReplicaSets:  <none>
-NewReplicaSet:   api-server-7d6b8f9c4 (3/3 replicas created)
-Events:          <none>
-```
+
+При timeout команда возвращает ненулевой exit code. Дальше полезно сравнить ReplicaSet:
 
 ```bash
-# Статус rollout (во время деплоя)
-kubectl rollout status deployment/api-server -n production
+kubectl -n payments get rs -l app=api
+kubectl -n payments get pods -l app=api \
+  -o custom-columns='NAME:.metadata.name,READY:.status.containerStatuses[*].ready,IMAGE:.spec.containers[*].image,NODE:.spec.nodeName'
 ```
-```
-Waiting for deployment "api-server" rollout to finish: 1 of 3 updated replicas are available...
-Waiting for deployment "api-server" rollout to finish: 2 of 3 updated replicas are available...
-deployment "api-server" successfully rolled out
-```
+
+</details>
+
+## Service и EndpointSlice
+
+Проверка маршрута от Service к Pod:
 
 ```bash
-# История деплоев
-kubectl rollout history deployment/api-server -n production
-```
-```
-REVISION  CHANGE-CAUSE
-1         kubectl apply --filename=deploy.yaml
-2         kubectl set image deployment/api-server api-server=gcr.io/mycompany/api-server:v1.2.2
-3         kubectl set image deployment/api-server api-server=gcr.io/mycompany/api-server:v1.2.3
+kubectl -n payments describe service api
+kubectl -n payments get pods -l app=api --show-labels
+kubectl -n payments get endpointslice \
+  -l kubernetes.io/service-name=api -o wide
 ```
 
-```bash
-# Детали конкретной ревизии
-kubectl rollout history deployment/api-server --revision=2 -n production
+`Endpoints` API deprecated начиная с Kubernetes 1.33; для новых runbook следует использовать `EndpointSlice`.
 
-# Откатить на предыдущую версию
-kubectl rollout undo deployment/api-server -n production
+Если ready endpoints отсутствуют:
 
-# Откатить на конкретную ревизию
-kubectl rollout undo deployment/api-server --to-revision=1 -n production
-```
-```
-deployment.apps/api-server rolled back
-```
+1. selector Service должен совпадать с labels Pod;
+2. `targetPort` должен указывать на правильный port/name;
+3. Pod должен быть Ready;
+4. NetworkPolicy и приложение должны разрешать трафик.
 
-```bash
-# Обновить image (задеплоить новую версию)
-kubectl set image deployment/api-server api-server=gcr.io/mycompany/api-server:v1.2.4 -n production
+<details>
+<summary>Пример EndpointSlice с ready и terminating endpoints</summary>
 
-# Принудительный restart всех pod (без изменения image)
-kubectl rollout restart deployment/api-server -n production
-```
-```
-deployment.apps/api-server restarted
-```
-
-```bash
-# Приостановить rollout (пауза деплоя)
-kubectl rollout pause deployment/api-server -n production
-
-# Возобновить
-kubectl rollout resume deployment/api-server -n production
-```
-
----
-
-## Services и port-forward
-
-```bash
-# Список services
-kubectl get services -n production
-# Или сокращение:
-kubectl get svc -n production
-```
-```
-NAME          TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)    AGE
-api-server    ClusterIP   10.100.1.15     <none>        8080/TCP   30d
-postgres      ClusterIP   10.100.1.20     <none>        5432/TCP   30d
-kafka-ui      ClusterIP   10.100.1.25     <none>        8080/TCP   10d
-```
-
-```bash
-# Детальная информация о сервисе (видно endpoints — какие pod зарегистрированы)
-kubectl describe svc api-server -n production
-```
-```
-Name:              api-server
-Namespace:         production
-Selector:          app=api-server
-Type:              ClusterIP
-IP:                10.100.1.15
-Port:              http  8080/TCP
-TargetPort:        8080/TCP
-Endpoints:         10.96.1.14:8080,10.96.1.15:8080,10.96.1.16:8080
-Session Affinity:  None
-```
-
-```bash
-# Port-forward: пробросить service на локальный порт
-# Формат: kubectl port-forward svc/<name> <local>:<remote> -n <namespace>
-
-# Пробросить kafka-ui на localhost:8080
-kubectl port-forward svc/kafka-ui 8080:8080 -n default
-
-# Пробросить postgres на localhost:5433 (чтобы не конфликтовать с локальным)
-kubectl port-forward svc/postgres 5433:5432 -n default
-
-# Пробросить сервис на порт 9080 (удалённый порт — 9081)
-kubectl port-forward svc/platform-core 9080:9081 -n default
-```
-```
-Forwarding from 127.0.0.1:5433 -> 5432
-Forwarding from [::1]:5433 -> 5432
-Handling connection for 5433
-```
-
-После этого: `psql -h localhost -p 5433 -U postgres`
-
-```bash
-# Port-forward к конкретному pod (а не через service)
-kubectl port-forward pod/api-server-7d6b8f9c4-xkp2m 8080:8080 -n production
-
-# Слушать на всех интерфейсах (по умолчанию только localhost)
-kubectl port-forward svc/api-server 8080:8080 --address=0.0.0.0 -n production
-```
-
-```bash
-# Endpoints — к каким pod идут запросы через service
-kubectl get endpoints api-server -n production
-```
-```
-NAME         ENDPOINTS                                            AGE
-api-server   10.96.1.14:8080,10.96.1.15:8080,10.96.1.16:8080   30d
-```
-
----
-
-## ConfigMap и Secret
-
-```bash
-# Список configmap
-kubectl get configmap -n production
-```
-```
-NAME               DATA   AGE
-api-config         3      30d
-nginx-config       1      30d
-kube-root-ca.crt   1      45d
-```
-
-```bash
-# Посмотреть содержимое configmap
-kubectl get configmap api-config -o yaml -n production
-```
 ```yaml
-apiVersion: v1
-kind: ConfigMap
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
 metadata:
-  name: api-config
-  namespace: production
-data:
-  LOG_LEVEL: "info"
-  FEATURE_FLAGS: "new-ui=true,dark-mode=false"
-  MAX_CONNECTIONS: "100"
+  labels:
+    kubernetes.io/service-name: api
+addressType: IPv4
+ports:
+  - name: http
+    port: 8080
+endpoints:
+  - addresses: ["10.42.1.17"]
+    conditions:
+      ready: true
+      serving: true
+      terminating: false
+  - addresses: ["10.42.2.21"]
+    conditions:
+      ready: false
+      serving: true
+      terminating: true
 ```
+
+Обычный Service traffic использует ready endpoint. У terminating endpoint `ready: false`; поля `serving` и `terminating` позволяют aware-клиентам реализовать более сложный draining.
+
+</details>
+
+Для разделения проблем:
+
+- `port-forward pod/...` проверяет приложение, обходя Service selection;
+- запрос к Service из debug Pod проверяет DNS, Service и cluster networking;
+- внешний запрос дополнительно включает Ingress/Gateway/load balancer.
+
+## Resources и events
+
+`kubectl top` требует Metrics API, обычно предоставляемый Metrics Server:
 
 ```bash
-# Список secrets
-kubectl get secrets -n production
-```
-```
-NAME                  TYPE                                  DATA   AGE
-api-secrets           Opaque                                3      30d
-default-token-xyz     kubernetes.io/service-account-token  3      45d
-registry-credentials  kubernetes.io/dockerconfigjson        1      30d
-```
-
-```bash
-# Посмотреть имена ключей в secret (значения — base64)
-kubectl describe secret api-secrets -n production
-```
-```
-Name:         api-secrets
-Namespace:    production
-Type:  Opaque
-
-Data
-====
-database_url:  45 bytes
-jwt_secret:    32 bytes
-redis_url:     38 bytes
-```
-
-```bash
-# Декодировать значение секрета
-kubectl get secret api-secrets -o jsonpath='{.data.database_url}' -n production | base64 -d
-# → postgres://user:password@postgres:5432/mydb
-
-# Все значения сразу
-kubectl get secret api-secrets -o go-template='{{range $k,$v := .data}}{{$k}}: {{$v | base64decode}}{{"\n"}}{{end}}' -n production
-```
-
----
-
-## Ресурсы: top и requests/limits
-
-```bash
-# Потребление CPU и памяти по pod (нужен metrics-server)
-kubectl top pods -n production
-```
-```
-NAME                           CPU(cores)   MEMORY(bytes)
-api-server-7d6b8f9c4-xkp2m    45m          128Mi
-api-server-7d6b8f9c4-rtq8n    38m          122Mi
-worker-5c4d3e2f1-abc12         120m         256Mi
-postgres-0                     15m          512Mi
-```
-
-```bash
-# Потребление по нодам
+kubectl -n payments top pods --containers
 kubectl top nodes
 ```
-```
-NAME                          CPU(cores)   CPU%   MEMORY(bytes)   MEMORY%
-gke-prod-pool-abc12        823m         20%    3840Mi          50%
-gke-prod-pool-def34        412m         10%    2048Mi          26%
-gke-prod-pool-ghi56        1124m        28%    4352Mi          56%
-```
+
+Requests и limits:
 
 ```bash
-# Посмотреть requests/limits у всех pod
-kubectl get pods -n production -o custom-columns=\
-'NAME:.metadata.name,CPU_REQ:.spec.containers[*].resources.requests.cpu,CPU_LIM:.spec.containers[*].resources.limits.cpu,MEM_REQ:.spec.containers[*].resources.requests.memory,MEM_LIM:.spec.containers[*].resources.limits.memory'
-```
-```
-NAME                           CPU_REQ   CPU_LIM   MEM_REQ   MEM_LIM
-api-server-7d6b8f9c4-xkp2m    100m      500m      128Mi     512Mi
-worker-5c4d3e2f1-abc12         200m      1000m     256Mi     1Gi
+kubectl -n payments get pod api-abc \
+  -o custom-columns='NAME:.metadata.name,CPU_REQ:.spec.containers[*].resources.requests.cpu,CPU_LIMIT:.spec.containers[*].resources.limits.cpu,MEM_REQ:.spec.containers[*].resources.requests.memory,MEM_LIMIT:.spec.containers[*].resources.limits.memory'
 ```
 
----
-
-## Events: что происходит в кластере
-
-Events — первое место куда смотреть при проблемах с pod.
+Events полезны для scheduling, image pull, probes и volume operations:
 
 ```bash
-# События в namespace (отсортированы по времени)
-kubectl get events -n production --sort-by='.lastTimestamp'
+kubectl -n payments get events --sort-by='.metadata.creationTimestamp'
+kubectl -n payments get events --field-selector type=Warning
+kubectl -n payments get events \
+  --field-selector involvedObject.name=api-abc
 ```
-```
-LAST SEEN   TYPE      REASON              OBJECT                                MESSAGE
-5m          Normal    Scheduled           Pod/api-server-new-8e7c9d0b5-zyx1    Successfully assigned to gke-prod-pool-abc12
-5m          Normal    Pulling             Pod/api-server-new-8e7c9d0b5-zyx1    Pulling image "gcr.io/mycompany/api-server:v1.2.4"
-4m          Normal    Pulled              Pod/api-server-new-8e7c9d0b5-zyx1    Successfully pulled image
-4m          Normal    Started             Pod/api-server-new-8e7c9d0b5-zyx1    Started container api-server
-2m          Warning   BackOff             Pod/worker-5c4d3e2f1-abc12           Back-off restarting failed container
-1m          Warning   OOMKilled           Pod/worker-5c4d3e2f1-abc12           Container worker exceeded memory limit
-```
+
+Events имеют ограниченный срок хранения и могут агрегироваться. Для долгого расследования нужны централизованные logs, metrics и audit trail.
+
+## Применение изменений
+
+Безопасная последовательность для declarative manifests:
 
 ```bash
-# Только Warning events
-kubectl get events -n production --field-selector type=Warning
-
-# События для конкретного объекта
-kubectl get events -n production --field-selector involvedObject.name=api-server-7d6b8f9c4-xkp2m
-
-# Наблюдать за событиями в реальном времени
-kubectl get events -n production -w
+kubectl diff -f ./k8s/
+kubectl apply --dry-run=server -f ./k8s/
+kubectl apply -f ./k8s/
+kubectl -n payments rollout status deployment/api --timeout=5m
 ```
 
----
+- `--dry-run=client` проверяет локальную генерацию;
+- `--dry-run=server` проходит admission и server-side validation без сохранения;
+- `diff` показывает ожидаемое изменение, но может требовать права patch;
+- `apply` успешен до завершения rollout, поэтому статус проверяют отдельно.
 
-## Labels и selectors
+<details>
+<summary>Пример diff перед изменением image и resources</summary>
 
-```bash
-# Посмотреть labels у pod
-kubectl get pods --show-labels -n production
-```
-```
-NAME                           READY   STATUS    LABELS
-api-server-7d6b8f9c4-xkp2m    1/1     Running   app=api-server,pod-template-hash=7d6b8f9c4,version=v1.2.3
-worker-5c4d3e2f1-abc12         1/1     Running   app=worker,pod-template-hash=5c4d3e2f1
-```
-
-```bash
-# Выбрать pod по label (selector)
-kubectl get pods -l app=api-server -n production
-kubectl get pods -l app=api-server,version=v1.2.3 -n production
-
-# Отрицательный selector
-kubectl get pods -l 'app!=worker' -n production
-
-# Selector с in
-kubectl get pods -l 'app in (api-server, worker)' -n production
-
-# Добавить label к pod
-kubectl label pod api-server-7d6b8f9c4-xkp2m debug=true -n production
-
-# Удалить label
-kubectl label pod api-server-7d6b8f9c4-xkp2m debug- -n production
-```
-
----
-
-## Apply, delete, scale
-
-```bash
-# Применить манифест (создать или обновить)
-kubectl apply -f deployment.yaml
-kubectl apply -f ./k8s/  # все файлы в директории
-kubectl apply -f ./k8s/ -R  # рекурсивно
-
-# Dry-run: показать что изменится, не применяя
-kubectl apply -f deployment.yaml --dry-run=client
-kubectl apply -f deployment.yaml --dry-run=server  # отправить в API server, не сохранять
-
-# Diff: посмотреть разницу между текущим и манифестом
-kubectl diff -f deployment.yaml
-```
 ```diff
--  image: gcr.io/mycompany/api-server:v1.2.3
-+  image: gcr.io/mycompany/api-server:v1.2.4
+ spec:
+   template:
+     spec:
+       containers:
+         - name: api
+-          image: registry.example/api:v1.2.3
++          image: registry.example/api:v1.2.4
+           resources:
+             requests:
+-              memory: 128Mi
++              memory: 256Mi
 ```
 
-```bash
-# Удалить ресурс
-kubectl delete pod api-server-7d6b8f9c4-xkp2m -n production  # pod пересоздастся
-kubectl delete deployment api-server -n production             # удалить deployment
+Такой diff показывает изменение Pod template и ожидаемый rollout, но не доказывает, что новый image пройдёт startup/readiness или поместится на Node.
 
-# Удалить по манифесту
-kubectl delete -f deployment.yaml
+</details>
 
-# Удалить все pod в namespace (deployment их пересоздаст)
-kubectl delete pods --all -n staging
+Команды `delete`, `scale`, `edit`, `patch` и `rollout undo` изменяют кластер. Перед ними проверяют context, namespace, owner resource и source of truth.
+
+## Troubleshooting workflows
+
+### Pod перезапускается
+
+```text
+get pod
+  → describe pod: state / last state / exit code / events
+  → logs --previous
+  → metrics и dependency logs
 ```
 
-```bash
-# Масштабирование
-kubectl scale deployment api-server --replicas=5 -n production
-```
-```
-deployment.apps/api-server scaled
-```
+### Rollout не завершается
 
-```bash
-# Автомасштабирование (HPA)
-kubectl get hpa -n production
-```
-```
-NAME         REFERENCE              TARGETS   MINPODS   MAXPODS   REPLICAS   AGE
-api-server   Deployment/api-server  45%/70%   2         10        3          30d
+```text
+rollout status
+  → новый ReplicaSet
+  → его Pod: Pending, image pull, startup, readiness
+  → capacity для maxSurge и progressDeadline
+  → исправить manifest или rollback
 ```
 
-```bash
-# Редактировать ресурс прямо в кластере (откроет $EDITOR)
-kubectl edit deployment api-server -n production
+### Service не отвечает
+
+```text
+Service selector и targetPort
+  → Pod labels и readiness
+  → EndpointSlice conditions
+  → запрос из debug Pod
+  → NetworkPolicy / Gateway / external LB
 ```
-
----
-
-## Полезные флаги и алиасы
-
-### Сокращения ресурсов
-
-| Полное название | Сокращение |
-|---|---|
-| `namespaces` | `ns` |
-| `pods` | `po` |
-| `services` | `svc` |
-| `deployments` | `deploy` |
-| `configmaps` | `cm` |
-| `persistentvolumeclaims` | `pvc` |
-| `replicasets` | `rs` |
-| `statefulsets` | `sts` |
-| `horizontalpodautoscalers` | `hpa` |
-| `ingresses` | `ing` |
-
-### Shell алиасы (в ~/.zshrc или ~/.bashrc)
-
-```bash
-alias k='kubectl'
-alias kgp='kubectl get pods'
-alias kgpw='kubectl get pods -w'
-alias kgs='kubectl get svc'
-alias kgd='kubectl get deployment'
-alias kl='kubectl logs'
-alias klf='kubectl logs -f'
-alias ke='kubectl exec -it'
-alias kd='kubectl describe'
-alias kdp='kubectl describe pod'
-
-# Быстрое переключение контекста
-alias kprod='kubectl config use-context gke_mycompany_europe-west4_prod'
-alias klocal='kubectl config use-context docker-desktop'
-```
-
-### kubectx + kubens: удобное переключение
-
-```bash
-# Установить
-brew install kubectx
-
-# Показать контексты и переключить
-kubectx                       # список контекстов
-kubectx gke_mycompany_...    # переключить
-kubectx -                     # вернуться к предыдущему
-
-# Переключить namespace
-kubens production
-kubens -  # вернуться к предыдущему
-```
-
-### Вывод в разных форматах
-
-```bash
-kubectl get pods -o wide          # дополнительные колонки (IP, node)
-kubectl get pods -o yaml          # полный YAML
-kubectl get pods -o json          # JSON
-kubectl get pods -o name          # только имена: pod/api-server-xxx
-kubectl get pods -o jsonpath=...  # конкретное поле
-kubectl get pods -o custom-columns=NAME:.metadata.name,STATUS:.status.phase
-```
-
----
-
-## Быстрый troubleshooting workflow
-
-### Pod не стартует
-
-```bash
-# 1. Смотрим статус
-kubectl get pods -n production
-# CrashLoopBackOff, OOMKilled, ImagePullBackOff, Pending, Error
-
-# 2. Смотрим события pod
-kubectl describe pod <pod-name> -n production
-# Раздел Events внизу — причина обычно там
-
-# 3. Смотрим логи (в том числе предыдущего контейнера)
-kubectl logs <pod-name> -n production --previous
-kubectl logs <pod-name> -n production --tail=100
-```
-
-### Типичные статусы и причины
-
-| Статус | Что значит | Куда смотреть |
-|---|---|---|
-| `Pending` | Нет ресурсов или нода не найдена | `describe pod` → Events: FailedScheduling |
-| `ImagePullBackOff` | Не может скачать образ | `describe pod` → Events: неверный tag или credentials |
-| `CrashLoopBackOff` | Pod падает при старте | `logs --previous` → что пишет приложение перед смертью |
-| `OOMKilled` | Превысил limits.memory | `describe pod` → Last State: OOMKilled; увеличить limit |
-| `Terminating` висит | Не может завершиться | Проверить finalizers: `kubectl patch pod ... -p '{"metadata":{"finalizers":[]}}' --type=merge` |
-| `0/1 Ready` | Probe не проходит | `describe pod` → Readiness probe failed |
-
-```bash
-# Деплой завис: новые pod не становятся Ready
-kubectl rollout status deployment/api-server -n production
-# Waiting for... (не завершается)
-
-# Посмотреть состояние replicaset
-kubectl get rs -n production
-
-# Посмотреть события deployment
-kubectl describe deployment api-server -n production
-# Раздел Events покажет почему новые pod не стартуют
-
-# Если нужно быстро откатить
-kubectl rollout undo deployment/api-server -n production
-```
-
-```bash
-# Service не достигает pod
-kubectl get endpoints api-server -n production
-# Если ENDPOINTS = <none> — selector в Service не совпадает с labels у pod
-
-kubectl get pods --show-labels -n production  # проверить labels
-kubectl describe svc api-server -n production  # проверить selector
-```
-
-```bash
-# Нужно срочно посмотреть переменные окружения
-kubectl exec api-server-7d6b8f9c4-xkp2m -n production -- env | sort
-
-# Нет ли OOM за последнее время
-kubectl get events -n production --field-selector reason=OOMKilling
-```
-
----
 
 ## Interview-ready answer
 
-**1. Pod не стартует — как диагностировать?**
+**1. Как диагностировать Pod в `CrashLoopBackOff`?**
 
-- Сначала `kubectl get pods` — статус подсказывает класс проблемы (Pending / ImagePullBackOff / CrashLoopBackOff / OOMKilled). Затем `kubectl describe pod` — секция Events внизу почти всегда содержит причину (FailedScheduling, неверный tag, failed probe). Для падающего приложения — `kubectl logs --previous`: логи именно того контейнера, который умер.
+Смотрю `describe pod`, чтобы увидеть container last state, exit code и events, затем `logs --previous`. После этого проверяю config, probes, memory limit и зависимости. `CrashLoopBackOff` — не отдельная фаза Pod, а backoff между рестартами container.
 
-**2. Чем describe отличается от logs и events?**
+**2. Чем отличаются `get`, `describe`, `logs` и `events`?**
 
-- `logs` — stdout/stderr самого приложения; `describe` — состояние объекта глазами Kubernetes (probes, лимиты, mounts) плюс его события; `get events` — события всего namespace, полезно когда непонятно, какой объект виноват. Диагностика обычно идёт describe → events → logs.
+`get` даёт краткое или структурированное состояние объекта, `describe` объединяет ключевые поля и связанные events, `logs` показывает stdout/stderr container, а events объясняют решения платформы: scheduling, pull, probe или mount.
 
-**3. Service не отдаёт трафик на pod — что проверять?**
+**3. Как диагностировать пустой Service?**
 
-- `kubectl get endpoints <svc>`: если ENDPOINTS пуст — selector Service не совпадает с labels pod-ов (`get pods --show-labels`) либо pod-ы не проходят readiness probe (не-ready pod из endpoints исключается). `port-forward` к pod-у напрямую помогает отделить проблему приложения от проблемы маршрутизации.
+Сверяю selector Service с labels Pod, затем readiness и EndpointSlice. Если endpoint есть, проверяю `targetPort`, запрос изнутри кластера и NetworkPolicy. Прямой port-forward к Pod помогает отделить приложение от Service path.
+
+## Официальные источники
+
+- [kubectl quick reference](https://kubernetes.io/docs/reference/kubectl/quick-reference/)
+- [Debug Pods](https://kubernetes.io/docs/tasks/debug/debug-application/debug-pods/)
+- [Debug Services](https://kubernetes.io/docs/tasks/debug/debug-application/debug-service/)
+- [EndpointSlices](https://kubernetes.io/docs/concepts/services-networking/endpoint-slices/)
