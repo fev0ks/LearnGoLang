@@ -9,6 +9,10 @@
 
 ## Структура раздела
 
+### Группа 0 — Введение
+
+- [00. Что такое ОС и зачем она нужна](./00-what-is-an-os.md) — задачи ядра, граница user/kernel, syscall и другие способы взаимодействия с ОС, место Go runtime в общей картине
+
 ### Группа 1 — Память: от железа до Go
 
 - [02. Иерархия памяти](./02-memory-hierarchy.md) — пирамида от регистра до сети, latency numbers, DRAM устройство, SSD vs HDD, локальность доступа
@@ -23,7 +27,7 @@
 ### Группа 3 — OS threading
 
 - [06. Процессы и потоки](./06-processes-and-threads.md) — PID/TID, fork/exec/clone, kernel vs user mode, syscalls, task_struct, /proc, goroutines vs threads vs processes, когда Go создаёт OS thread, LockOSThread
-- [07. Context switching и scheduling](./07-context-switching-and-scheduling.md) — что сохраняется при switch, стоимость через cold cache, CFS, nice values, I/O vs CPU bound, Go M:N scheduler, async preemption в 1.14+, когда goroutine паркуется, GOMAXPROCS в контейнерах
+- [07. Переключение контекста и планирование CPU](./07-context-switching-and-scheduling.md) — состояния потоков, добровольные и вынужденные переключения, CFS/EEVDF, `nice`, cgroups, миграции между CPU и диагностика через `pidstat`/`perf`
 
 ## Что должен знать senior
 
