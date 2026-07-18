@@ -1,35 +1,63 @@
-# Map Internals
+# Map internals без лишней магии
 
-Внутренности `map` в Go: архитектура до Go 1.24 и новая реализация на Swiss Tables начиная с Go 1.24.
+Раздел разделяет две вещи, которые часто смешивают:
 
-## Материалы
+1. **семантика языка** — что гарантируют lookup, `range`, `delete`, nil map и concurrent access;
+2. **реализация runtime** — как Go размещает и ищет элементы внутри hash table.
 
-- [01. hmap + bmap (до Go 1.24)](./01-hmap-before-1.24.md) — hmap struct, bmap bucket layout, tophash, lookup, overflow chains, инкрементальная эвакуация
-- [02. Swiss Tables (с Go 1.24)](./02-swiss-tables-since-1.24.md) — open addressing, ctrl bytes, matchH2 bitset, tombstones, batch copy рост, directory
-- [03. Задачки и подводные камни](./03-puzzles-and-gotchas.md) — version-agnostic гочи: порядок итерации, NaN-ключ, nil map, concurrent fatal, неадресуемость, map не сжимаются
-- [04. sync.Map](./04-sync-map.md) — две реализации (read/dirty ≤1.23 vs hash-trie 1.24+), почему lock-free чтение масштабируется по ядрам (кэш-линии), бенчмарки vs map+RWMutex/Mutex, когда брать, ловушки (боксинг any, Range, нет Len)
+Начиная с Go 1.24 builtin `map` использует реализацию на основе Swiss Tables. Старые статьи про `hmap`, `bmap`, overflow buckets и incremental evacuation описывают Go 1.23 и ниже.
 
-## Порядок чтения
+## Как читать
 
-1. Начни с `01-hmap-before-1.24.md` — понять, что было до
-2. Затем `02-swiss-tables-since-1.24.md` — что заменили и почему
-3. `03-puzzles-and-gotchas.md` — задачки на поведение map (одинаково в обеих версиях)
+| Шаг | Материал | Что нужно вынести |
+| --- | --- | --- |
+| 1 | [Swiss Tables с Go 1.24](./02-swiss-tables-since-1.24.md) | актуальная mental model lookup/insert/delete/grow |
+| 2 | [Задачки и gotchas](./03-puzzles-and-gotchas.md) | наблюдаемое поведение, не зависящее от runtime layout |
+| 3 | [sync.Map](./04-sync-map.md) | выбор concurrent map и актуальный hash-trie |
+| 4 | [Историческая hmap до Go 1.24](./01-hmap-before-1.24.md) | понимать старые статьи и отличия прежней реализации |
 
-## Вопросы senior-уровня
+Историческую главу не нужно учить первой. Для современного собеседования обычно достаточно сказать, что Go 1.24 заменил bucket chaining на Swiss Tables, и дальше объяснять актуальную модель.
 
-- как устроен bucket в hmap: сколько слотов, как хранятся ключи и значения
-- зачем tophash и почему ключи хранятся отдельно от значений
-- как работает инкрементальная эвакуация при росте map
-- почему порядок итерации по map случаен
-- что изменилось в Go 1.24: Swiss Tables vs hmap
-- как ctrl-байт в Swiss Tables позволяет проверить 8 слотов одной операцией
-- почему при delete в Swiss Tables нужны tombstones (ctrlDeleted)
-- H1 vs H2: как разделяется хэш в Swiss Tables
-- почему рост через полное копирование (Swiss Tables) не хуже инкрементальной эвакуации по latency
-- что такое directory в Swiss Tables для больших map
+## Одна схема на весь раздел
 
-## Перекрёстные ссылки
+```mermaid
+flowchart LR
+    Key["key"] --> Hash["hash(key, seed)"]
+    Hash --> Location["выбрать table и стартовую group"]
+    Hash --> Fingerprint["H2: короткий fingerprint"]
+    Location --> Probe["проверять groups"]
+    Fingerprint --> Candidates["быстро найти candidate slots"]
+    Probe --> Candidates
+    Candidates --> Equal["полностью сравнить candidate keys"]
+    Equal --> Result["value / miss / место вставки"]
+```
 
-- [Memory Internals: Allocator](../memory-internals/02-allocator.md) — как Go аллоцирует память под map elements
-- [Memory Internals: GC](../memory-internals/04-garbage-collector.md) — write barrier при записи в map
-- [Scheduler](../runtime-scheduler/01-scheduler-and-preemption.md) — GMP, почему concurrent map access не thread-safe
+Hash не доказывает равенство ключей. Он только быстро приводит поиск к небольшому числу кандидатов; окончательное решение всегда делает сравнение ключей.
+
+## Что действительно важно senior backend
+
+- lookup в среднем близок к `O(1)`, но это не hard real-time guarantee;
+- key должен быть comparable, а interface key проверяется по dynamic type;
+- элемент map не addressable: структуру нужно достать, изменить и записать обратно;
+- `range` не имеет стабильного порядка, а изменения во время обхода имеют специальную семантику;
+- builtin map не поддерживает concurrent read/write без внешней синхронизации;
+- массовый `delete` не обещает вернуть backing memory;
+- `sync.Map` — специализированный инструмент, а не автоматическая замена `map + Mutex`.
+
+## Практические эксперименты
+
+Расширенные примеры находятся под `<details>` рядом с соответствующей темой:
+
+- ручной lookup по H1/H2 и ctrl bytes;
+- tombstone и продолжение probe sequence;
+- задачки «что выведет»;
+- typed wrapper и benchmark для `sync.Map`;
+- сравнение Swiss Tables с исторической `hmap`.
+
+## Официальные источники
+
+- [Go 1.24 release notes](https://go.dev/doc/go1.24)
+- [Faster Go maps with Swiss Tables](https://go.dev/blog/swisstable)
+- [Go map specification](https://go.dev/ref/spec#Map_types)
+- [Current runtime maps source](https://go.dev/src/internal/runtime/maps/)
+- [sync.Map documentation](https://pkg.go.dev/sync#Map)

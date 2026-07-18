@@ -1,412 +1,888 @@
-# `sync.Map`: устройство, две реализации, бенчмарки
+# `sync.Map`: когда использовать и как она устроена
 
-`sync.Map` — потокобезопасная мапа из stdlib. Практически важно — чем она отличается от `map + Mutex` и когда её брать; а технически интереснее всего то, что **её реализацию переписали в Go 1.24**: классический дизайн read/dirty заменили на конкурентный хэш-trie. Этот файл — про внутренности обеих реализаций, про то, почему lock-free чтение масштабируется по ядрам, и про реальные бенчмарки.
+`sync.Map` — потокобезопасная map из стандартной библиотеки Go. Она позволяет нескольким goroutines одновременно читать, добавлять, заменять и удалять значения без внешнего `Mutex`.
 
-Про быстрый выбор «что взять» и API в контексте других примитивов — в [concurrency/03-sync-primitives](../concurrency-and-performance/03-sync-primitives.md), раздел «sync.Map»; здесь — глубина и «почему».
+Но это не универсальная замена обычной `map`. У `sync.Map` нет статической типизации ключей и значений, `Len` и согласованного snapshot. Зато она предоставляет готовые атомарные операции над **одним ключом**: `LoadOrStore`, `Swap`, `CompareAndSwap`, `LoadAndDelete`.
+
+Начиная с Go 1.24 внутри используется concurrent hash-trie. Объяснения через `read`, `dirty`, `misses` и promotion описывают реализацию Go 1.23 и ниже, поэтому эта модель вынесена в отдельный исторический раздел.
 
 ## Содержание
 
-- [Зачем он нужен: чем плох `map + RWMutex`](#зачем-он-нужен-чем-плох-map--rwmutex)
-- [API](#api)
-- [Реализация до Go 1.24: read/dirty](#реализация-до-go-124-readdirty)
-  - [Структуры и три состояния entry](#структуры-и-три-состояния-entry)
-  - [Пути Load / Store / Delete](#пути-load--store--delete)
-  - [Промоушн и почему write-heavy проигрывал](#промоушн-и-почему-write-heavy-проигрывал)
-- [Реализация с Go 1.24: хэш-trie](#реализация-с-go-124-хэш-trie)
-  - [Структура и спуск по дереву](#структура-и-спуск-по-дереву)
-  - [Пути Load / Store / Delete (trie)](#пути-load--store--delete-trie)
-  - [Коллизии: expand и overflow](#коллизии-expand-и-overflow)
-  - [Почему запись масштабируется](#почему-запись-масштабируется)
-- [Низкий уровень: почему чтение масштабируется](#низкий-уровень-почему-чтение-масштабируется)
-- [Бенчмарки](#бенчмарки)
-- [Когда использовать](#когда-использовать)
-- [Ловушки](#ловушки)
+- [Зачем нужна sync.Map](#зачем-нужна-syncmap)
+- [Когда выбирать sync.Map](#когда-выбирать-syncmap)
+- [API: что делает каждая операция](#api-что-делает-каждая-операция)
+- [Memory model и безопасная публикация](#memory-model-и-безопасная-публикация)
+- [Как работает Range](#как-работает-range)
+- [Ментальная модель hash-trie](#ментальная-модель-hash-trie)
+- [Как hash выбирает путь](#как-hash-выбирает-путь)
+- [Как выполняется Load](#как-выполняется-load)
+- [Как выполняются Store и другие изменения](#как-выполняются-store-и-другие-изменения)
+- [Как разрешаются коллизии](#как-разрешаются-коллизии)
+- [Как работают Delete и Clear](#как-работают-delete-и-clear)
+- [Историческая реализация read/dirty](#историческая-реализация-readdirty)
+- [Практические patterns](#практические-patterns)
+- [Как сравнивать с map и Mutex](#как-сравнивать-с-map-и-mutex)
+- [Типичные ошибки](#типичные-ошибки)
 - [Interview-ready answer](#interview-ready-answer)
 
----
+## Зачем нужна sync.Map
 
-## Зачем он нужен: чем плох `map + RWMutex`
-
-Обычная мапа не потокобезопасна — конкурентная запись даёт `fatal error: concurrent map read and map write` (см. [03-puzzles](./03-puzzles-and-gotchas.md)). Базовое решение — `map + sync.RWMutex`. Кажется, что `RWMutex` идеален для read-heavy: много читателей не блокируют друг друга. Но есть незаметная проблема на уровне железа: **`RLock()` сам по себе пишет в общее состояние мьютекса** (счётчик читателей). Эта запись инвалидирует кэш-линию мьютекса во всех остальных ядрах → они вынуждены перечитывать её из памяти. Чем больше ядер читают, тем сильнее эта кэш-линия «пинг-понгует» между ними (cache-line bouncing), и читатели начинают тормозить **друг друга**, хотя данные не меняются.
-
-`sync.Map` решает именно это: его путь чтения **не пишет в общую память вообще** — только атомарные загрузки указателей. Поэтому читатели не мешают друг другу и масштабирование идёт почти линейно по ядрам (бенчмарки ниже).
-
----
-
-## API
+Обычная Go map не поддерживает конкурентную запись и чтение. Такой код содержит data race и может завершиться panic:
 
 ```go
-var m sync.Map // нулевое значение готово к работе; копировать после использования нельзя
+var users = map[string]int{}
 
-m.Store("k", 1)                     // записать
-v, ok := m.Load("k")                // прочитать → (any, bool)
-v, loaded := m.LoadOrStore("k", 2)  // прочитать или записать, если не было
-v, loaded := m.LoadAndDelete("k")   // прочитать и удалить
-m.Delete("k")                       // удалить
+go func() {
+	users["alice"] = 1
+}()
 
-prev, loaded := m.Swap("k", 9)            // Go 1.20+
-swapped := m.CompareAndSwap("k", 9, 10)   // Go 1.20+
-deleted := m.CompareAndDelete("k", 10)    // Go 1.20+
-
-m.Range(func(k, v any) bool { return true }) // обход; false — прервать
-m.Clear()                                     // Go 1.23+
+go func() {
+	_ = users["alice"]
+}()
 ```
 
-Ключи и значения — `any`. Это сразу два следствия: **нет типобезопасности** и **боксинг** не-указательных значений (см. [Ловушки](#ловушки)).
+Классическое решение — защищать map общим lock:
 
-**Почему нулевое значение готово к работе, а `Store` в него не паникует** (в отличие от записи в `nil`-мапу). `sync.Map` — это **структура**, а не reference-тип. `var m sync.Map` создаёт валидную пустую структуру: все поля в нуле (готовый `Mutex`, внутренние мапы/указатели — `nil`). Методы вызываются на `&m`, и `Store` **лениво инициализирует** внутренности при первой записи — паниковать нечему.
+```go
+type UserMap struct {
+	mu    sync.RWMutex
+	users map[string]int
+}
+
+func (m *UserMap) Load(name string) (int, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	value, ok := m.users[name]
+	return value, ok
+}
+
+func (m *UserMap) Store(name string, value int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.users[name] = value
+}
+```
+
+Это хороший вариант по умолчанию:
+
+- ключи и значения имеют compile-time types;
+- под одним lock можно проверить или изменить несколько записей;
+- легко добавить `Len`, snapshot и другие операции;
+- поведение структуры очевидно из кода.
+
+`sync.Map` полезна, когда внешний общий lock сам становится источником contention либо когда готовые атомарные операции точно совпадают с моделью задачи.
+
+## Когда выбирать sync.Map
+
+Официальная документация выделяет два основных сценария:
+
+1. значение для ключа записывается один раз, затем много раз читается — например append-only cache или registry;
+2. разные goroutines работают в основном с непересекающимися наборами ключей.
+
+Практическая таблица выбора:
+
+| Ситуация | Обычно выбрать | Почему |
+| --- | --- | --- |
+| Небольшая map, contention не измерен | `map + Mutex` | Проще API, меньше косвенности |
+| Нужна строгая типизация | `map[K]V + Mutex` | Нет `any` и type assertions |
+| Нужно атомарно поддерживать invariant нескольких ключей | `map + Mutex` | `sync.Map` атомарна только на уровне одной операции и одного ключа |
+| Append-mostly registry/cache с большим числом readers | Измерить `sync.Map` | Lock-free read path хорошо подходит access pattern |
+| Goroutines изменяют разные ключи | Измерить `sync.Map` или sharded map | Изменения могут блокировать разные ветви |
+| Нужен `LoadOrStore`, `Swap` или CAS одного ключа | `sync.Map` | Операция уже атомарна и выражена одним method call |
+| Нужен согласованный snapshot или точный `Len` | Другая структура под lock | `Range` не даёт snapshot, `Len` отсутствует |
+| Один hot key постоянно перезаписывается | Отдельный `atomic`, lock или benchmark | Один ключ всё равно создаёт contention |
+
+`RWMutex` также не является автоматическим ускорением по сравнению с `Mutex`: учёт readers имеет стоимость, а writer ждёт активных readers. Итоговый выбор подтверждается benchmark с реальным соотношением чтений и записей и реальным распределением ключей.
+
+## API: что делает каждая операция
+
+Нулевое значение `sync.Map` готово к использованию:
 
 ```go
 var m sync.Map
-m.Store("k", 1)   // ок: лениво создаёт внутренние структуры
 
-var raw map[string]int
-raw["k"] = 1      // panic: assignment to entry in nil map
+m.Store("key", 1)
+value, ok := m.Load("key")
 ```
 
-Обычная `map` — reference-тип: её zero value это `nil` (заголовок мапы пуст), а у встроенного `m[k]=v` ленивой инициализации нет → обращение к полям несуществующего `hmap` даёт панику. Нюанс: работает именно нулевое значение **структуры**. `var m *sync.Map` (nil-**указатель**) на `m.Store(...)` упадёт уже на nil-разыменовании.
+После первого использования `sync.Map` нельзя копировать. Обычно её хранят как поле объекта и передают сам объект по pointer.
 
----
+### Основные методы
 
-## Реализация до Go 1.24: read/dirty
+| Method | Результат | Что атомарно |
+| --- | --- | --- |
+| `Load(key)` | Текущее значение и `ok` | Одно чтение ключа |
+| `Store(key, value)` | Ничего | Установка значения ключа |
+| `LoadOrStore(key, value)` | Existing/stored value и `loaded` | Прочитать существующее или сохранить переданное |
+| `Swap(key, value)` | Предыдущее значение и `loaded` | Заменить и вернуть предыдущее |
+| `CompareAndSwap(key, old, new)` | `swapped` | Заменить, только если текущее значение равно `old` |
+| `LoadAndDelete(key)` | Удалённое значение и `loaded` | Прочитать и удалить |
+| `CompareAndDelete(key, old)` | `deleted` | Удалить, только если значение равно `old` |
+| `Delete(key)` | Ничего | Удалить ключ, если он существует |
+| `Clear()` | Ничего | Сделать map пустой |
+| `Range(f)` | Ничего | Обойти ключи без snapshot guarantee |
 
-Классический дизайн (всё ещё полезно понимать — он жил во всех версиях до 1.24). Идея: держать **два** представления мапы — почти неизменный снимок для lock-free чтения и «грязную» мапу под мьютексом для записи новых ключей.
+Для `Load`, `Store` и `Delete` документация заявляет амортизированную сложность `O(1)`. Это не означает одинаковую latency каждого вызова: коллизии, allocations, конкуренция за node lock и работа GC всё равно влияют на отдельные операции.
 
-### Структуры и три состояния entry
+Пример различия между похожими методами:
 
 ```go
-// sync/map.go (до Go 1.24), упрощённо
+actual, loaded := m.LoadOrStore("worker-1", worker)
+// loaded == true: actual уже находился в map.
+// loaded == false: worker сохранён этим вызовом.
+
+previous, loaded := m.Swap("worker-1", replacement)
+// loaded == true: previous содержит заменённое значение.
+// loaded == false: ключа не было, replacement просто добавлен.
+```
+
+Все methods принимают `any`. Поэтому публичный API не мешает случайно записать под одним ключом значения разных типов:
+
+```go
+m.Store("timeout", 5*time.Second)
+m.Store("timeout", "five seconds")
+
+timeout := value.(time.Duration) // panic, если прочитана string
+```
+
+### Ограничения key и value
+
+Динамический тип ключа должен быть comparable, как и у обычной `map[any]any`. Slice, map и function нельзя использовать как ключ:
+
+```go
+m.Store([]int{1, 2, 3}, "value") // panic: hash of unhashable type []int
+```
+
+Значение само по себе может быть любого типа. Но `old`, переданный в `CompareAndSwap` или `CompareAndDelete`, должен иметь comparable dynamic type, потому что method сравнивает его с текущим значением.
+
+```go
+m.Store("ids", []int{1, 2, 3})
+
+_ = m.CompareAndSwap("ids", []int{1, 2, 3}, []int{4, 5})
+// panic: []int нельзя сравнивать через ==
+```
+
+### `nil` не означает отсутствие ключа
+
+В `sync.Map` можно сохранить `nil`:
+
+```go
+m.Store("result", nil)
+
+value, ok := m.Load("result")
+fmt.Println(value, ok) // <nil> true
+```
+
+Поэтому отсутствие ключа определяют по `ok`, а не по `value == nil`.
+
+## Memory model и безопасная публикация
+
+Документация `sync.Map` формулирует гарантию через Go memory model: write operation **synchronizes before** read operation, которая наблюдает результат этой записи.
+
+Простыми словами: объект можно полностью подготовить, сохранить в `sync.Map`, а другая goroutine, которая прочитает именно это значение, увидит завершённую инициализацию.
+
+```go
+type Config struct {
+	Timeout time.Duration
+	Hosts   []string
+}
+
+config := &Config{
+	Timeout: 3 * time.Second,
+	Hosts:   []string{"api-1", "api-2"},
+}
+
+m.Store("config", config)
+
+value, _ := m.Load("config")
+loaded := value.(*Config)
+fmt.Println(loaded.Timeout, loaded.Hosts)
+```
+
+Гарантия относится к публикации ссылки и уже выполненной инициализации. Она **не превращает содержимое объекта в concurrent-safe структуру**.
+
+```go
+value, _ := m.Load("config")
+config := value.(*Config)
+
+// Если другая goroutine одновременно читает Hosts,
+// эта запись создаёт data race.
+config.Hosts = append(config.Hosts, "api-3")
+```
+
+Для дальнейших изменений объекта нужны собственный lock, atomics, copy-on-write или правило immutable-after-publication.
+
+<details>
+<summary>Какие методы считаются read и write operations</summary>
+
+В терминах документации:
+
+- read operations: `Load`, `LoadAndDelete`, `LoadOrStore`, `Swap`, `CompareAndSwap`, `CompareAndDelete`;
+- write operations: `Delete`, `LoadAndDelete`, `Store`, `Swap`;
+- `LoadOrStore` является write operation, когда возвращает `loaded == false`;
+- `CompareAndSwap` является write operation, когда возвращает `swapped == true`;
+- `CompareAndDelete` является write operation, когда возвращает `deleted == true`.
+
+Некоторые методы одновременно читают старое состояние и записывают новое, поэтому находятся в обоих списках.
+
+`Clear` не включён в этот перечень в public memory-model contract. Не стоит использовать его как неявный publication barrier для несвязанных данных.
+
+</details>
+
+### Атомарность ограничена одним вызовом
+
+Два последовательных method calls не превращаются в транзакцию:
+
+```go
+if value, ok := m.Load("pending"); ok {
+	m.Delete("pending")
+	m.Store("running", value)
+}
+```
+
+Между `Load`, `Delete` и `Store` может вмешаться другая goroutine. Если требуется invariant «value находится ровно в одном из двух ключей», нужен общий lock или другая state model.
+
+## Как работает Range
+
+```go
+m.Range(func(key, value any) bool {
+	fmt.Println(key, value)
+	return true
+})
+```
+
+`Range` последовательно вызывает callback, но при этом:
+
+- не создаёт согласованный snapshot;
+- не блокирует остальные methods на всё время обхода;
+- посещает каждый key не более одного раза;
+- для конкретного key может увидеть value из любого момента во время вызова `Range`;
+- разрешает callback вызывать methods той же `sync.Map`;
+- останавливается, когда callback возвращает `false`;
+- по public contract может иметь стоимость `O(N)`, даже если callback быстро вернул `false`.
+
+<details>
+<summary>Почему Range нельзя использовать для согласованного отчёта</summary>
+
+Пусть перед обходом map логически содержит:
+
+```text
+A = 10
+B = 20
+```
+
+Во время `Range` другая goroutine выполняет:
+
+```text
+A = 11
+delete(B)
+C = 30
+```
+
+Обход может увидеть, например, `A = 10`, не увидеть `B` и увидеть `C = 30`. Такой набор не обязан совпадать с состоянием map в один конкретный момент времени.
+
+Это нормально для best-effort метрик или очистки cache. Для billing report, consistent export или проверки invariant нужен snapshot под внешней синхронизацией либо другая структура.
+
+</details>
+
+## Ментальная модель hash-trie
+
+С Go 1.24 публичная `sync.Map` делегирует операции internal concurrent hash-trie.
+
+Trie здесь — дерево, путь в котором определяется не символами ключа, а частями его hash:
+
+```text
+hash(key):  [4 bits][4 bits][4 bits][4 bits] ...
+                |       |       |
+root ----------+       |       |
+    child --------------+       |
+         child -----------------+
+              entry(key, value)
+```
+
+Каждый внутренний, или indirect, node содержит 16 child slots. Почему 16: четыре bits кодируют число от `0` до `15`.
+
+Slot — это одна позиция в массиве `children[16]`. В ней находится atomic pointer на:
+
+- `nil`, если ветвь пустая;
+- `entry`, если здесь уже можно хранить key/value;
+- следующий indirect node, если нескольким keys нужен более глубокий уровень.
+
+```mermaid
+flowchart LR
+    Root["root: 16 slots"]
+    Root -->|"slot A"| Branch["indirect node: 16 slots"]
+    Root -->|"slot 3"| E1["entry: key/value"]
+    Branch -->|"slot 7"| E2["entry: key/value"]
+    Branch -->|"slot C"| E3["entry: key/value"]
+```
+
+Дерево создаётся лениво: не выделяется полный массив всех возможных путей. Новые уровни появляются только там, где hash prefixes разных keys совпадают.
+
+<details>
+<summary>Упрощённые internal structures</summary>
+
+```go
+type HashTrieMap[K comparable, V any] struct {
+	root     atomic.Pointer[indirect[K, V]]
+	keyHash  hashFunc
+	valEqual equalFunc
+	seed     uintptr
+}
+
+type indirect[K comparable, V any] struct {
+	dead     atomic.Bool
+	mu       Mutex
+	parent   *indirect[K, V]
+	children [16]atomic.Pointer[node[K, V]]
+}
+
+type entry[K comparable, V any] struct {
+	overflow atomic.Pointer[entry[K, V]]
+	key      K
+	value    V
+}
+```
+
+Реальный `HashTrieMap` также содержит состояние ленивой инициализации. Hash function и value equality function берутся из type metadata, а случайный `seed` создаётся отдельно для экземпляра map.
+
+Public `sync.Map` хранит `HashTrieMap[any, any]`; generic types во фрагменте относятся к internal implementation, а не к публичному API.
+
+</details>
+
+## Как hash выбирает путь
+
+На каждом уровне используются четыре bits hash. Для 64-bit hash получается не более 16 уровней, для 32-bit — не более 8:
+
+```text
+64 bits / 4 bits per level = 16 levels
+32 bits / 4 bits per level = 8 levels
+```
+
+Текущая реализация начинает со старших bits. Номер child slot вычисляется так:
+
+```go
+index := (hash >> hashShift) & 0xF
+```
+
+`0xF` в binary выглядит как `1111`, поэтому операция `& 0xF` оставляет только нужные четыре bits. Получившееся число и есть номер slot на этом уровне.
+
+Например, для условного hash:
+
+```text
+hash = 0xA37C...
+       | ||
+       | |+-- третий уровень выбирает slot 7
+       | +--- второй уровень выбирает slot 3
+       +----- root выбирает slot A, то есть 10
+```
+
+Путь имеет вид:
+
+```text
+root.children[10]
+    -> children[3]
+        -> children[7]
+            -> ...
+```
+
+Обычно key встречает `entry` намного раньше, чем заканчиваются все hash bits. Глубина зависит от того, сколько начальных частей hash совпадает у keys в одной ветви.
+
+Hash использует случайный seed, поэтому этот путь является implementation detail: нельзя рассчитывать, что один key всегда попадёт в один и тот же slot между разными map или запусками процесса.
+
+## Как выполняется Load
+
+Упрощённый read path:
+
+1. Вычисляется `hash(key)` с seed конкретной map.
+2. Через atomic load читается root.
+3. Из очередных четырёх bits вычисляется child index.
+4. Child pointer читается атомарно.
+5. Если pointer равен `nil`, key отсутствует.
+6. Если pointer ведёт на indirect node, поиск спускается на следующий уровень.
+7. Если pointer ведёт на entry, сравнивается полный key.
+8. При полной hash collision дополнительно просматривается overflow chain.
+
+Главная особенность: обычный `Load` не берёт mutex узлов. Readers идут по атомарно опубликованным pointers.
+
+```text
+Load(key)
+   |
+   v
+hash(key)
+   |
+   v
+atomic root load
+   |
+   v
+child by 4 hash bits
+   |
+   +-- nil ------> miss
+   |
+   +-- indirect -> next 4 bits
+   |
+   +-- entry ----> full key comparison -> value/miss
+```
+
+Это не означает «никакой синхронизации». Atomic loads и publication pointers и являются механизмом синхронизации read path.
+
+## Как выполняются Store и другие изменения
+
+`Store`, `Swap`, успешный `CompareAndSwap` и вставляющая ветка `LoadOrStore` изменяют дерево. В общих чертах mutation работает так:
+
+1. Без node lock проходит trie и находит предполагаемый parent и slot.
+2. Берёт mutex найденного parent indirect node.
+3. Повторно читает slot и проверяет, что node не удалён.
+4. Если состояние изменилось, отпускает lock и начинает поиск заново.
+5. Создаёт новый entry или готовое subtree.
+6. Атомарно публикует новый pointer в slot, то есть одним действием делает готовую структуру видимой readers.
+7. Отпускает node mutex.
+
+Перепроверка после взятия lock обязательна. Пока goroutine шла по дереву, другая goroutine могла заменить entry, расширить ветвь или удалить indirect node.
+
+### Почему блокировка локальная
+
+Mutex находится не один на всю map, а в каждом indirect node:
+
+```text
+root
+  |
+  +-- branch A -- node lock A -- keys A...
+  |
+  +-- branch B -- node lock B -- keys B...
+```
+
+Изменения в глубоких независимых ветвях могут выполняться под разными locks. Но из этого не следует, что любые два `Store` всегда независимы:
+
+- новые или неглубокие keys могут встретиться на root lock;
+- один hot key использует один и тот же parent;
+- keys с общим hash prefix дольше идут по одной ветви;
+- CAS одного значения всё равно сериализуется с конкурирующими изменениями этого значения.
+
+### Почему entry заменяется целиком
+
+При изменении существующего key реализация создаёт новый entry и публикует pointer на него, а не меняет поле `value` внутри уже видимого entry.
+
+```text
+reader 1 -> old entry(value=10)
+
+writer builds new entry(value=11)
+writer atomically replaces slot pointer
+
+reader 2 -> new entry(value=11)
+```
+
+Reader видит старый целый entry либо новый целый entry. Он не видит частично изменённый node. Цена такого подхода — дополнительные allocations, pointers и последующая работа GC.
+
+## Как разрешаются коллизии
+
+Важно различать две ситуации.
+
+### Совпал только hash prefix
+
+У двух разных hashes совпадают bits, уже использованные на текущем пути:
+
+```text
+hash A: A B C 1 ...
+hash B: A B C 9 ...
+        -----
+        общий prefix
+```
+
+В slot пока лежит `entry A`. При добавлении B реализация создаёт дополнительные indirect nodes, пока очередные четыре bits не начнут отличаться:
+
+```text
+slot A
+  -> slot B
+       -> slot C
+            +-- slot 1 -> entry A
+            +-- slot 9 -> entry B
+```
+
+Сначала полностью строится новое subtree, и только затем его верхний pointer публикуется в старом slot. Поэтому concurrent reader видит либо старый entry, либо уже завершённое subtree.
+
+### Полностью совпал hash
+
+Разные keys могут иметь одинаковый hash целиком. Углублять trie бессмысленно: доступных bits больше нет. Тогда entries связываются в overflow chain — цепочку записей с одинаковым hash:
+
+```text
+slot -> entry B -> entry A -> ...
+```
+
+При поиске hash приводит к этой chain, а точный key находится полным сравнением keys. В нормальном workload полные коллизии редки, но correctness от качества hash не зависит.
+
+## Как работают Delete и Clear
+
+### Delete
+
+`Delete` использует ту же идею: находит parent, берёт его lock, перепроверяет состояние и убирает entry.
+
+Если после удаления indirect node становится полностью пустым, реализация может удалить и его, двигаясь к root. Node помечается как `dead`, чтобы concurrent writer, который успел сохранить на него pointer, заметил устаревшую ветвь и начал операцию заново.
+
+При этом дерево не обязано немедленно сжимать любой node с одним оставшимся child. Cleanup удаляет именно пустые ветви.
+
+### Clear
+
+В текущей реализации `Clear` создаёт новый пустой root и атомарно заменяет root pointer:
+
+```text
+old root -> всё старое дерево
+
+root.Store(new empty root)
+
+new loads -> пустое дерево
+old readers -> могут завершить чтение старого дерева
+```
+
+Поэтому непосредственная работа `Clear` близка к `O(1)` для текущей реализации: она не удаляет entries по одному. Но память старого дерева освобождается GC только после того, как на него перестают ссылаться уже начавшиеся operations.
+
+Это implementation detail Go 1.24+, а не причина строить API приложения вокруг сложности `Clear`.
+
+## Историческая реализация read/dirty
+
+До Go 1.24 `sync.Map` использует другую архитектуру. Она важна для чтения старых статей, анализа binary на Go 1.23 и ниже и interview-вопросов с явно указанной версией.
+
+Упрощённо структура выглядит так:
+
+```go
 type Map struct {
-    mu     Mutex
-    read   atomic.Pointer[readOnly]  // снимок, читается БЕЗ лока
-    dirty  map[any]*entry            // актуальная мапа, доступ под mu
-    misses int                       // сколько раз промахнулись мимо read
+	mu     Mutex
+	read   atomic.Pointer[readOnly]
+	dirty  map[any]*entry
+	misses int
 }
 
 type readOnly struct {
-    m       map[any]*entry
-    amended bool   // true, если в dirty есть ключи, которых нет в m
+	m       map[any]*entry
+	amended bool
 }
 
 type entry struct {
-    p atomic.Pointer[any]  // указатель на значение (или nil / expunged)
+	p atomic.Pointer[any]
 }
-
-var expunged = new(any)    // sentinel: «entry удалён и вычеркнут из dirty»
 ```
 
-Ключевая хитрость — **`entry` общий** между `read` и `dirty` (обе мапы хранят указатели на одни и те же `entry`). Поэтому обновить значение существующего ключа можно атомарным CAS по `entry.p`, **не трогая сами мапы** и не беря лок. У `entry.p` три состояния, и каждое нужно по делу:
+Здесь существуют два индекса на entries:
 
-| `entry.p` | Что значит | Зачем |
-|---|---|---|
-| `*value` | живое значение | обычный элемент |
-| `nil` | ключ удалён, но `entry` ещё числится в `read` | удаление без лока (CAS `*value → nil`), не пересоздавая `read` |
-| `expunged` | удалён **и** вычеркнут из `dirty` | пометка при перестройке `dirty`: такой ключ не копируется в новый `dirty` |
+- `read` — доступный через atomic pointer read-mostly индекс;
+- `dirty` — индекс под общим `mu`, содержащий новые keys и актуальные entries;
+- `misses` — число чтений, которым пришлось искать в `dirty`.
 
-`nil` vs `expunged` — самая неинтуитивная часть. `nil` означает «удалён, но если сейчас перестроить `dirty`, этот ключ туда попадёт». `expunged` ставится в момент перестройки `dirty`: записи с `nil` переводятся в `expunged` и в новый `dirty` **не включаются**. Так `read` и `dirty` со временем расходятся, и `expunged`-ключ при новом `Store` придётся «воскрешать» (вернуть в `dirty`).
+### Как выполняется Load
 
-### Пути Load / Store / Delete
-
-**Load** — в типичном случае вообще без лока: один атомарный read снимка + атомарная загрузка `entry.p`.
-
-```
-Load(key):
-    read := m.read.Load()              // атомарно, БЕЗ лока
-    e, ok := read.m[key]
-    if !ok && read.amended:            // в read нет, но в dirty есть лишние ключи
-        m.mu.Lock()
-        read = m.read.Load()           // перепроверка: read мог промотироваться,
-        e, ok = read.m[key]            //   пока мы ждали лок
-        if !ok && read.amended:
-            e, ok = m.dirty[key]
-            m.missLocked()             // misses++; при misses>=len(dirty) → промоушн
-        m.mu.Unlock()
-    if !ok: return nil, false
-    return e.load()                    // грузим e.p; nil/expunged → (nil, false)
+```text
+Load(key)
+  |
+  +-- key есть в read -> прочитать entry без общего mutex
+  |
+  +-- key нет, read.amended=false -> miss
+  |
+  +-- key нет, read.amended=true
+         -> lock mu
+         -> повторно проверить read
+         -> посмотреть dirty
+         -> misses++
 ```
 
-**Store** — быстрый путь (ключ уже в `read`) обновляет значение атомарным CAS по `entry.p`, не трогая мапы и не беря лок. Лок нужен только для новых/воскрешаемых ключей.
+Повторная проверка после lock нужна по той же причине, что и в hash-trie: состояние могло измениться, пока goroutine ждала mutex.
 
-```
-Store(key, value):
-    read := m.read.Load()
-    if e, ok := read.m[key]; ok && e.tryStore(&value):  // CAS по e.p — БЕЗ лока
-        return                                          // ← дешёвый общий случай
+### Что означает promotion
 
-    m.mu.Lock()
-    read = m.read.Load()
-    if e, ok := read.m[key]; ok:           // ключ есть в read
-        if e.unexpungeLocked():            //   был expunged → воскресить
-            m.dirty[key] = e               //   и вернуть в dirty
-        e.storeLocked(&value)
-    else if e, ok := m.dirty[key]; ok:     // ключ только в dirty
-        e.storeLocked(&value)
-    else:                                  // совсем новый ключ
-        if !read.amended:
-            m.dirtyLocked()                // O(n): перестроить dirty из read
-            m.read.Store(&readOnly{m: read.m, amended: true})
-        m.dirty[key] = newEntry(value)
-    m.mu.Unlock()
+Если `misses >= len(dirty)`, происходит promotion — `dirty` становится новым `read`:
+
+```text
+before:
+read  -> старый быстрый индекс
+dirty -> более полный индекс под lock
+
+promotion:
+read  = dirty
+dirty = nil
+misses = 0
+
+after:
+read  -> актуальный быстрый индекс
 ```
 
-**Delete** существующего (в `read`) ключа тоже lock-free: CAS `entry.p → nil`. Ключ при этом **остаётся** в `read` (с `p == nil`), физически из мапы он уйдёт только при следующей перестройке `dirty`.
+Логика trade-off такая: каждый slow-path lookup уже платит за общий lock. После достаточного числа таких обращений выгоднее сделать `dirty` новым fast-path `read`.
 
-```
-Delete(key):
-    read := m.read.Load()
-    e, ok := read.m[key]
-    if !ok && read.amended:                // нет в read — придётся под локом
-        m.mu.Lock()
-        read = m.read.Load()
-        e, ok = read.m[key]
-        if !ok && read.amended:
-            delete(m.dirty, key)           // настоящее удаление из dirty-мапы
-            m.missLocked()
-        m.mu.Unlock()
-    if ok:
-        e.delete()                         // CAS e.p → nil, БЕЗ лока
-```
+Когда после promotion снова появляется первый новый key, создаётся новый `dirty` и в него копируются подходящие entries из `read`. Эта операция имеет стоимость `O(N)`.
 
-Везде один и тот же приём: **частый случай (ключ уже в `read`) обходится атомарной операцией над общим `entry`**, а лок берётся только когда надо менять состав мап (`dirty`).
+### Состояния entry
 
-### Промоушн и почему write-heavy проигрывал
+Pointer внутри entry кодирует несколько состояний:
 
-Два механизма работают в паре:
+- pointer на value — key присутствует;
+- `nil` — key логически удалён;
+- специальный sentinel `expunged` — entry удалён и не включён в `dirty`.
 
-1. **Промоушн `dirty → read`** (`missLocked`): каждый промах мимо `read` инкрементит `misses`; когда `misses >= len(dirty)` — `read` заменяется на `readOnly{m: dirty}`, `dirty := nil`, `misses := 0`. Это **дешёвый swap указателя**, не копирование.
-2. **Перестройка `dirty` из `read`** (`dirtyLocked`): после промоушна `dirty == nil`. Первый же `Store` **нового** ключа вынужден заново собрать `dirty`, **скопировав все живые `entry` из `read`** (записи с `nil` по дороге переводятся в `expunged`). Вот это — `O(n)`.
+Такая схема позволяет обновлять некоторые уже существующие entries через atomic CAS без изменения самого индекса. Но добавление новых keys, promotion и пересоздание `dirty` используют общий mutex.
 
-Отсюда и слабое место: при потоке **новых** ключей каждый цикл «промоушн → первый новый ключ» запускает `O(n)`-перестройку `dirty`, и чем чаще добавляются ключи, тем чаще копируется вся мапа — в сумме дороже прямого `RWMutex`. (В исходном тексте было «промоушн копирует всю мапу» — на самом деле копирует обратная операция, перестройка `dirty` из `read`.) Отсюда классическое правило: **`sync.Map` (до 1.24) только для read-mostly или непересекающихся ключей**, где новых ключей мало и `dirty` почти не пересоздаётся.
+### Почему hash-trie заменяет эту модель
 
----
+Read/dirty хорошо обслуживает established keys, особенно write-once/read-many. Но поток новых keys и write churn чаще приводит к:
 
-## Реализация с Go 1.24: хэш-trie
+- общему `mu`;
+- slow-path lookup в `dirty`;
+- promotion;
+- `O(N)` созданию нового `dirty`.
 
-С Go 1.24 публичный `sync.Map` — тонкая обёртка над `internal/sync.HashTrieMap` (тот же тип, что используется в пакете `unique`). Это **конкурентный хэш-trie**: дерево, где спуск задаётся битами хэша ключа.
+Hash-trie убирает глобальный read/dirty lifecycle и локализует изменения по tree nodes. Поэтому profile современной `sync.Map` нельзя объяснять через `misses` и promotion.
 
-### Структура и спуск по дереву
+## Практические patterns
+
+### Typed wrapper
+
+Generic wrapper возвращает compile-time types, хотя внутри всё равно хранится `any`:
 
 ```go
-// упрощённо, из internal/sync/hashtriemap.go (go1.26)
-type HashTrieMap[K comparable, V any] struct {
-    root atomic.Pointer[indirect[K, V]]
-    seed uintptr                       // seed хэша, уникальный на мапу
-    // ... keyHash, valEqual, ленивая инициализация
+type ConcurrentMap[K comparable, V any] struct {
+	inner sync.Map
 }
 
-// node — общая «база»: флаг, кто это — внутренний узел или лист
-type node[K comparable, V any] struct{ isEntry bool }
-
-type indirect[K comparable, V any] struct {  // внутренний узел
-    node[K, V]
-    mu       Mutex                            // лочит ТОЛЬКО мутации этого узла
-    dead     atomic.Bool                      // узел вынут из дерева (см. Delete)
-    parent   *indirect[K, V]
-    children [nChildren]atomic.Pointer[node[K, V]]  // nChildren = 16 → 4 бита хэша на уровень
+func (m *ConcurrentMap[K, V]) Load(key K) (V, bool) {
+	value, ok := m.inner.Load(key)
+	if !ok {
+		var zero V
+		return zero, false
+	}
+	return value.(V), true
 }
 
-type entry[K comparable, V any] struct {     // лист
-    node[K, V]
-    key      K
-    value    V
-    overflow atomic.Pointer[entry[K, V]]      // цепочка на полную коллизию хэша
+func (m *ConcurrentMap[K, V]) Store(key K, value V) {
+	m.inner.Store(key, value)
+}
+
+func (m *ConcurrentMap[K, V]) Delete(key K) {
+	m.inner.Delete(key)
 }
 ```
 
-Спуск идёт по хэшу **сверху вниз, по 4 бита на уровень** (`nChildrenLog2 = 4`, 16 детей). Сдвиг `hashShift` стартует с разрядности хэша (64 на 64-бит) и уменьшается на 4 каждый уровень; индекс ребёнка — `(hash >> hashShift) & 15`. На каждом шаге ребёнок — это либо `nil` (пусто), либо лист-`entry`, либо вложенный `indirect`:
+Wrapper предотвращает смешивание типов через собственный public API, но не добавляет snapshot, `Len` или транзакции над несколькими keys.
 
-```
-hash:  [ b63..b60 ][ b59..b56 ][ b55..b52 ] ...
-          уровень0    уровень1    уровень2
-root(indirect) → children[b63..b60] → children[b59..b56] → entry(key,value)
-                                                              └─ overflow → entry → … (полная коллизия)
-```
+### Per-key counter
 
-Дерево **разрастается лениво**: пока в слот попадает один ключ, там лежит просто лист-`entry`. Внутренний `indirect`-узел появляется только когда в один слот «целятся» два разных ключа (см. «Коллизии»).
-
-### Пути Load / Store / Delete (trie)
-
-**Load — полностью lock-free**: атомарные загрузки указателей сверху вниз, ни одного лока, ни одной записи в общую память.
-
-```
-Load(key):
-    hash := keyHash(key, seed)
-    i := root.Load()
-    for hashShift := 64; hashShift != 0; {
-        hashShift -= 4
-        n := i.children[(hash >> hashShift) & 15].Load()   // атомарно
-        if n == nil:        return zero, false             // пусто → нет ключа
-        if n.isEntry:       return n.entry().lookup(key)    // лист: сверить ключ
-        i = n.indirect()                                    //       (+ overflow-цепочка)
-    }
-```
-
-**Store** идёт по тому же спуску, но найдя слот для вставки/замены, **лочит `mu` родительского `indirect`-узла** (того, в чьём `children[]` лежит слот) и под локом перепроверяет слот (мог измениться):
-
-```
-Store(key, value):
-    hash := keyHash(key, seed)
-    for {                                  // retry, если под локом увидели не то
-        i, slot := спуститься до nil-слота ИЛИ слота с entry
-        i.mu.Lock()
-        if слот всё ещё nil/entry && !i.dead: break   // ок, можно писать
-        i.mu.Unlock()                                  // иначе — заново
-    }
-    defer i.mu.Unlock()
-    if в слоте entry с тем же ключом:
-        slot.Store(новый entry)            // замена значения
-    else if слот пуст:
-        slot.Store(новый entry)            // простая вставка
-    else:                                   // в слоте entry с ДРУГИМ ключом
-        slot.Store(expand(старый, новый, hash, hashShift, i))  // см. «Коллизии»
-```
-
-**Delete** так же спускается, лочит `mu` родителя и заменяет слот на `nil` (а при опустошении узла — помечает его `dead` и убирает из родителя, чтобы дерево не пухло). Удалённые узлы — мусор для GC.
-
-Ключевое: лок берётся **только** для мутации и **только на одном узле** — родителе изменяемого слота. Чтение лока не берёт вовсе.
-
-### Коллизии: expand и overflow
-
-Когда в один слот попадают **два разных** ключа, лист нельзя оставить листом. `expand` разбирает два случая:
-
-1. **Хэши различаются** (просто кончились использованные биты на этом уровне): создаётся новый `indirect`-узел, и оба ключа раскладываются на **уровень глубже** по следующим 4 битам. Если и там совпали — добавляется ещё уровень, и так пока ключи не разойдутся.
-2. **Хэши совпадают целиком** (настоящая коллизия): углубляться бессмысленно — старый `entry` цепляется в `overflow`-список нового. Дальше `lookup` по этому листу идёт по цепочке, сравнивая ключи.
+`sync.Map` отвечает за конкурентный доступ к набору counters, а каждый `atomic.Int64` — за значение отдельного counter:
 
 ```go
-// expand (упрощённо)
-if oldHash == newHash {
-    newEntry.overflow.Store(oldEntry)   // полная коллизия → overflow-цепочка
-    return newEntry
-}
-for {                                    // иначе — углубляемся, пока биты не разойдутся
-    hashShift -= 4
-    oi, ni := (oldHash>>hashShift)&15, (newHash>>hashShift)&15
-    if oi != ni { /* положить старый и новый в разные дети */ break }
-    // совпали → ещё один indirect-уровень
+var counters sync.Map // map[string]*atomic.Int64
+
+func increment(name string) int64 {
+	candidate := &atomic.Int64{}
+	actual, _ := counters.LoadOrStore(name, candidate)
+	counter := actual.(*atomic.Int64)
+
+	return counter.Add(1)
 }
 ```
 
-Публикация результата — **одним атомарным** `slot.Store`: новый поддерев целиком собирается, и только потом подменяет слот. Поэтому конкурентный lock-free `Load` никогда не видит «полуразобранное» дерево — либо старый `entry`, либо уже готовый новый узел.
+Несколько goroutines могут создать несколько `candidate`, но только один pointer сохраняется. Все goroutines изменяют именно `actual`, возвращённый `LoadOrStore`.
 
-### Почему запись масштабируется
+Для фиксированного заранее известного набора counters обычная структура с отдельными atomic fields проще. Pattern полезен именно для динамического набора keys.
 
-Главное отличие от read/dirty — **нет ни общего `dirty`-мьютекса, ни `O(n)`-перестройки**. Мутация лочит `mu` **конкретного** узла-родителя; записи по разным ключам почти всегда садятся в разные узлы дерева → лочат **разные** мьютексы и не мешают друг другу. Конкуренция размазывается по дереву пропорционально его ширине, а не упирается в один лок. Поэтому даже write-heavy масштабируется куда лучше старого дизайна (видно в бенчах ниже). Узкое место остаётся только одно: шквал записей в **один и тот же** ключ — тогда все они сходятся на одном узле.
+### LoadOrStore и дорогая инициализация
 
----
+Такой код не дедуплицирует работу:
 
-## Низкий уровень: почему чтение масштабируется
-
-Суть — что происходит с кэш-линиями процессора (протокол когерентности MESI):
-
-| | `RWMutex.RLock` | `sync.Map.Load` (trie) |
-|---|---|---|
-| Что делает с памятью | атомарный RMW по счётчику читателей — **запись** в общую кэш-линию | только атомарные **загрузки** указателей |
-| Эффект на другие ядра | запись переводит линию в `Modified` → инвалидирует копии в кэшах всех ядер → они перечитывают | загрузка держит линию в `Shared` → копия живёт в кэше каждого ядра одновременно |
-| С ростом ядер | линия мьютекса «пинг-понгует» между ядрами → читатели тормозят друг друга | независимые чтения из своих кэшей → почти линейно |
-
-Грубо: `RWMutex` заставляет даже читателей **писать** в одно общее место, а запись в многоядерной системе — это синхронная инвалидация чужих кэшей. `sync.Map` на чтении ничего общего не пишет, поэтому несколько ядер читают параллельно, не мешая друг другу. Ровно это видно в бенчмарке масштабирования: с числом ядер `sync.Map` ускоряется, а `RWMutex` — замедляется.
-
----
-
-## Бенчмарки
-
-`go1.26`, darwin/arm64, 16 логических ядер (Apple Silicon). 1024 ключа, доступ через `b.RunParallel`. Сравниваем `sync.Map`, `map+RWMutex`, `map+Mutex`.
-
-**При 16 ядрах, по паттернам доступа** (ns/op — меньше лучше):
-
-```
-ReadHeavy  (99% read)   SyncMap   2.70    RWMutex  48.9    Mutex  126.9
-Mixed      (50/50)      SyncMap  15.98    RWMutex 120.5    Mutex  166.3
-WriteHeavy (10% read)   SyncMap  27.55    RWMutex 194.1    Mutex  186.0
-Disjoint   (свои ключи) SyncMap  13.87    RWMutex  78.9    Mutex  169.2
+```go
+candidate := buildExpensiveValue()
+actual, loaded := m.LoadOrStore(key, candidate)
 ```
 
-**Масштабирование по ядрам (read-heavy, 99% read):**
+Несколько goroutines могут одновременно выполнить `buildExpensiveValue`. `LoadOrStore` гарантирует только то, что в map сохранится один из candidates и все callers получат stored value.
 
+<details>
+<summary>Per-key lazy value через sync.Once</summary>
+
+```go
+type lazyValue[T any] struct {
+	once  sync.Once
+	value T
+	err   error
+}
+
+var cache sync.Map // map[string]*lazyValue[Config]
+
+func loadConfig(key string) (Config, error) {
+	actual, _ := cache.LoadOrStore(key, &lazyValue[Config]{})
+	lazy := actual.(*lazyValue[Config])
+
+	lazy.once.Do(func() {
+		lazy.value, lazy.err = fetchConfig(key)
+	})
+	return lazy.value, lazy.err
+}
 ```
-              -cpu=1   -cpu=4   -cpu=8   -cpu=16
-SyncMap        14.82     5.60     3.40     2.64    ← быстрее с ростом ядер
-RWMutex         6.90    28.04    46.58    51.23    ← медленнее с ростом ядер
+
+Теперь несколько goroutines могут создать дешёвые `lazyValue`, но `fetchConfig` выполняется один раз у сохранённого объекта.
+
+Этот pattern кэширует и ошибку. Если failed initialization нужно повторять, `sync.Once` не подходит без дополнительной state machine. Для дедупликации только одновременных запросов часто лучше `singleflight`.
+
+</details>
+
+### CAS как state transition одного ключа
+
+```go
+const (
+	Pending = "pending"
+	Running = "running"
+)
+
+if jobs.CompareAndSwap(jobID, Pending, Running) {
+	// Только goroutine, успешно сменившая состояние,
+	// получает право запустить job.
+}
 ```
 
-Что отсюда читается:
-- **read-heavy на многих ядрах — разгром**: `sync.Map` ~18× быстрее `RWMutex` (2.7 vs 48.9 ns).
-- **на 1 ядре `RWMutex` быстрее** (6.9 vs 14.8): без конкуренции выигрыша нет, а у trie есть накладные (спуск по дереву + атомики + боксинг). `sync.Map` выигрывает **только** под конкуренцией.
-- **противоположное масштабирование** — ключевая иллюстрация раздела про кэш-линии: с ядрами один ускоряется, другой деградирует.
-- **write-heavy: новый дизайн смягчил старое правило.** Даже при 90% записей `sync.Map` тут быстрее — потому что записи размазаны по 1024 ключам → по разным узлам trie → локальные локи почти не пересекаются. ⚠️ Если бы все записи били в **один** ключ, конкуренция сошлась бы на одном узле и преимущество испарилось.
-- **аллокации**: у `sync.Map` на запись видны `31–55 B/op, 1–2 allocs/op` — это **боксинг** `int` в `any`. Это цена `any`-интерфейса, не самой структуры (см. ловушки).
+Это удобно, пока всё состояние помещается в одно comparable value одного key. Если вместе нужно атомарно изменить owner, timestamp и несколько индексов, лучше хранить immutable comparable state, pointer с собственным protocol либо использовать общий lock.
 
----
+## Как сравнивать с map и Mutex
 
-## Когда использовать
+У `sync.Map` есть lock-free read path и более локальные write locks, но также есть цена:
 
-Документация `sync.Map` прямо называет два сценария, где он «значительно снижает контеншн»:
+- keys и values проходят через interfaces;
+- trie содержит дополнительные nodes и atomic pointers;
+- замена values создаёт новые entries;
+- освобождением старых объектов занимается GC;
+- сложнее выразить операции над несколькими keys.
 
-1. **append-only / read-mostly** — ключ пишется один раз, дальше только читается (кэши, которые только растут).
-2. **непересекающиеся ключи** — разные горутины работают с разными наборами ключей.
+Поэтому benchmark должен отражать:
 
-В остальных случаях по умолчанию — `map + sync.RWMutex` (проще, типобезопасно, без боксинга). Сводная шпаргалка выбора — в [03-sync-primitives](../concurrency-and-performance/03-sync-primitives.md), раздел «Когда sync.Map, когда map + mutex».
+- реальное соотношение reads/writes/deletes;
+- один hot key или равномерные/disjoint keys;
+- число goroutines и доступных CPU cores;
+- размер map;
+- стоимость hash конкретного key type;
+- lifetime и размер values;
+- p95/p99 latency, allocations и GC, а не только средний throughput.
 
-> Нюанс после Go 1.24: новый hash-trie стал заметно лучше на записи, чем старый read/dirty, так что разрыв с `RWMutex` под конкуренцией сократился даже вне «двух сценариев». Но решает не микробенч, а профиль: бери `RWMutex` по умолчанию, переходи на `sync.Map`, только если профилировщик показывает контеншн на мьютексе.
+<details>
+<summary>Минимальный parallel benchmark чтения</summary>
 
----
+```go
+type lockedMap struct {
+	mu sync.RWMutex
+	m  map[int]int
+}
 
-## Ловушки
+func (m *lockedMap) Load(key int) (int, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	value, ok := m.m[key]
+	return value, ok
+}
 
-- **Боксинг и нет типобезопасности.** Ключи/значения — `any`. `Store(k, 42)` боксирует `int` → аллокация (видно `B/op` в бенчах). Значения-указатели не боксируются. Обёртка-дженерик поверх `sync.Map` даёт типобезопасность, но не убирает боксинг (`any` внутри остаётся).
-- **`Range` — не консистентный снимок.** Обход не блокирует мапу: видит подмножество, изменения во время обхода могут попасть или нет. Каждый ключ — максимум один раз. `f` не должна долго блокировать.
-- **Нет `Len()`.** Узнать размер можно только обходом `Range` со счётчиком — `O(n)` и неточно при конкуренции.
-- **Нельзя копировать после использования** — передавай по указателю (`*sync.Map`), не клади в структуру, которую копируют по значению. Почему: `sync.Map` содержит `_ noCopy` и внутренние мьютексы + атомарное состояние. `go vet` ловит копию статически (`copylocks`: «assignment copies lock value … contains sync.noCopy»; `noCopy` — маркер ровно для vet, рантайм его не enforce'ит). Если проигнорировать и скопировать — получаются **два разных значения**, которые синхронизируют общие/разъезжающиеся внутренности рассогласованными локами: гонки, потерянные записи, порча структуры вплоть до `fatal error: concurrent map writes`. То есть копирование ломает ровно ту взаимоисключаемость, ради которой `sync.Map` и нужен.
-- **Ключ должен быть comparable** — как и у обычной мапы.
+func BenchmarkConcurrentReads(b *testing.B) {
+	const keys = 1024
 
----
+	var concurrent sync.Map
+	locked := lockedMap{m: make(map[int]int, keys)}
+	for key := range keys {
+		concurrent.Store(key, key)
+		locked.m[key] = key
+	}
+
+	b.Run("sync.Map", func(b *testing.B) {
+		b.RunParallel(func(pb *testing.PB) {
+			key := 0
+			for pb.Next() {
+				_, _ = concurrent.Load(key & (keys - 1))
+				key++
+			}
+		})
+	})
+
+	b.Run("map+RWMutex", func(b *testing.B) {
+		b.RunParallel(func(pb *testing.PB) {
+			key := 0
+			for pb.Next() {
+				_, _ = locked.Load(key & (keys - 1))
+				key++
+			}
+		})
+	})
+}
+```
+
+```bash
+go test -run='^$' -bench=ConcurrentReads -benchmem -cpu=1,4,8 -count=10
+```
+
+Добавьте отдельные benchmarks для hot-key writes, disjoint writes и production-like mixed workload. Сравнивайте несколько запусков через `benchstat`, иначе шум легко принять за закономерность.
+
+</details>
+
+## Типичные ошибки
+
+1. **Использовать `sync.Map` по умолчанию.** Обычная typed map под lock часто проще и достаточно быстра.
+2. **Копировать после первого использования.** Внутреннее состояние и locks нельзя безопасно разделить копированием struct.
+3. **Считать `Range` snapshot.** Обход может смешивать состояния из разных моментов времени.
+4. **Определять отсутствие по `value == nil`.** Сохранённый `nil` возвращается с `ok == true`.
+5. **Смешивать value types.** Ошибка обнаруживается только при type assertion в runtime.
+6. **Использовать non-comparable key.** Slice, map или function приводят к panic при hashing.
+7. **Передавать non-comparable `old` в CAS methods.** Сравнение slice/map/function приводит к panic.
+8. **Считать содержимое stored pointer потокобезопасным.** `sync.Map` защищает entry, но не поля объекта за pointer.
+9. **Строить multi-key invariant из нескольких calls.** Между calls может вмешаться другая goroutine.
+10. **Ожидать, что `LoadOrStore` выполнит constructor один раз.** Он дедуплицирует storage, но не предварительное вычисление.
+11. **Ожидать отсутствие contention.** Hot key, общий prefix и неглубокие изменения всё равно конкурируют за node lock.
+12. **Переносить чужой benchmark.** Результат зависит от версии Go, CPU, keys и access pattern.
 
 ## Interview-ready answer
 
-**1. Как устроен `sync.Map` внутри?**
+**1. Что такое `sync.Map`?**
 
-- Зависит от версии. До Go 1.24 — два map: `read` (lock-free атомарный снимок) и `dirty` (под `Mutex`) + счётчик `misses` и промоушн `dirty→read`. С Go 1.24 — конкурентный **хэш-trie** (`HashTrieMap`): дерево с 16 детьми на узел по битам хэша; чтение полностью lock-free (атомарные загрузки указателей), запись лочит только локальный узел.
+`sync.Map` — специализированная concurrent map из стандартной библиотеки. Она предоставляет lock-free read path и атомарные операции над одним ключом, но использует `any`, не имеет `Len` и не даёт consistent snapshot.
 
-**2. Почему он быстрее `map + RWMutex` на чтении?**
+**2. Когда выбирать `sync.Map`?**
 
-- `RWMutex.RLock` пишет в общий счётчик читателей → инвалидирует кэш-линию мьютекса в других ядрах → читатели тормозят друг друга. `Load` у `sync.Map` ничего общего не пишет (только атомарные загрузки) → ядра читают из своих кэшей параллельно. В бенче с ростом ядер `sync.Map` ускоряется, `RWMutex` деградирует.
+Когда key обычно записывается один раз и много читается, goroutines работают с disjoint key sets либо `LoadOrStore`/`Swap`/CAS точно выражает операцию одного ключа. В остальных случаях начинаю с typed `map + Mutex` и измеряю contention.
 
-**3. Когда брать `sync.Map`?**
+**3. Чем `sync.Map` не заменяет обычную map под lock?**
 
-- Два сценария из доки: (1) read-mostly / append-only кэш; (2) непересекающиеся наборы ключей у горутин. Иначе — `map + RWMutex`. На 1 ядре `sync.Map` даже медленнее — выигрыш только под конкуренцией.
+Она не позволяет одним атомарным блоком поддержать invariant нескольких keys, получить точный `Len` вместе со snapshot или добавить произвольную compound operation. Для этого внешний lock обычно проще.
 
-**4. Главные минусы?**
+**4. Как `sync.Map` устроена в Go 1.24+?**
 
-- Значения `any` → боксинг (аллокации) и потеря типобезопасности; `Range` не даёт консистентного снимка; нет `Len`; нельзя копировать.
+Внутри находится concurrent 16-way hash-trie. На каждом уровне четыре bits hash выбирают один из 16 child slots. Slot содержит `nil`, entry или следующий indirect node.
 
-**5. Что поменялось в Go 1.24?**
+**5. Как выполняется `Load`?**
 
-- Реализацию переписали с read/dirty на hash-trie. Старое правило «`sync.Map` проигрывает на записи» смягчилось: записи по разным ключам лочат разные узлы дерева, поэтому масштабируются куда лучше, чем старый промоушн с копированием всей мапы.
+Вычисляется hash, затем поиск идёт по atomic child pointers без node mutex. При достижении entry сравнивается полный key, а при полной hash collision просматривается overflow chain.
 
-**6. Почему нулевое значение `sync.Map` готово к работе, а запись в nil-`map` паникует?**
+**6. Как выполняется `Store`?**
 
-- `sync.Map` — структура: `var m sync.Map` создаёт валидную пустую структуру, а `Store` лениво инициализирует внутренности при первой записи. Обычная `map` — reference-тип, её zero value это `nil`, и у встроенного `m[k]=v` ленивой инициализации нет → паника. Но `var m *sync.Map` (nil-указатель) на `Store` всё же упадёт.
+Сначала trie проходится без node lock, затем блокируется найденный parent node, состояние перепроверяется и новый entry или subtree публикуется атомарной заменой pointer. При конфликте операция начинает поиск заново.
 
-**7. В старой (read/dirty) реализации — зачем три состояния entry?**
+**7. Почему новая реализация лучше масштабирует изменения?**
 
-- `*value` — живое; `nil` — удалён, но ещё числится в `read` (удаление без лока через CAS); `expunged` — удалён и вычеркнут из `dirty` (ставится при перестройке `dirty`, чтобы такой ключ не копировался). `nil` ещё попал бы в новый `dirty`, `expunged` — уже нет.
+Вместо общего read/dirty lifecycle используются locks отдельных tree nodes, поэтому изменения разных глубоких ветвей могут идти независимо. Hot key, общий prefix и операции около root всё равно создают contention.
 
-**8. Где в старой реализации терялась производительность?**
+**8. Что гарантирует memory model `sync.Map`?**
 
-- Не на промоушне `dirty→read` (это дешёвый swap указателя), а на **перестройке `dirty` из `read`** (`dirtyLocked`) — она копирует все живые `entry`, это `O(n)`. При потоке новых ключей перестройка случается часто → в сумме дороже `RWMutex`.
+Write operation synchronizes before read operation, которая наблюдает её результат. Это обеспечивает безопасную публикацию уже инициализированного значения, но не делает дальнейшие изменения объекта за pointer потокобезопасными.
 
-**9. Как trie (1.24+) обрабатывает коллизию хэша?**
+**9. Что гарантирует `Range`?**
 
-- Два разных ключа в один слот: если их хэши различаются — `expand` добавляет `indirect`-уровень(ни) и раскладывает ключи по следующим 4 битам, пока не разойдутся; если хэши совпали целиком — старый `entry` цепляется в `overflow`-список (дальше lookup идёт по цепочке со сравнением ключей).
+`Range` посещает key не более одного раза, но не является snapshot. Для key он может увидеть mapping из любого момента во время обхода, а concurrent modifications продолжают выполняться.
 
-**10. Почему запись в trie масштабируется, а копировать `sync.Map` нельзя?**
+**10. Что гарантирует `LoadOrStore`?**
 
-- Масштабируется, потому что мутация лочит `mu` **конкретного** узла-родителя, а не один глобальный лок — записи по разным ключам лочат разные узлы. Копировать нельзя, потому что внутри `noCopy` + мьютексы и атомарное состояние: копия и оригинал стали бы синхронизировать общие внутренности рассогласованными локами → гонки/`fatal`. `go vet` ловит это (`copylocks`).
+Он атомарно возвращает существующее значение либо сохраняет переданное. Но constructor переданного candidate может параллельно выполниться в нескольких goroutines; для дорогой инициализации нужен `sync.Once`, `singleflight` или другая lifecycle model.
 
----
+**11. Как разрешаются hash collisions?**
 
-## Перекрёстные ссылки
+Если совпал только prefix, trie добавляет уровни до различающихся четырёх bits. Если hash совпал полностью, entries связываются в overflow chain и различаются полным сравнением keys.
 
-- [03-sync-primitives](../concurrency-and-performance/03-sync-primitives.md) — API в контексте, шпаргалка выбора примитива
-- [03-puzzles-and-gotchas](./03-puzzles-and-gotchas.md) — почему обычный `map` падает при конкурентном доступе
-- [01-memory-model](../concurrency-and-performance/01-memory-model.md) — happens-before, на которых строится lock-free чтение
+**12. Как устроена `sync.Map` до Go 1.24?**
+
+Есть atomic `read`, защищённый общим mutex `dirty` и счётчик `misses`. После достаточного числа slow-path reads `dirty` promoted в `read`; при последующем появлении новых keys новый `dirty` строится из подходящих entries. Эта модель не описывает current implementation.
+
+## Официальные источники
+
+- [`sync.Map` documentation](https://pkg.go.dev/sync#Map)
+- [Go memory model](https://go.dev/ref/mem)
+- [Go 1.24 release notes](https://go.dev/doc/go1.24#sync)
+- [Current `sync.Map` source](https://go.dev/src/sync/map.go)
+- [Current `HashTrieMap` source](https://go.dev/src/internal/sync/hashtriemap.go)

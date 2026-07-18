@@ -1,336 +1,345 @@
-# Map: задачки и подводные камни
+# Map: задачи и подводные камни
 
-Каверзные задачи и гочи по `map` — то, что реально спрашивают на собесах в формате «что выведет / где баг / почему так». Всё здесь **version-agnostic**: поведение одинаково и в старом `hmap` (до 1.24), и в Swiss Tables (1.24+) — менялась реализация, не семантика.
+Здесь важна семантика языка, а не Swiss Table layout. Сначала попробуйте ответить сами, затем раскройте `<details>`.
 
 ## Содержание
 
-- [Загадка 1: порядок итерации случаен](#загадка-1-порядок-итерации-случаен)
-- [Загадка 2: нельзя менять поле структуры-значения на месте](#загадка-2-нельзя-менять-поле-структуры-значения-на-месте)
-- [Загадка 3: NaN-ключ нельзя достать обратно](#загадка-3-nan-ключ-нельзя-достать-обратно)
-- [Загадка 4: nil map — чтение ок, запись паника](#загадка-4-nil-map--чтение-ок-запись-паника)
-- [Загадка 5: модификация во время range](#загадка-5-модификация-во-время-range)
-- [Загадка 6: concurrent доступ — это fatal, не panic](#загадка-6-concurrent-доступ--это-fatal-не-panic)
-- [Загадка 7: map не сравнимы и не сжимаются](#загадка-7-map-не-сравнимы-и-не-сжимаются)
-- [Загадка 8: missing key и comma-ok](#загадка-8-missing-key-и-comma-ok)
-- [Загадка 9: map — ссылочный тип (алиас)](#загадка-9-map--ссылочный-тип-алиас)
-- [Загадка 10: интерфейсный ключ с не-comparable значением](#загадка-10-интерфейсный-ключ-с-не-comparable-значением)
-- [Загадка 11: какие типы можно ключом](#загадка-11-какие-типы-можно-ключом)
-- [Загадка 12: pointer-метод на значении map](#загадка-12-pointer-метод-на-значении-map)
+- [Задача 1: missing key и nil map](#задача-1-missing-key-и-nil-map)
+- [Задача 2: значение map не addressable](#задача-2-значение-map-не-addressable)
+- [Задача 3: range и модификация](#задача-3-range-и-модификация)
+- [Задача 4: присваивание не клонирует map](#задача-4-присваивание-не-клонирует-map)
+- [Задача 5: comparable и interface key](#задача-5-comparable-и-interface-key)
+- [Задача 6: NaN как key](#задача-6-nan-как-key)
+- [Задача 7: сравнение maps](#задача-7-сравнение-maps)
+- [Задача 8: concurrent access](#задача-8-concurrent-access)
+- [Задача 9: delete, clear и память](#задача-9-delete-clear-и-память)
+- [Interview-ready answer](#interview-ready-answer)
 
----
-
-## Загадка 1: порядок итерации случаен
+## Задача 1: missing key и nil map
 
 ```go
-m := map[int]string{1: "a", 2: "b", 3: "c"}
-for k := range m {
-    fmt.Print(k)
-}
-fmt.Println()
-for k := range m {
-    fmt.Print(k)
-}
+var m map[string]int
+
+fmt.Println(m["x"])
+value, ok := m["x"]
+fmt.Println(value, ok, len(m))
+
+delete(m, "x")
+clear(m)
+m["x"] = 1
 ```
 
 <details>
 <summary>Ответ</summary>
 
-Два прохода по **тому же** map дадут, скорее всего, **разный** порядок, например:
-```
-231
-312
+```text
+0
+0 false 0
+panic: assignment to entry in nil map
 ```
 
-Go намеренно рандомизирует стартовый bucket/слот на каждом `range` (через random seed `hash0`, заданный при `make`). Это сделано в Go 1.0, чтобы программы не закладывались на порядок. Нужен порядок — собери ключи в slice и отсортируй:
+Lookup отсутствующего key возвращает zero value. Comma-ok отличает отсутствие от сохранённого нуля. Для nil map безопасны read, `len`, `range`, `delete` и `clear`; запись требует `make` или map literal.
+
+Удобный idiom для non-nil counter map:
+
 ```go
-keys := make([]int, 0, len(m))
-for k := range m { keys = append(keys, k) }
-sort.Ints(keys)
+counts[word]++ // missing key читается как 0, затем записывается 1
 ```
+
 </details>
 
----
-
-## Загадка 2: нельзя менять поле структуры-значения на месте
+## Задача 2: значение map не addressable
 
 ```go
 type Point struct{ X, Y int }
-m := map[string]Point{"a": {1, 2}}
 
-m["a"].X = 10  // ?
+m := map[string]Point{"a": {X: 1, Y: 2}}
+m["a"].X = 10
 ```
+
+Что произойдёт и как изменить `X`?
 
 <details>
 <summary>Ответ</summary>
 
-```
-ошибка компиляции: cannot assign to struct field m["a"].X in map
-```
+Код не компилируется: map index expression нельзя использовать как addressable struct value.
 
-Значение в map **не адресуемо** (map может реаллоцироваться при росте → адрес стал бы dangling). `m["a"]` возвращает **копию** структуры, менять её поле бессмысленно — компилятор это запрещает. Нужно достать, изменить, положить обратно:
 ```go
 p := m["a"]
 p.X = 10
 m["a"] = p
 ```
-Либо хранить указатели: `map[string]*Point` — тогда `m["a"].X = 10` работает (меняем по указателю, сам элемент map не трогаем).
-</details>
 
----
-
-## Загадка 3: NaN-ключ нельзя достать обратно
+Либо хранить pointers, если нужны shared mutable objects:
 
 ```go
-m := map[float64]int{}
-m[math.NaN()] = 1
-m[math.NaN()] = 2
-fmt.Println(len(m))         // ?
-fmt.Println(m[math.NaN()])  // ?
+mp := map[string]*Point{"a": {X: 1, Y: 2}}
+mp["a"].X = 10
 ```
 
-<details>
-<summary>Ответ</summary>
+Pointer-вариант меняет ownership, nil handling и allocation profile — это design choice, а не автоматический fix.
 
-```
-2
-0
-```
+По той же причине нельзя вызвать pointer receiver method на `map[K]T` element, если для вызова compiler должен взять адрес элемента.
 
-`NaN != NaN` по стандарту IEEE-754. Каждая вставка `math.NaN()` — это **новый** ключ (хэши могут совпасть, но сравнение ключей всегда `false`), поэтому `len` растёт. А `lookup` по `NaN` **никогда** не найдёт совпадение → zero value. Значения «застревают» в map навсегда, их нельзя ни прочитать, ни удалить по ключу.
-
-Мораль: не используй float с возможным NaN как ключ. Это классический «вечный лик» данных в map.
 </details>
 
----
-
-## Загадка 4: nil map — чтение ок, запись паника
+## Задача 3: range и модификация
 
 ```go
-var m map[string]int  // nil
+m := map[int]int{1: 10, 2: 20, 3: 30}
 
-fmt.Println(m["x"], len(m))   // ?
-for range m {                  // ?
-    fmt.Println("iter")
-}
-delete(m, "x")                 // ?
-m["x"] = 1                     // ?
-```
-
-<details>
-<summary>Ответ</summary>
-
-```
-0 0
-(итераций нет)
-(delete — безопасный no-op)
-panic: assignment to entry in nil map
-```
-
-Чтение nil map (`m["x"]`), `len`, `range`, `delete` — **безопасны** (lookup видит nil-hmap и возвращает zero value; range делает 0 итераций). А вот **запись** обращается к полям hmap → nil pointer → паника. Фикс — инициализировать: `m = make(map[string]int)`.
-</details>
-
----
-
-## Загадка 5: модификация во время range
-
-```go
-m := map[int]int{1: 1, 2: 2, 3: 3, 4: 4}
-for k := range m {
-    if k == 1 {
-        delete(m, 2)   // ?
-    }
-    m[k+100] = 0       // ?
+for key := range m {
+	if key == 1 {
+		delete(m, 2)
+		m[4] = 40
+	}
 }
 ```
 
+Гарантировано ли посещение keys 2 и 4?
+
 <details>
 <summary>Ответ</summary>
 
-Паники **не будет**, но поведение частично undefined:
-- **`delete` во время range безопасен**: удалённый ключ, если ещё не был выдан итератором, больше не появится. Гарантировано спецификацией.
-- **Добавление ключей во время range** — undefined: новый ключ **может** быть выдан в этой же итерации, а может и нет. Полагаться нельзя.
+- Порядок обхода не specified и не обязан повторяться.
+- Если key 2 ещё не был достигнут к моменту `delete`, он не будет произведён итератором.
+- Добавленный key 4 может быть посещён в этом range, а может быть пропущен.
 
-Это не та же ошибка, что concurrent-доступ (Загадка 6): тут одна горутина, поэтому не `fatal`, просто недетерминированный набор посещённых ключей. Если нужно изменять map по результатам обхода — собери изменения в отдельный список и примени **после** цикла.
-</details>
+Это не undefined behavior: specification явно описывает варианты. Но код, зависящий от выбранного варианта, некорректен.
 
----
+Изменение map в той же goroutine допустимо. Параллельная запись из другой goroutine — уже data race.
 
-## Загадка 6: concurrent доступ — это fatal, не panic
+Если нужен стабильный порядок:
 
 ```go
-m := map[int]int{}
-go func() { for { m[1] = 1 } }()
-go func() { for { _ = m[1] } }()
-time.Sleep(time.Second)
+keys := make([]int, 0, len(m))
+for key := range m {
+	keys = append(keys, key)
+}
+slices.Sort(keys)
 ```
 
-<details>
-<summary>Ответ</summary>
-
-```
-fatal error: concurrent map read and map write
-```
-
-Это **не `panic`**, а `throw` рантайма — его **нельзя поймать** через `recover()`, программа падает целиком. Runtime детектирует гонку через флаг `hashWriting` в `hmap` (с Go 1.6): при записи флаг выставляется, при чтении/записи — проверяется.
-
-Детектор не гарантирован (ловит не каждую гонку), поэтому защищайся явно: `sync.RWMutex` для read-heavy, или `sync.Map` для append-only / непересекающихся ключей. `go test -race` ловит надёжнее.
 </details>
 
----
-
-## Загадка 7: map не сравнимы и не сжимаются
+## Задача 4: присваивание не клонирует map
 
 ```go
-// Часть А
-a := map[string]int{"x": 1}
-b := map[string]int{"x": 1}
-fmt.Println(a == b)  // ?
+first := map[string]int{"x": 1}
+second := first
+second["x"] = 99
 
-// Часть Б
-m := make(map[int]int)
-for i := 0; i < 1_000_000; i++ { m[i] = i }
-for i := 0; i < 1_000_000; i++ { delete(m, i) }
-fmt.Println(len(m))  // ?  а сколько памяти держит m?
+fmt.Println(first["x"])
 ```
 
 <details>
 <summary>Ответ</summary>
 
-**Часть А:**
-```
-ошибка компиляции: map can only be compared to nil
-```
-Map несравнимы через `==` (кроме как с `nil`). Следствия: map нельзя использовать как **ключ** другой map, а структура с полем-map **не comparable** (нельзя `==`, нельзя ключом map). Для сравнения содержимого — `maps.Equal` (Go 1.21+) или `reflect.DeepEqual`.
+Будет напечатано `99`. Присваивание копирует небольшое map value, но обе переменные ссылаются на одни underlying entries. Такое поведение часто называют reference semantics, хотя specification не вводит отдельную категорию «reference type».
 
-**Часть Б:**
+Независимая shallow copy:
+
+```go
+second := maps.Clone(first)
+second["x"] = 99
+
+fmt.Println(first["x"]) // 1
 ```
-len(m) == 0
-```
-Но **память не освобождается**: map не сжимает свой backing-массив buckets после массовых `delete`. `len` нулевой, а capacity (и RSS) остались на пике в миллион элементов. Чтобы вернуть память — пересоздать: `m = make(map[int]int)` или `m = nil`. Частая причина «утечки» памяти в долгоживущих кэшах.
+
+`maps.Clone` не делает deep copy значений: pointers, slices и вложенные maps внутри values продолжат разделять underlying data.
+
 </details>
 
----
+## Задача 5: comparable и interface key
 
-## Загадка 8: missing key и comma-ok
+Какие declarations корректны?
 
 ```go
-counts := map[string]int{}
-counts["a"]++           // ?
-fmt.Println(counts["a"], counts["b"])  // ?
+_ = map[[2]int]string{}
+_ = map[struct{ X, Y int }]bool{}
+_ = map[[]int]string{}
 
-v, ok := counts["b"]
-fmt.Println(v, ok)      // ?
+dynamic := map[any]string{}
+dynamic[[]int{1, 2}] = "value"
 ```
 
 <details>
 <summary>Ответ</summary>
 
-```
-1
-1 0
-0 false
-```
+- Array comparable, если comparable element type.
+- Struct comparable, если comparable все fields.
+- Slice, map и function не comparable, поэтому `map[[]int]...` не компилируется.
+- `any` как static key type допустим, но dynamic slice внутри interface вызывает runtime panic при hashing.
 
-Чтение отсутствующего ключа возвращает **zero value** без паники, поэтому `counts["a"]++` на пустой map работает: читает `0`, прибавляет, пишет `1` (это read-modify-write — на **nil** map такой `++` уже паникнул бы из-за записи). `counts["b"]` — отсутствует → `0`, неотличимо от реально хранимого нуля. Различить «нет ключа» и «значение 0» можно только через **comma-ok**: `v, ok := counts["b"]` → `ok == false`.
-</details>
-
----
-
-## Загадка 9: map — ссылочный тип (алиас)
-
-```go
-m1 := map[string]int{"x": 1}
-m2 := m1            // ?
-m2["x"] = 99
-delete(m2, "x")
-m2["y"] = 2
-fmt.Println(m1["x"], m1["y"], len(m1))  // ?
-```
-
-<details>
-<summary>Ответ</summary>
-
-```
-0 2 1
-```
-
-`m2 := m1` **не копирует** мапу — копируется только её заголовок (указатель на общий `hmap`/`Map`). `m1` и `m2` указывают на **одни и те же** данные, поэтому все правки через `m2` видны через `m1`: `delete(m2,"x")` убрал `x` (теперь `m1["x"] == 0`), `m2["y"]=2` добавил `y` обоим → `len == 1`.
-
-То же и при **передаче в функцию**: map передаётся «по ссылке» (по значению заголовка), и функция меняет исходную мапу. Чтобы получить независимую копию — копировать вручную (`maps.Clone`, Go 1.21+, или цикл). Это роднит map со срезами и каналами.
-</details>
-
----
-
-## Загадка 10: интерфейсный ключ с не-comparable значением
-
-```go
-m := map[any]int{}
-m[42] = 1
-m["x"] = 2
-m[[]int{1}] = 3   // ?
-```
-
-<details>
-<summary>Ответ</summary>
-
-```
+```text
 panic: runtime error: hash of unhashable type []int
 ```
 
-Тип ключа `any` — comparable, поэтому **компилируется**. Но конкретное значение `[]int` (срез) не comparable, и падение происходит **в рантайме**, при попытке захэшировать ключ для вставки. Сообщение именно про **хэш** (`hash of unhashable type`), а не про сравнение, потому что в map хэш считается раньше сравнения. Прямое же `a == b` двух интерфейсов со срезами внутри дало бы другое: `comparing uncomparable type []int`.
+Поэтому `map[any]V` переносит часть проверки из compile time в runtime. Для domain key лучше использовать конкретный comparable type.
 
-Это `panic` (ловится `recover`), а не `fatal` — в отличие от concurrent-доступа (Загадка 6). Мораль: `map[any]…` — отложенная мина, если в ключи может прилететь срез/мапа/функция.
 </details>
 
----
-
-## Загадка 11: какие типы можно ключом
+## Задача 6: NaN как key
 
 ```go
-_ = map[[2]int]string{}        // ?
-_ = map[struct{ X, Y int }]int{}  // ?
-_ = map[[]int]int{}            // ?
+nan := math.NaN()
+m := map[float64]string{}
 
-type S struct{ tags []string }
-_ = map[S]int{}                // ?
+m[nan] = "first"
+m[nan] = "second"
+
+fmt.Println(len(m))
+fmt.Println(m[nan])
+delete(m, nan)
+fmt.Println(len(m))
 ```
 
 <details>
 <summary>Ответ</summary>
 
-```
-map[[2]int]string        — ок (массив фикс. длины из comparable)
-map[struct{X,Y int}]int  — ок (все поля comparable)
-map[[]int]int            — ошибка компиляции: invalid map key type []int
-map[S]int                — ошибка компиляции: invalid map key type S
+Типичный результат:
+
+```text
+2
+
+2
 ```
 
-Ключ должен быть **comparable**. Массив фиксированной длины и структура из comparable-полей — годятся. Срез — нет (несравним), и структура `S` с полем-срезом **тоже** становится не-comparable → не годится ключом. Так же «заражают» структуру поля-`map` и поля-функции. Полный разбор — в [01-hmap-before-1.24](./01-hmap-before-1.24.md), раздел «Что может быть ключом».
+IEEE-754 задаёт `NaN != NaN`. Поэтому повторная вставка не находит existing key, lookup возвращает zero value, а `delete` тоже не находит equality match.
+
+Удалить такие entries по key нельзя, даже получив NaN key через `range`: он не равен самому себе. Очистить map можно через `clear(m)` или замену новым экземпляром.
+
+Практическое правило: normalise/forbid NaN до использования float как key.
+
 </details>
 
----
-
-## Загадка 12: pointer-метод на значении map
+## Задача 7: сравнение maps
 
 ```go
-type Counter struct{ n int }
-func (c *Counter) Inc() { c.n++ }
+left := map[string]int{"x": 1}
+right := map[string]int{"x": 1}
 
-m := map[string]Counter{"a": {}}
-m["a"].Inc()   // ?
+fmt.Println(left == right)
 ```
 
 <details>
 <summary>Ответ</summary>
 
-```
-ошибка компиляции: cannot call pointer method Inc on Counter
-(m["a"] is not addressable)
+Не компилируется. Map можно сравнить только с `nil`.
+
+Для content equality:
+
+```go
+equal := maps.Equal(left, right)
 ```
 
-Метод `Inc` объявлен на `*Counter`, а чтобы его вызвать, нужно взять адрес `&m["a"]`. Но значение в map **не адресуемо** (при росте buckets переаллоцируются, адрес стал бы dangling — см. Загадка 2). Поэтому компилятор запрещает вызов pointer-метода на элементе map.
+Если values требуют custom equality, используйте `maps.EqualFunc`. Помните, что NaN и pointer-containing values подчиняются equality выбранной функции.
 
-Варианты: достать копию, изменить, положить обратно (`c := m["a"]; c.Inc(); m["a"] = c`); либо хранить указатели — `map[string]*Counter`, тогда `m["a"].Inc()` работает (адрес берётся у самого `*Counter`, элемент map не трогаем).
+Следствие: map нельзя использовать как key другой map; struct с map field тоже не comparable.
+
 </details>
 
----
+## Задача 8: concurrent access
+
+```go
+m := map[int]int{}
+
+go func() {
+	for {
+		m[1]++
+	}
+}()
+
+go func() {
+	for {
+		_ = m[1]
+	}
+}()
+```
+
+Можно ли рассчитывать на runtime error?
+
+<details>
+<summary>Ответ</summary>
+
+Нет. Программа содержит data race и её поведение нельзя использовать как synchronization contract. Runtime часто обнаруживает пересечение и завершает process сообщением вроде:
+
+```text
+fatal error: concurrent map read and map write
+```
+
+Это runtime throw, а не recoverable panic. Но встроенная проверка не обязана обнаружить каждую race.
+
+Правильные варианты:
+
+- map под `sync.Mutex`/`sync.RWMutex`;
+- ownership одной goroutine и commands через channel;
+- `sync.Map` для подходящего access pattern;
+- immutable snapshot, публикуемый атомарно.
+
+И обязательно:
+
+```bash
+go test -race ./...
+```
+
+</details>
+
+## Задача 9: delete, clear и память
+
+```go
+m := make(map[int][]byte, 1_000_000)
+for i := range 1_000_000 {
+	m[i] = make([]byte, 64)
+}
+
+clear(m)
+fmt.Println(len(m))
+```
+
+Гарантирует ли `len(m)==0`, что backing memory вернулась ОС?
+
+<details>
+<summary>Ответ</summary>
+
+Нет. `clear` удаляет entries и освобождает references на values для GC, но specification ничего не обещает о capacity или RSS. Текущая implementation сохраняет внутренние tables для повторного использования.
+
+Если map пережила редкий большой peak и должна освободить storage:
+
+```go
+m = nil
+// или
+m = make(map[int][]byte)
+```
+
+После этого старая map становится eligible for GC, если других references нет. Даже после GC runtime может оставить освобождённые pages себе, поэтому решение проверяют по heap profile и RSS, а не по `len`.
+
+</details>
+
+## Interview-ready answer
+
+**1. Что возвращает lookup отсутствующего key?**
+
+- Zero value. Comma-ok нужен, чтобы отличить отсутствие от сохранённого zero. Nil map можно читать, но запись в неё паникует.
+
+**2. Можно ли изменять map во время range?**
+
+- В одной goroutine можно, но семантика специальная: ещё не достигнутый deleted key не появится, а новый key может появиться или нет. Порядок итерации не specified.
+
+**3. Почему нельзя изменить поле `m[key].Field`?**
+
+- Map element не addressable. Нужно получить value copy, изменить и записать обратно либо хранить pointer осознанно.
+
+**4. Какие типы допустимы как keys?**
+
+- Comparable types. Для interface key важен dynamic type: interface со slice/map/function внутри вызовет panic при hashing/comparison.
+
+**5. Безопасна ли builtin map для concurrency?**
+
+- Только если нет concurrent write либо доступ синхронизирован. Runtime fatal — best-effort detection, не механизм защиты; корректность дают happens-before и race-free program.
+
+## Официальные источники
+
+- [Go specification: map types](https://go.dev/ref/spec#Map_types)
+- [Go specification: range over map](https://go.dev/ref/spec#For_range)
+- [Go maps in action](https://go.dev/blog/maps)
+- [maps package](https://pkg.go.dev/maps)
