@@ -1,17 +1,21 @@
 # Docker
 
-Практическое использование Docker для Go-сервисов: не только как собрать image, но и как понимать runtime, изоляцию, сигналы и настройку Go runtime под контейнерное окружение.
+Устройство контейнеров и практическое использование Docker для Go-сервисов: изоляция, образы, ресурсы, безопасность, сигналы и настройка Go runtime под контейнерное окружение.
 
 ## Материалы
 
-- [Container vs Virtual Machine](./01-container-vs-virtual-machine.md) — Linux namespaces и cgroups под капотом, OCI, Kata/gVisor
-- [Docker For Go Services](./02-docker-for-go-services.md) — multi-stage Dockerfile, layer caching, PID 1 / SIGTERM, GOMEMLIMIT, GOMAXPROCS, security
+1. [Контейнер и виртуальная машина: в чём разница](./01-container-vs-virtual-machine.md) — короткое сравнение и выбор подхода
+2. [Как устроен контейнер](./02-containers.md) — процессы, namespaces, cgroups, слои образа, OCI и безопасность
+3. [Как устроена виртуальная машина](./03-virtual-machines.md) — гипервизор, гостевая ОС, виртуальные ресурсы и отличие от эмуляции
+4. [Docker для Go-сервисов](./04-docker-for-go-services.md) — многоэтапная сборка, кэш слоёв, PID 1 / SIGTERM, `GOMEMLIMIT`, `GOMAXPROCS` и защита
+
+Если нужен только ответ на вопрос «чем контейнер отличается от VM», достаточно первого файла. Второй и третий объясняют устройство каждой технологии отдельно, не смешивая их механизмы.
 
 ## Что важно уметь объяснить
 
-- Контейнер — это Linux-процесс с namespaces (изоляция видимости) и cgroups (ограничение ресурсов). Ядро хоста shared.
+- Контейнер — это процесс или группа процессов с namespaces (изоляция видимости) и cgroups (ограничение ресурсов). Ядро Linux-хоста остаётся общим.
 - Почему `ENTRYPOINT ["/app/server"]` (exec form), а не `ENTRYPOINT /app/server` (shell form) — PID 1 и SIGTERM.
 - Почему без `GOMEMLIMIT` контейнер получает OOMKilled, а без `automaxprocs` — CPU throttling.
-- Multi-stage Dockerfile: builder (go toolchain) → runtime (distroless/scratch). Размер: 10–20 MB.
+- Многоэтапный Dockerfile: сборка с Go toolchain → минимальный runtime-образ (`distroless`/`scratch`).
 - Порядок слоёв для эффективного кэша: `go.mod`/`go.sum` → `go mod download` → исходники.
-- Секреты нельзя класть в Dockerfile ENV или COPY — они попадают в image history.
+- Секреты нельзя класть в Dockerfile через `ENV` или `COPY` — они попадают в историю образа.

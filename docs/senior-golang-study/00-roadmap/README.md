@@ -252,8 +252,10 @@
 
 | Файл | Что внутри | Приоритет |
 |------|-----------|-----------|
-| [01-container-vs-virtual-machine.md](../10-devops-and-observability/docker/01-container-vs-virtual-machine.md) | container = namespaces + cgroups + overlay FS | ★★★ |
-| [02-docker-for-go-services.md](../10-devops-and-observability/docker/02-docker-for-go-services.md) | multi-stage build, distroless/scratch, GOMEMLIMIT, automaxprocs | ★★★ |
+| [01-container-vs-virtual-machine.md](../10-devops-and-observability/docker/01-container-vs-virtual-machine.md) | короткое сравнение контейнера и VM, выбор подхода | ★★★ |
+| [02-containers.md](../10-devops-and-observability/docker/02-containers.md) | процессы, namespaces, cgroups, слои образа, OCI, безопасность | ★★★ |
+| [03-virtual-machines.md](../10-devops-and-observability/docker/03-virtual-machines.md) | гипервизор, гостевая ОС, виртуальные ресурсы, эмуляция | ★★★ |
+| [04-docker-for-go-services.md](../10-devops-and-observability/docker/04-docker-for-go-services.md) | multi-stage build, distroless/scratch, GOMEMLIMIT, automaxprocs | ★★★ |
 | [02-dockerfile-anatomy.md](../10-devops-and-observability/dockerfiles-for-go/02-dockerfile-anatomy.md) | слои, кэш layers, порядок инструкций | ★★ |
 | [03-dockerfiles-for-go-projects.md](../10-devops-and-observability/dockerfiles-for-go/03-dockerfiles-for-go-projects.md) | паттерны prod/dev Dockerfile | ★★ |
 

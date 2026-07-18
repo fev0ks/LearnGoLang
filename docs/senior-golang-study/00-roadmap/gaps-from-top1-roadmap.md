@@ -107,7 +107,7 @@
 - `04-atomics-and-memory-ordering.md` — store buffers, x86 TSO vs ARM weak, fences, CAS
 - `05-virtual-memory-and-paging.md` — VA→PA, MMU/TLB, COW, mmap, swap, VIRT/RSS
 - `06-processes-and-threads.md` — fork/exec/clone, kernel/user mode, syscalls
-- `07-context-switching-and-scheduling.md` — CFS, Go M:N scheduler, GOMAXPROCS
+- `07-context-switching-and-scheduling.md` — voluntary/nonvoluntary context switches, CFS/EEVDF, `nice`, cgroups и диагностика планирования
 
 ### Углубление аутентификации
 
@@ -117,7 +117,7 @@
 
 ### Container security deep-dive
 
-Расширен `10-devops-and-observability/docker/01-container-vs-virtual-machine.md` — добавлены разделы про векторы атак, известные CVE (runc, Dirty Pipe, Leaky Vessels), последствия компрометации, чек-лист защиты.
+В `10-devops-and-observability/docker/02-containers.md` разобраны векторы атак, примеры уязвимостей `runc`, последствия компрометации и чек-лист защиты.
 
 ---
 
