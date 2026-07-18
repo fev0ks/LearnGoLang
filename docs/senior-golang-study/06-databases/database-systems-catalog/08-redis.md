@@ -1,22 +1,24 @@
 # Redis
 
-Redis — in-memory data store: данные живут в RAM, отсюда sub-millisecond latency. От простого key-value кэша его отличают две вещи, из которых растёт почти всё остальное: богатый набор **структур данных** (не только строки) и **однопоточная модель** исполнения команд — источник и его атомарности, и его ограничений. Ниже — как это устроено внутри, а не только «какие есть команды».
+Redis — in-memory data store: основной dataset живёт в RAM, поэтому простые операции выполняются с очень низкой latency. Redis полезен не только как key-value cache: он предоставляет структуры данных, TTL, атомарные команды, persistence, replication и sharding.
 
-Конкретные production-сценарии с Go-кодом — в [08a-redis-real-scenarios.md](./08a-redis-real-scenarios.md).  
-Реализации rate limiters (Fixed Window, Sliding Window, Token Bucket) — в [08b-redis-rate-limiters.md](./08b-redis-rate-limiters.md).
+Главная mental model: Redis хранит `key → value`, где value имеет тип (`String`, `Hash`, `List`, `Set`, `Sorted Set`, `Stream`). Одна команда атомарна, но данные ограничены памятью, а durability и consistency зависят от выбранной конфигурации.
+
+Version-sensitive детали в этом файле ориентированы на Redis Open Source 8.x. Внутренние кодировки и defaults могут отличаться в более старых версиях.
 
 ## Содержание
 
 - [Где используется](#где-используется)
-- [Однопоточная модель](#однопоточная-модель)
-- [Структуры данных и их внутренние кодировки](#структуры-данных-и-их-внутренние-кодировки)
-  - [Примеры по типам](#примеры-по-типам)
-- [Как работает TTL (истечение ключей)](#как-работает-ttl-истечение-ключей)
+- [Как Redis исполняет команды](#как-redis-исполняет-команды)
+- [Структуры данных: что выбирать](#структуры-данных-что-выбирать)
+- [TTL: когда исчезает ключ](#ttl-когда-исчезает-ключ)
+- [Что происходит при заполнении памяти](#что-происходит-при-заполнении-памяти)
 - [Persistence: RDB vs AOF](#persistence-rdb-vs-aof)
-- [Eviction policies](#eviction-policies)
-- [Redis Sentinel vs Redis Cluster](#redis-sentinel-vs-redis-cluster)
+- [Replication, Sentinel и Cluster](#replication-sentinel-и-cluster)
+- [Redis Streams, List или Pub/Sub](#redis-streams-list-или-pubsub)
 - [Атомарность: pipeline, MULTI/EXEC, Lua, WATCH](#атомарность-pipeline-multiexec-lua-watch)
 - [Distributed lock: подводные камни](#distributed-lock-подводные-камни)
+- [Производительность и работа под нагрузкой](#производительность-и-работа-под-нагрузкой)
 - [Сильные стороны](#сильные-стороны)
 - [Слабые стороны](#слабые-стороны)
 - [Когда выбирать](#когда-выбирать)
@@ -24,53 +26,46 @@ Redis — in-memory data store: данные живут в RAM, отсюда sub
 - [Типичные ошибки](#типичные-ошибки)
 - [Go: go-redis](#go-go-redis)
 - [Interview-ready answer](#interview-ready-answer)
+- [Официальная документация](#официальная-документация)
 
 ## Где используется
 
-- cache;
-- rate limiting;
-- counters;
-- sessions;
-- distributed locks (с оговорками);
-- leaderboards;
-- queues-lite / pub-sub;
-- ephemeral fast state.
+| Сценарий | Почему Redis подходит |
+| --- | --- |
+| Cache и sessions | быстрый lookup по key и встроенный TTL |
+| Counters и rate limiting | атомарные `INCR` и server-side scripts |
+| Leaderboards | Sorted Set хранит порядок по score |
+| Presence и temporary state | дешёвые Set/Hash и expiration |
+| Лёгкие очереди и notifications | List, Stream или Pub/Sub под разные гарантии |
+| Advisory locks | атомарный `SET NX PX`, если понятны ограничения lease |
 
-## Однопоточная модель
+Production-паттерны и Go-код вынесены в [08a-redis-real-scenarios.md](./08a-redis-real-scenarios.md), а алгоритмы rate limiting — в [08b-redis-rate-limiters.md](./08b-redis-rate-limiters.md).
 
-Redis исполняет команды в **одном потоке**: один event loop берёт команды из сокетов и выполняет их по очереди. Это не недоработка, а осознанный дизайн, и из него следует почти всё поведение Redis:
+## Как Redis исполняет команды
 
-- **Атомарность даром.** Пока команда выполняется, никакая другая не вклинится → любая одиночная команда атомарна без всяких локов. `INCR`, `LPUSH`, `SETNX` безопасны при любой конкуренции. На этом же строятся Lua-скрипты и `MULTI/EXEC` (см. [Атомарность](#атомарность-pipeline-multiexec-lua-watch)).
-- **Hot key — bottleneck.** Все команды инстанса сериализуются в этом одном потоке. Один «горячий» ключ упирается в один CPU-core, и шардирование по ключам не спасает, если вся нагрузка идёт в один ключ (см. [08a, счётчики и hot rows](./08a-redis-real-scenarios.md)).
-- **O(N)-команды блокируют всех.** Пока идёт `KEYS *`, большой `SMEMBERS`, `LRANGE` по огромному списку или `FLUSHALL`, остальные клиенты **ждут**. Отсюда правило: в проде никогда `KEYS`, только курсорный `SCAN` (отдаёт ключи порциями, не блокируя loop).
-- **Threaded I/O (Redis 6+).** Чтение/парсинг запросов и запись ответов можно распараллелить на несколько I/O-потоков (`io-threads`), но **само исполнение команд остаётся однопоточным**. То есть лишние ядра ускоряют сеть, а не логику; чтобы занять все ядра под нагрузкой — несколько инстансов/шардов.
+Основной путь исполнения команд Redis преимущественно однопоточный: event loop обрабатывает команды последовательно. При этом Redis использует дополнительные потоки и фоновые процессы для I/O и служебной работы, поэтому фразу «Redis полностью однопоточный» не стоит понимать буквально.
 
-## Структуры данных и их внутренние кодировки
+- **Одна команда атомарна.** `INCR`, `HSET`, `LPUSH` или `SET ... NX` не требуют client-side lock.
+- **Долгая команда задерживает другие.** Стоимость зависит не только от имени команды, но и от размера value: `SMEMBERS` по десяти элементам безопасен, по миллиону — нет.
+- **Hot key ограничивает масштабирование.** Cluster распределяет разные ключи, но один перегруженный ключ всё равно обслуживается одним shard.
+- **Pipeline экономит сеть, а не CPU.** Он уменьшает число round trips, но не делает команды атомарными.
 
-Под капотом Redis хранит каждый тип в **компактной кодировке, пока коллекция маленькая**, и переключается на полноценную структуру при росте. Это ключ к его memory-эффективности:
+В application path избегают `KEYS *` и неограниченных `HGETALL`/`SMEMBERS`/`LRANGE`. Для постепенного обхода используют `SCAN`, `HSCAN`, `SSCAN`, `ZSCAN`; они не дают snapshot и при изменении коллекции могут возвращать элементы повторно.
 
-| Тип | Мелкий (компактно) | Крупный | Порог переключения |
-|---|---|---|---|
-| String | `int` (число) / `embstr` (≤44 байт) | `raw` | размер строки |
-| Hash | `listpack` | `hashtable` | `hash-max-listpack-entries` / `-value` |
-| List | `listpack` | `quicklist` (список listpack-ов) | `list-max-listpack-size` |
-| Set | `intset` (все целые) / `listpack` | `hashtable` | `set-max-intset-entries`, `set-max-listpack-entries` |
-| Sorted Set | `listpack` | `skiplist` + hashtable | `zset-max-listpack-entries` / `-value` |
+## Структуры данных: что выбирать
 
-Что важно понимать:
+Выбирать Redis type нужно по операции, которая должна быть дешёвой и атомарной:
 
-- **listpack** — плоский непрерывный блок памяти: дёшево по памяти, но операции O(N). Поэтому и есть порог: коллекция перерастает — Redis переключает её на структуру с O(1)/O(log N) доступом ценой большей памяти.
-- **Sorted Set = skip list + hash map**: skiplist даёт порядок по score и диапазонные запросы за O(log N), hash map — доступ к score по члену за O(1). Отсюда и вся мощь leaderboard'ов.
-- `INCR` дёшев, потому что число хранится кодировкой `int`, а не как строка, которую парсят каждый раз.
-- Текущую кодировку показывает `OBJECT ENCODING key`.
+| Задача | Тип | Основные команды |
+| --- | --- | --- |
+| Кэшировать blob, хранить token или counter | `String` | `GET`, `SET`, `INCR` |
+| Хранить небольшой объект с полями | `Hash` | `HSET`, `HGET`, `HMGET` |
+| Очередь или deque | `List` | `LPUSH`, `RPOP`, `BLMOVE` |
+| Уникальные элементы и membership | `Set` | `SADD`, `SISMEMBER`, `SINTER` |
+| Ranking или диапазон по score | `Sorted Set` | `ZADD`, `ZRANGE`, `ZRANK` |
+| Retained event log с consumer groups | `Stream` | `XADD`, `XREADGROUP`, `XACK` |
 
-Практический вывод: 10k маленьких хэшей по 5 полей (все в listpack) тратят кратно меньше памяти, чем 50k отдельных ключей, — но нельзя бездумно растить коллекцию: перескок `listpack → hashtable/skiplist` меняет и память, и сложность операций.
-
-### Примеры по типам
-
-Как каждый тип используют на практике:
-
-**String** (`int` / `embstr` / `raw`) — кэш, сессии, атомарные счётчики:
+**String** — кэш, сессия или атомарный счётчик:
 
 ```text
 SET session:abc123 "user-42" EX 3600     # значение + TTL 1 час
@@ -79,7 +74,9 @@ INCR rate:user:42:2026-04-20-10:00       # атомарный счётчик о�
 EXPIRE rate:user:42:2026-04-20-10:00 60
 ```
 
-**Hash** (`listpack` → `hashtable`) — объект с полями (профиль, настройки):
+`INCR` и `EXPIRE` здесь две отдельные команды. Для корректного rate limiter их объединяют Lua/Function или другим атомарным паттерном из [08b](./08b-redis-rate-limiters.md).
+
+**Hash** — объект с полями, когда не нужно каждый раз читать и перезаписывать весь JSON:
 
 ```text
 HSET user:42 email user@example.com status active plan pro
@@ -87,15 +84,17 @@ HGET user:42 plan
 HGETALL user:42
 ```
 
-**List** (`listpack` → `quicklist`) — очередь/стек, лента событий:
+**List** — простая очередь или deque:
 
 ```text
 LPUSH queue:jobs job-1                    # добавить в голову
-RPOPLPUSH queue:jobs queue:processing     # надёжная очередь: взять и запомнить «в работе»
+BLMOVE queue:jobs queue:processing RIGHT LEFT 0
 LRANGE feed:user:42 0 19                  # последние 20 элементов
 ```
 
-**Set** (`intset` / `listpack` → `hashtable`) — уникальные множества, теги, «кто онлайн»:
+`BLMOVE` помогает не потерять задачу между получением и переносом в processing list, но retry, acknowledgments и cleanup приложение реализует самостоятельно. Для готовой consumer-group модели обычно удобнее Stream.
+
+**Set** — уникальные множества, теги и membership:
 
 ```text
 SADD online:users 42 99 100
@@ -104,95 +103,176 @@ SCARD online:users                        # размер множества
 SINTER tag:go tag:senior                  # пересечение множеств
 ```
 
-**Sorted Set** (`listpack` → `skiplist`) — leaderboard, приоритетная очередь, выборки по диапазону score:
+**Sorted Set** — leaderboard, приоритетная очередь или диапазон по score:
 
 ```text
 ZADD leaderboard 1500 user:42 2000 user:99
-ZREVRANGE leaderboard 0 9 WITHSCORES      # топ-10
-ZRANK leaderboard user:42                 # позиция игрока
+ZRANGE leaderboard 0 9 REV WITHSCORES     # топ-10
+ZREVRANK leaderboard user:42              # позиция от большего score к меньшему
 ```
 
-**HyperLogLog** — приблизительный счётчик уникальных: ~12 KB на любой объём, погрешность ~0.8% (когда точный `SCARD` слишком дорог по памяти):
+**HyperLogLog** — приблизительный счётчик уникальных, когда точный `Set` слишком дорог по памяти:
 
 ```text
 PFADD visitors:2026-04-20 user:1 user:2 user:3
 PFCOUNT visitors:2026-04-20               # ≈ число уникальных
 ```
 
-## Как работает TTL (истечение ключей)
+<details>
+<summary>Deep dive: внутренние кодировки</summary>
 
-TTL **не** срабатывает ровно в момент истечения — Redis удаляет протухшие ключи двумя механизмами:
+Redis автоматически выбирает компактное представление для небольших values и меняет его при росте. Например, Hash и Sorted Set могут использовать `listpack`, Set из целых — `intset`, а крупные структуры переходят на hash table, quicklist или skiplist.
 
-- **Lazy (пассивно):** при обращении к ключу Redis проверяет TTL и, если истёк, удаляет его и отвечает «нет ключа». То есть протухший ключ может «висеть» в памяти, пока к нему кто-нибудь не обратится.
-- **Active (активно):** фоновый цикл ~10 раз/сек берёт случайную выборку ключей с TTL и удаляет протухшие; если протухших в выборке много (>25%), повторяет, чтобы не копить мусор.
+Это важно по двум причинам:
 
-Следствия для собеса:
-- expired-но-не-собранные ключи **занимают память** → нельзя считать, что после TTL память сразу свободна (память освобождает eviction/active-expire, а не факт истечения);
-- на **реплике** ключи не истекают сами: она ждёт `DEL` от мастера (иначе реплики разошлись бы по данным);
-- `SET ... EX/PX`, `EXPIRE`/`PEXPIRE` ставят TTL; `PERSIST` снимает; `TTL key` показывает остаток.
+- множество маленьких Hash обычно экономнее множества отдельных keys, потому что у каждого key есть собственные метаданные;
+- после перехода на другую encoding меняются потребление памяти и стоимость некоторых операций.
+
+Конкретные thresholds зависят от версии и `redis.conf`; не стоит запоминать их как универсальные constants. Текущую encoding показывает:
+
+```text
+OBJECT ENCODING key
+```
+
+Для sizing используют `MEMORY USAGE`, `redis-cli --memkeys` и тест на данных, похожих на production.
+
+</details>
+
+## TTL: когда исчезает ключ
+
+TTL задают вместе с записью (`SET ... EX/PX`) либо командами `EXPIRE`/`PEXPIRE`. `TTL key` показывает оставшееся время, `PERSIST` снимает expiration.
+
+После deadline ключ логически считается отсутствующим, но физическое удаление асинхронно:
+
+- **passive expiration** удаляет ключ при обращении;
+- **active expiration** периодически выбирает keys с TTL и очищает просроченные.
+
+Поэтому TTL не является точным scheduler: событие «удалить ровно в 12:00:00» нужно реализовывать отдельно. Просроченные, но ещё не очищенные keys могут временно учитываться в памяти. Primary синтезирует `DEL` и передаёт его в AOF и replicas, чтобы dataset не расходился.
+
+## Что происходит при заполнении памяти
+
+`maxmemory` задаёт предел, а `maxmemory-policy` — реакцию на его достижение:
+
+| Режим | Когда подходит | Что происходит |
+| --- | --- | --- |
+| `noeviction` | данные нельзя автоматически удалять | команды, которым нужна новая память, получают error |
+| `allkeys-lru` / `allkeys-lfu` | весь instance — cache | Redis приближённо вытесняет старые или редко используемые keys |
+| `volatile-lru` / `volatile-lfu` | удалять разрешено только keys с TTL | keys без TTL сохраняются, но запись может упасть, если подходящих кандидатов нет |
+| `volatile-ttl` | ближе к expiry — менее ценно | сначала вытесняются keys с меньшим оставшимся TTL |
+
+Для cache обычно начинают с `allkeys-lru` или `allkeys-lfu`. Для mixed workload безопаснее разделить cache и non-evictable state по разным instances: одна policy на общей базе создаёт неочевидную зависимость между ними.
+
+`maxmemory` оставляют ниже доступной RAM: replication buffers, client buffers, fork copy-on-write и allocator overhead могут потреблять память сверх dataset limit.
 
 ## Persistence: RDB vs AOF
 
-Redis предлагает несколько режимов persistence. Выбор зависит от требований к durability.
+Persistence отвечает за восстановление после restart, но не заменяет replication и backups.
 
-**RDB (snapshotting)**: Redis делает полный снапшот данных на диск раз в N секунд (или при M изменениях). Быстрый restart — загружается один файл. Минус: при сбое теряются изменения с момента последнего snapshot.
+| Режим | Что хранится | Возможная потеря при crash | Основной trade-off |
+| --- | --- | --- | --- |
+| без persistence | только RAM | весь dataset | минимум disk I/O; только для восстановимого cache |
+| RDB | периодический snapshot | изменения после последнего snapshot | компактный backup и быстрый restart |
+| AOF `everysec` | log write-команд | обычно до одной секунды | лучше durability, больше disk I/O |
+| RDB + AOF | snapshots и command log | зависит от AOF policy | больше защиты и operational complexity |
 
-Как это устроено внутри — через `fork()`: Redis форкает дочерний процесс, тот пишет консистентный снапшот на диск, а родитель продолжает обслуживать команды. Работает за счёт **copy-on-write**: родитель и потомок делят страницы памяти, и копируется только та страница, которую родитель изменил во время снапшота. Подвох на собес: под тяжёлой записью копируется много страниц → **скачок потребления памяти** (в худшем случае почти x2), а сам `fork` на больших датасетах (десятки ГБ) даёт заметную паузу. AOF rewrite (компакция лога) идёт тем же `fork` с теми же эффектами — поэтому snapshot/rewrite планируют на низкую нагрузку.
+Для AOF доступны `appendfsync always`, `everysec` и `no`. `everysec` — типичный компромисс; `always` повышает durability ценой latency, а `no` оставляет flush операционной системе. С Redis 7 AOF состоит из base и incremental files и периодически переписывается, чтобы не расти бесконечно.
 
-**AOF (Append-Only File)**: каждая write-команда дописывается в лог. Настраивается через `appendfsync`:
-- `always` — fsync на каждую команду (безопасно, медленно);
-- `everysec` (рекомендуется) — fsync раз в секунду, теряется максимум 1 секунда данных;
-- `no` — fsync на усмотрение ОС.
+<details>
+<summary>Deep dive: fork и copy-on-write</summary>
 
-**No persistence**: только в памяти. Подходит для pure cache — при рестарте данные теряются, основная DB является source of truth.
+RDB snapshot и фоновые persistence-операции могут использовать `fork()`. Child process пишет snapshot, а parent продолжает обслуживать команды. После fork они разделяют memory pages; изменённые страницы копируются по механизму copy-on-write.
 
-**RDB + AOF**: можно включить оба. AOF используется при restart.
+На большом write-heavy dataset это означает:
 
-Правило: если Redis — cache, persistence может быть отключена. Если Redis — primary storage (сессии, очереди), нужен AOF `everysec` как минимум.
+- короткая pause на сам `fork`;
+- дополнительную RAM на изменяемые pages;
+- конкуренцию за disk I/O во время snapshot или rewrite.
 
-## Eviction policies
+Поэтому capacity планируют не только по `used_memory`, но и с запасом под fork и buffers. Состояние проверяют через `INFO persistence`.
 
-При достижении `maxmemory` Redis должен что-то удалять. Политика задается `maxmemory-policy`:
+</details>
 
-| Policy | Что удаляет |
-|---|---|
-| `noeviction` | отказывает в записи (error) |
-| `allkeys-lru` | самый давно неиспользуемый из всех ключей |
-| `volatile-lru` | самый давно неиспользуемый из ключей с TTL |
-| `allkeys-lfu` | наименее часто используемый из всех |
-| `volatile-ttl` | с наименьшим оставшимся TTL |
-| `allkeys-random` | случайный из всех |
+## Replication, Sentinel и Cluster
 
-Для cache: обычно `allkeys-lru` или `allkeys-lfu`.  
-Для mixed storage (и cache, и persistent data без TTL): `volatile-lru`, чтобы не удалялись ключи без TTL.  
-Для critical data: `noeviction` + алерт на использование памяти.
+Сначала разделим три понятия:
 
-## Redis Sentinel vs Redis Cluster
+| Механизм | Что решает | Чего не решает |
+| --- | --- | --- |
+| Replication | копии dataset, read replicas | автоматический failover сам по себе |
+| Sentinel | discovery и failover одного primary с replicas | горизонтальное распределение keys |
+| Cluster | sharding по slots и failover каждого shard | cross-slot операции без ограничений |
 
-**Redis Sentinel** — high availability для single-primary конфигурации:
-- несколько нод (1 primary + N replicas);
-- Sentinel процессы мониторят primary и делают failover при его падении;
-- клиент подключается через Sentinel и получает адрес актуального primary.
+Replication асинхронная: primary обычно отвечает клиенту до того, как replicas применили запись. Поэтому после failover небольшое окно подтверждённых записей может потеряться, а чтение с replica может быть stale.
 
-Подходит для: HA без горизонтального масштабирования, умеренные объемы данных.
+```mermaid
+flowchart LR
+    C[Клиент] -->|write| P[(Primary)]
+    P -->|response| C
+    P -.->|async replication| R1[(Replica 1)]
+    P -.->|async replication| R2[(Replica 2)]
+```
 
-**Redis Cluster** — горизонтальное шардирование:
-- данные делятся на 16384 hash slots между несколькими master-нодами;
-- каждый мастер может иметь реплики;
-- клиент направляет команды на правильную ноду по ключу.
+После write на том же connection команда `WAIT 1 100` просит дождаться получения записи хотя бы одной replica или timeout 100 ms. Это уменьшает окно потери, но не превращает Redis в consensus database и не гарантирует fsync. `min-replicas-to-write` может ограничить запись при недостатке healthy replicas, меняя availability на меньший риск divergence.
 
-Ограничение Cluster: multi-key операции работают только если все ключи на одном shard — используй `{hash tags}` для группировки: `{user:42}:session` и `{user:42}:profile` попадут на одну ноду.
+**Sentinel** выбирают, когда dataset и throughput помещаются в один primary, но нужен автоматический failover и discovery нового primary.
 
-Подходит для: объемы данных больше одной ноды, очень высокий throughput.
+**Cluster** выбирают, когда нужны sharding и aggregate throughput нескольких primaries. Key попадает в один из 16384 hash slots; cluster-aware client хранит карту `slot → node`. Multi-key command, transaction или script должны обращаться к keys одного slot. Hash tag делает это явно:
+
+```text
+{user:42}:session
+{user:42}:profile
+```
+
+Обе записи используют hash tag `user:42` и попадают в один slot. Это помогает multi-key операциям, но может создать hot slot, если tag слишком популярный.
+
+<details>
+<summary>Deep dive: full/partial resync и MOVED/ASK</summary>
+
+При первом подключении или большом отставании replica делает **full resync**: получает snapshot и накопившийся поток изменений. После короткого disconnect возможен **partial resync** из replication backlog по replication ID и offset. Если нужная часть backlog уже вытеснена, снова нужен full resync.
+
+В Cluster:
+
+- `MOVED` сообщает постоянного владельца slot и заставляет client обновить карту;
+- `ASK` временно направляет одну команду на destination во время slot migration;
+- gossip по cluster bus распространяет topology и участвует в failure detection.
+
+Resharding перемещает keys slot за slot. Big keys увеличивают latency миграции, поэтому их контролируют ещё до масштабирования cluster.
+
+</details>
+
+## Redis Streams, List или Pub/Sub
+
+Эти инструменты решают разные задачи:
+
+| | Pub/Sub | List (`LPUSH`/`BRPOP`) | Stream |
+| --- | --- | --- | --- |
+| Модель | fan-out уведомлений | простая очередь/deque | retained log |
+| Если consumer offline | сообщение теряется | задача остаётся до извлечения | запись остаётся до trimming/deletion |
+| Acknowledgment | нет | приложение строит само | `XACK` и Pending Entries List |
+| Recovery зависшей работы | нет | приложение строит само | `XPENDING`, `XCLAIM`, `XAUTOCLAIM` |
+| Delivery | best effort | зависит от паттерна | at-least-once в consumer group |
+
+Stream выбирают, когда workers должны делить сообщения, подтверждать обработку и забирать зависшие pending entries. Дубликаты возможны, поэтому consumer должен быть idempotent. Фактическая durability Stream определяется общей настройкой RDB/AOF и replication — слово retained не означает автоматический fsync каждого события.
+
+Минимальный flow:
+
+```text
+XGROUP CREATE events workers $ MKSTREAM
+XADD events MAXLEN ~ 100000 * type order_placed order_id ORD-1
+XREADGROUP GROUP workers worker-1 COUNT 10 BLOCK 5000 STREAMS events >
+XACK events workers 1698765432-0
+```
+
+`MAXLEN` или `XTRIM` ограничивает рост Stream. Без retention policy он становится unbounded key. Для большого retention, независимого partitioning, долгого replay и развитой broker-экосистемы обычно выбирают Kafka/Pulsar, а не Redis.
 
 ## Атомарность: pipeline, MULTI/EXEC, Lua, WATCH
 
-Однопоточность даёт атомарность **одной** команды. Для групп команд есть четыре разных инструмента, и их часто путают:
+Одна Redis-команда атомарна. Когда логика состоит из нескольких команд, выбирают инструмент по требуемой гарантии:
 
 - **Pipeline — это НЕ про атомарность.** Это отправка нескольких команд за один RTT без ожидания ответа на каждую — экономия сети, и только. Между командами пайплайна вполне могут вклиниться команды других клиентов.
-- **MULTI/EXEC (транзакции).** Команды между `MULTI` и `EXEC` ставятся в очередь и выполняются **атомарно подряд** — никто не вклинится. Но это **не транзакции БД**: rollback'а нет — если команда упадёт в середине (например, неверный тип), остальные всё равно выполнятся; до `EXEC` проверяется только синтаксис.
+- **MULTI/EXEC (транзакции).** Команды между `MULTI` и `EXEC` ставятся в очередь и выполняются **атомарно подряд** — никто не вклинится. Но rollback нет: queue-time error отменяет `EXEC`, а runtime error вроде неверного типа не откатывает выполненные команды и не мешает остальным.
 - **WATCH — оптимистичная блокировка (CAS).** `WATCH key` перед `MULTI`: если `key` изменился до `EXEC`, транзакция отменяется (`EXEC` вернёт nil) → повторить. Так делают безопасный read-modify-write без блокировок.
-- **Lua-скрипт (`EVAL`).** Исполняется **атомарно и целиком** в том же однопоточном loop, плюс позволяет логику и ветвления на стороне сервера. Современная замена `MULTI/EXEC` для сложной атомарной операции; на нём же строят корректный release distributed-lock и rate limiters ([08b](./08b-redis-rate-limiters.md)).
+- **Lua script / Redis Function.** Выполняет server-side логику атомарно. Скрипт должен быть коротким: пока он работает, другие команды ждут. На Lua часто строят release lock и rate limiter ([08b](./08b-redis-rate-limiters.md)).
 
 Транзакция `MULTI/EXEC` — несколько команд, выполненных одним атомарным блоком:
 
@@ -223,36 +303,40 @@ pipe.Incr(ctx, "orders:count")
 pipe.LPush(ctx, "orders:queue", 42)
 _, err := pipe.Exec(ctx)
 
-// read-modify-write с оптимистичной блокировкой и авто-ретраем
-err = rdb.Watch(ctx, func(tx *redis.Tx) error {
-    n, err := tx.Get(ctx, "balance:42").Int()
-    if err != nil {
+// WATCH не делает auto-retry: конфликт redis.TxFailedErr повторяет приложение
+for attempt := 0; attempt < 3; attempt++ {
+    err = rdb.Watch(ctx, func(tx *redis.Tx) error {
+        n, err := tx.Get(ctx, "balance:42").Int()
+        if err != nil {
+            return err
+        }
+        if n < 100 {
+            return ErrInsufficientFunds
+        }
+        _, err = tx.TxPipelined(ctx, func(p redis.Pipeliner) error {
+            p.Set(ctx, "balance:42", n-100, 0)
+            return nil
+        })
         return err
+    }, "balance:42")
+
+    if !errors.Is(err, redis.TxFailedErr) {
+        break
     }
-    if n < 100 {
-        return ErrInsufficientFunds
-    }
-    _, err = tx.TxPipelined(ctx, func(p redis.Pipeliner) error {
-        p.Set(ctx, "balance:42", n-100, 0)
-        return nil
-    })
-    return err // redis.TxFailedErr, если ключ изменился между Get и Exec → повторить
-}, "balance:42")
+}
 ```
 
-Правило выбора: нужна скорость по сети — pipeline; нужна атомарная группа команд — `MULTI/EXEC`; тот же блок, но с проверкой «никто не изменил» — `WATCH`; атомарная логика с ветвлениями — Lua.
+Правило выбора: нужна скорость по сети — pipeline; нужна атомарная последовательность — `MULTI/EXEC`; нужен compare-and-set — `WATCH` с retry; нужна короткая атомарная логика с ветвлениями — Lua/Function.
 
 ## Distributed lock: подводные камни
 
-Базовая реализация через `SET NX PX` (атомарная операция):
+Минимальный advisory lock захватывают одной командой с уникальным случайным token и TTL:
 
 ```text
-SET lock:resource 42 NX PX 5000
+SET lock:resource 550e8400-e29b-41d4-a716-446655440000 NX PX 5000
 ```
 
-`NX` — только если не существует. `PX 5000` — TTL 5 секунд.
-
-Освобождение должно быть через Lua-скрипт (атомарно проверить и удалить):
+Освобождение должно атомарно сравнить token и удалить key, иначе клиент может снять уже чужой lock:
 
 ```lua
 if redis.call("get", KEYS[1]) == ARGV[1] then
@@ -262,25 +346,51 @@ else
 end
 ```
 
-Проблемы:
-- TTL истек, но процесс ещё работает — другой процесс захватил lock, оба думают что держат его;
-- при pause в GC или slow syscall lock может истечь неожиданно.
+Но TTL не доказывает, что владелец всё ещё единственный: GC pause, network delay или slow syscall могут пережить lease, после чего два процесса одновременно продолжат работу. Продление lock уменьшает вероятность, но не устраняет эту модель отказа.
 
-**Redlock** — алгоритм для lock на нескольких независимых Redis нодах. Спорный: критики (в частности Мартин Клеперман) указывают, что при pause процесса lock может быть перехвачен другим узлом, что делает Redlock небезопасным при строгих гарантиях. Для некритичного rate limiting и advisory locks — достаточно; для финансовых операций — нет.
+Поэтому Redis lock подходит для advisory-задач: не запустить одинаковый cron дважды, уменьшить duplicate work, координировать cache refresh. Если внешний ресурс требует строгой защиты от устаревшего владельца, используют **fencing token** — монотонный номер lease, который сам ресурс проверяет и отклоняет старые операции. Для финансового инварианта основная защита должна находиться в транзакционной БД или системе с подходящей consensus-моделью.
+
+Redlock координирует несколько независимых Redis primaries, но вокруг его гарантий есть известная дискуссия. На собеседовании важнее не название алгоритма, а способность объяснить lease expiry, process pause и fencing.
+
+## Производительность и работа под нагрузкой
+
+Число operations/sec без hardware, payload size, pipeline depth, TLS и persistence policy почти ничего не говорит. Redis измеряют собственным workload и смотрят не только average, но и p95/p99.
+
+Основные рычаги:
+
+- **pipelining/batching** уменьшает network round trips;
+- **connection pool** переиспользует TCP/TLS connections;
+- **bounded values** не дают O(N)-операциям занять event loop надолго;
+- **несколько shards** распределяют разные keys, но не исправляют один hot key;
+- **headroom по RAM** нужен для buffers, fragmentation и fork.
+
+Big key опасен не только памятью: его чтение, удаление или миграция может дать latency spike. Ищут большие values через `redis-cli --bigkeys`, `--memkeys`/`--keystats` и `MEMORY USAGE`. Для удаления большого key подходит `UNLINK`; для частичной обработки коллекций — `HSCAN`/`SSCAN`/`ZSCAN` с bounded batches.
+
+Типичные причины latency spikes:
+
+| Источник всплеска | Механизм | Что делать |
+| --- | --- | --- |
+| `fork` и persistence I/O | pause на fork, copy-on-write, конкуренция за disk | держать memory headroom, следить за `INFO persistence` |
+| Swap | часть RAM ушла в своп → каждая операция ждёт диск | `maxmemory` ниже физической RAM, отключить swap для Redis |
+| Transparent Huge Pages (THP) | ядро отдаёт huge pages → долгие copy-on-write при fork | отключить THP на хосте (официальная рекомендация Redis) |
+| O(N)-команды и big keys | event loop занят одной командой | `SLOWLOG`, bounded commands, incremental scans |
+| Штормовое истечение TTL | active-expire удаляет много ключей разом | размазать TTL джиттером, не ставить одинаковый expiry всем |
+
+Минимальный набор диагностики: `SLOWLOG GET`, `LATENCY DOCTOR`, `INFO memory`, `INFO replication`, `INFO persistence`, `MEMORY USAGE key` и cache hit rate `keyspace_hits`/`keyspace_misses`.
 
 ## Сильные стороны
 
-- **Очень низкая latency (sub-ms)** — данные в RAM, а однопоточный loop выполняет команды без блокировок и переключений контекста.
+- **Очень низкая latency для bounded операций** — основной dataset находится в RAM, а простой execution model уменьшает coordination overhead.
 - **Богатые структуры данных** — String, Hash, List, Set, Sorted Set, Stream, HyperLogLog, bitmap, geo: часто одна структура заменяет целый кусок логики (leaderboard = один Sorted Set).
-- **TTL из коробки** — авто-истечение ключей, отдельный процесс очистки не нужен.
+- **TTL из коробки** — lifecycle временных keys управляется самим Redis.
 - **Атомарность команд + Lua** — read-modify-write без гонок (счётчики, rate limiting, дедупликация) прямо на сервере.
 - **Pipeline** — десятки команд за один RTT, когда сеть дороже самих операций.
 - **Pub/Sub и Streams** — лёгкий messaging рядом с кэшем, без отдельного брокера для простых случаев.
 
 ## Слабые стороны
 
-- **Всё в RAM** — дорого по деньгам и жёстко ограничено объёмом памяти ноды.
-- **Durability слабее, чем у БД** — даже AOF `everysec` теряет до секунды, а fork под снапшот даёт скачок памяти и паузы (см. [Persistence](#persistence-rdb-vs-aof)).
+- **Основной dataset в RAM** — дорого по сравнению с disk-oriented storage и ограничено памятью shard.
+- **Подтверждённые записи могут теряться** — replication асинхронная, а AOF `everysec` допускает потерю последних изменений при crash.
 - **Hot key — потолок одного ядра** — из-за однопоточности вся нагрузка на один ключ упирается в один core, и шардирование по ключам не спасает.
 - **Инвалидация кэша сложна** — рассинхрон с source of truth, cache stampede при массовом истечении (паттерны — [08a](./08a-redis-real-scenarios.md)).
 - **Не для сложной логики хранения** — ни ad-hoc-запросов и джойнов, ни настоящих транзакций (`MULTI/EXEC` без rollback).
@@ -288,6 +398,7 @@ end
 ## Когда выбирать
 
 Redis подходит, когда:
+
 - **нужен быстрый кэш с TTL** перед медленным primary storage (cache-aside);
 - **нужны счётчики и rate limiting** — атомарные `INCR`/Lua решают это дёшево;
 - **надо хранить ephemeral state** — сессии, временные локи, feature-флаги, «кто онлайн»;
@@ -296,19 +407,20 @@ Redis подходит, когда:
 ## Когда не выбирать
 
 Redis — не лучший выбор, когда:
+
 - **нужна сложная транзакционная модель** с изоляцией и rollback — это работа реляционной БД;
-- **данные должны быть durable source of truth без потерь** — durability-профиль Redis этого не гарантирует;
+- **нельзя потерять ни одну подтверждённую запись** при failover или crash — стандартная replication/durability модель Redis этого не обещает;
 - **объём данных больше доступной RAM** — Redis не рассчитан на «холодные» данные на диске;
 - **нужны ad-hoc реляционные запросы** — фильтры, джойны, агрегации не его модель.
 
 ## Типичные ошибки
 
 - **Относиться к Redis как к «просто быстрой БД»** — без продуманных persistence и eviction это ведёт к тихой потере данных или отказам в записи.
-- **Хранить критичные данные без persistence** (или с `noeviction`, но без мониторинга памяти) — при рестарте/переполнении данные пропадут.
-- **Не ставить TTL** — ключи копятся, память растёт без ограничений до срабатывания eviction.
-- **Unbounded key/коллекция** — бесконечно растущий Sorted Set/Hash «на всё» превращается в hot key и раздувает память (перескок кодировки, см. [Структуры данных](#структуры-данных-и-их-внутренние-кодировки)).
+- **Хранить невосстановимые данные без persistence и replication** — restart или failover приводит к потере state.
+- **Не ставить TTL на временные keys** — сессии, idempotency keys и rate-limit windows копятся бесконечно.
+- **Unbounded key/коллекция** — бесконечно растущий Sorted Set, Stream или Hash превращается в big/hot key (см. [Структуры данных](#структуры-данных-что-выбирать)).
 - **Игнорировать hot keys** — вся нагрузка на один ключ упирается в один поток команд.
-- **`KEYS *` в production** — O(N) по всей базе, блокирует event loop для всех клиентов; только курсорный `SCAN`.
+- **`KEYS *` в application path** — O(N) по всей базе и блокирует другие команды; для incremental iteration используют `SCAN` с учётом его limited guarantees.
 - **Небезопасный distributed lock** — неатомарное освобождение (`GET`+`DEL` вместо Lua) снимает чужой лок.
 
 ## Go: go-redis
@@ -353,34 +465,48 @@ rdb := redis.NewFailoverClient(&redis.FailoverOptions{
 
 ## Interview-ready answer
 
-**1. Что Redis гарантирует по durability?**
+**1. Когда выбирать Redis?**
 
-- RDB-снапшоты теряют всё с момента последнего snapshot; AOF с `everysec` — максимум секунду. RDB/AOF-rewrite делаются через `fork` + copy-on-write, что даёт скачок памяти и паузу на больших датасетах. Redis — in-memory store для cache, счётчиков, rate limiting и ephemeral state; как единственное хранилище критичных данных его durability-профиль не подходит.
+- Когда нужен low-latency доступ по key, TTL, атомарный counter/rate limiter, leaderboard или временный distributed state. Redis особенно силён как cache перед source of truth. Не выбирают его только потому, что «он быстрый»: заранее определяют memory budget, eviction, durability и failover semantics.
 
-**2. Почему Redis однопоточный и что из этого следует?**
+**2. Что означает преимущественно однопоточное исполнение?**
 
-- Команды исполняет один event loop → любая одиночная команда атомарна без локов (основа `INCR`, Lua, `MULTI/EXEC`). Обратная сторона: hot key упирается в один core, а O(N)-команды (`KEYS *`, большой `SMEMBERS`) блокируют весь инстанс — в проде только `SCAN`. Threaded I/O (6+) распараллеливает сеть, но не исполнение команд; все ядра занимают несколькими инстансами.
+- Одна команда атомарна, но долгая O(N)-операция или big key задерживает другие команды. Cluster распределяет разные keys, однако hot key остаётся ограничен одним shard. Pipeline уменьшает RTT, но атомарности не добавляет.
 
-**3. Как Redis экономит память на структурах?**
+**3. Что произойдёт при заполнении памяти и при restart?**
 
-- Мелкие коллекции хранит компактными кодировками (`listpack`, `intset`, `embstr`) и переключается на полноценные (`hashtable`, `skiplist`) при росте за порогом (`*-max-listpack-entries`). Sorted Set внутри — skiplist + hash map: порядок по score за O(log N) и score по члену за O(1). Кодировку видно через `OBJECT ENCODING`.
+- При `maxmemory` Redis либо вытесняет keys по policy, либо возвращает error при `noeviction`. После restart dataset восстанавливается только из RDB/AOF; без persistence cache пуст. RDB теряет изменения после snapshot, AOF `everysec` обычно допускает потерю примерно последней секунды при crash.
 
-**4. TTL — ключ удаляется точно в момент истечения?**
+**4. Pipeline, MULTI/EXEC, WATCH и Lua — в чём разница?**
 
-- Нет: lazy (проверка при обращении) + active (фоновая выборка ~10 раз/сек). Протухший ключ может занимать память до сбора, поэтому память освобождает не факт истечения, а active-expire/eviction. Реплика сама не истекает — ждёт `DEL` от мастера.
+- Pipeline — batch ради сети. `MULTI/EXEC` выполняет queued commands подряд, но без rollback. `WATCH` добавляет optimistic CAS и требует retry при conflict. Lua/Redis Function подходит для короткой атомарной логики с ветвлениями; долгий script блокирует другие команды.
 
-**5. Pipeline, MULTI/EXEC, Lua — в чём разница по атомарности?**
+**5. Sentinel или Cluster?**
 
-- Pipeline — только экономия RTT, атомарности нет. `MULTI/EXEC` — атомарная очередь команд, но без rollback (не транзакция БД); `WATCH` добавляет CAS. Lua (`EVAL`) — атомарное исполнение целиком плюс логика на сервере; современный выбор для сложной атомарной операции.
+- Sentinel даёт discovery и failover для одного primary с replicas, но не делит dataset. Cluster распределяет keys по 16384 slots между primaries и даёт aggregate scale. Multi-key операции требуют одного slot, поэтому используют hash tags осознанно и следят за hot slots.
 
-**6. Как настроить eviction и что происходит при заполнении памяти?**
+**6. Почему при failover может потеряться подтверждённая запись?**
 
-- Eviction policy: для pure cache — `allkeys-lru`, для mixed storage (часть ключей без TTL важна) — `volatile-lru`. Без policy при заполнении памяти записи начнут падать с ошибкой.
+- Replication асинхронная: primary обычно отвечает до применения записи replicas. `WAIT` уменьшает окно, но не даёт consensus/zero-loss guarantee и не означает fsync. Чтение с replica также может быть stale.
 
-**7. Sentinel vs Cluster?**
+**7. Как выбрать Pub/Sub, List или Stream?**
 
-- Sentinel — HA для одного шарда (failover primary); Cluster — горизонтальное шардирование по hash slots, но multi-key операции работают только в пределах одного слота (hash tags).
+- Pub/Sub — best-effort fan-out без хранения. List — простая очередь, где acknowledgment и recovery строит приложение. Stream — retained log с consumer groups, PEL, `XACK` и reclaim зависших messages; delivery at-least-once, поэтому consumer должен быть idempotent.
 
-**8. Можно ли строить distributed lock на Redis?**
+**8. Безопасен ли distributed lock в Redis?**
 
-- `SET NX PX` + Lua-release годится как advisory lock (cron, дедупликация работ). Redlock для строгих гарантий спорен (критика Kleppmann): при паузах GC/сетевых задержках корректность не доказуема — финансовые инварианты защищаются в БД, не в Redis. Отдельная ловушка: hot key упирается в один поток команд Redis.
+- `SET NX PX` с уникальным token и atomic compare-and-delete подходит как advisory lease. GC pause может пережить TTL, поэтому для строгой защиты внешнего ресурса нужен fencing token или транзакционная/consensus-система, которая отклоняет устаревшего владельца.
+
+## Официальная документация
+
+- [Redis data types](https://redis.io/docs/latest/develop/data-types/)
+- [Key expiration](https://redis.io/docs/latest/commands/expire/)
+- [Key eviction](https://redis.io/docs/latest/develop/reference/eviction/)
+- [Redis persistence](https://redis.io/docs/latest/operate/oss_and_stack/management/persistence/)
+- [Redis replication](https://redis.io/docs/latest/operate/oss_and_stack/management/replication/)
+- [Redis Cluster specification](https://redis.io/docs/latest/operate/oss_and_stack/reference/cluster-spec/)
+- [Redis Streams](https://redis.io/docs/latest/develop/data-types/streams/)
+- [Transactions](https://redis.io/docs/latest/develop/using-commands/transactions/)
+- [Pipelining](https://redis.io/docs/latest/develop/using-commands/pipelining/)
+- [Distributed locks](https://redis.io/docs/latest/develop/clients/patterns/distributed-locks/)
+- [go-redis](https://github.com/redis/go-redis)
