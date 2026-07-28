@@ -1,5 +1,16 @@
 # Twitter / Social Feed
 
+## Содержание
+
+- [Фаза 1: Уточнение требований](#фаза-1-уточнение-требований)
+- [Фаза 2: Оценка нагрузки](#фаза-2-оценка-нагрузки)
+- [Фаза 3: Ключевое решение — Fan-out Strategy](#фаза-3-ключевое-решение--fan-out-strategy)
+- [Фаза 4: Deep Dive](#фаза-4-deep-dive)
+- [Сквозные потоки](#сквозные-потоки)
+- [Трейдоффы](#трейдоффы)
+- [Failure Scenarios](#failure-scenarios)
+- [Interview-ready ответ (2 минуты)](#interview-ready-ответ-2-минуты)
+
 Разбор задачи "Спроектируй Twitter". Ключевой challenge — news feed generation: fan-out on write vs fan-out on read, проблема celebrity (аккаунты с 100M+ подписчиков). Проверяет понимание компромиссов между latency и consistency.
 
 ---
@@ -59,10 +70,29 @@ Storage (tweets):
   1.825T × 300B ≈ 550 TB → распределённое хранилище
 
 Feed storage (если precomputed):
-  Если хранить по 1000 последних твитов для 200M users:
-  200M × 1000 × 8 bytes (tweet_id) = 1.6 TB в Redis
-  → Это управляемо
+  Наивно: 200M users × 1000 твитов × 8 B (id) = 1.6 TB
+
+  Но 8 байт на элемент — это размер числа, а не размер записи в Redis.
+  Элемент списка хранится строкой, плюс накладные структуры:
+  реально ~20-25 B на элемент.
+
+  200M × 1000 × 22 B ≈ 4,4 TB — почти втрое больше наивной оценки
 ```
+
+**Главная оптимизация fan-out — не рассылать неактивным.** 3,6 млн вставок/с считаются по ВСЕМ подписчикам, но лента нужна только тем, кто зайдёт её прочитать:
+
+```
+Типично активны за последние 30 дней — меньшинство подписчиков.
+Если это 20%, то:
+
+  вставок:  3,6 млн/с → ~720 тыс./с
+  память:   4,4 TB    → ~0,9 TB
+
+Ленту неактивного пользователя строим лениво при его возвращении
+(fan-out on read по подпискам), а дальше он снова становится активным.
+```
+
+Без этой отсечки система платит и записью, и памятью за ленты, которые никто не откроет — а в соцсети таких большинство.
 
 ---
 
@@ -217,17 +247,24 @@ flowchart TB
   - Читать по user_id + time range
   - Огромный объём, горизонтальное масштабирование
 
-Cassandra схема:
+Cassandra схема — ДВЕ таблицы, и это не стилистика:
   CREATE TABLE tweets (
     user_id     BIGINT,
     tweet_id    BIGINT,      -- Snowflake ID (time-ordered)
     content     TEXT,
-    like_count  COUNTER,     -- Cassandra COUNTER тип
-    reply_count COUNTER,
-    retweet_count COUNTER,
     created_at  TIMESTAMP,
     PRIMARY KEY (user_id, tweet_id)
   ) WITH CLUSTERING ORDER BY (tweet_id DESC);
+
+  -- Счётчики ОБЯЗАНЫ жить отдельно: Cassandra не разрешает
+  -- смешивать COUNTER с обычными колонками в одной таблице
+  -- ("Cannot mix counter and non counter columns").
+  CREATE TABLE tweet_counters (
+    tweet_id      BIGINT PRIMARY KEY,
+    like_count    COUNTER,
+    reply_count   COUNTER,
+    retweet_count COUNTER
+  );
 
   Partition key = user_id → все твиты одного пользователя вместе
   Clustering key = tweet_id DESC → новые первыми
@@ -434,26 +471,44 @@ INSERT в Cassandra → Fan-out Worker видит флаг `>1M followers` → *
 | Компонент | Выбор | Альтернатива | Причина |
 |---|---|---|---|
 | Fan-out | Hybrid (write + read) | Pure push / pure pull | Celebrity problem |
+| Порог celebrity | 10-50 тыс. подписчиков | 1M | При 1M «обычный» автор даёт сотни тысяч вставок на твит |
+| Кому рассылать | Только активным за 30 дней | Всем подписчикам | 3,6 млн вставок/с → ~720 тыс.; память 4,4 TB → ~0,9 TB |
 | Tweet storage | Cassandra | PostgreSQL | Write throughput, horizontal scale |
-| Feed storage | Redis List | Cassandra | Sub-millisecond LRANGE |
+| Счётчики | Отдельная таблица COUNTER | Колонки в `tweets` | Cassandra запрещает смешивать counter и обычные колонки |
+| Feed storage | Redis Sorted Set | Redis List | ZADD идемпотентен: повторный fan-out не плодит дубли |
 | Tweet ID | Snowflake | UUID v4 | Time-ordered, sortable |
 | Counters | Redis INCR + flush | Cassandra COUNTER | Flexibility, но потеря при Redis crash |
 | Search | Elasticsearch | PostgreSQL FTS | Scale: 1T+ indexed tweets |
 
-### Fan-out threshold: почему 1M?
+### Fan-out threshold: почему НЕ 1M
+
+Порог в 1M выглядит естественно («celebrity — это миллионники»), но по бюджету записи он не проходит:
 
 ```
-При 1M followers и fan-out on write:
-  1M LPUSH ≈ 1 сек (при batch + pipeline)
-  
-Twitter's actual threshold: ~10K-20K followers
-  (публично не раскрыто, но логика — latency бюджет публикации)
-  
-Чем выше threshold → меньше read-time работы, но дольше publish
-Чем ниже threshold → быстрый publish, больше read-time работы
+Автор с 999 тыс. подписчиков ещё считается «обычным»,
+значит один его твит = 999 тыс. вставок.
 
-Можно настраивать динамически: если fan-out queue растёт → снижать threshold
+Даже при отсечке по активным (20%) это ~200 тыс. вставок
+на ОДИН твит. Сотня таких авторов, пишущих раз в час:
+  100 × 200 000 / 3600 ≈ 5,5 тыс. вставок/с сверху,
+  и это ровно те авторы, чьи твиты ждут быстрее всего.
+
+Порог должен считаться от бюджета публикации, а не от красивого числа.
 ```
+
+```
+Рабочий диапазон — 10-50 тыс. подписчиков:
+  до порога: вставки укладываются в секунды даже с батчами
+  выше:      автор помечается celebrity, его твиты читаются on-read
+
+Чем выше порог → меньше работы на чтении, дольше публикация
+Чем ниже порог → быстрая публикация, больше merge при чтении
+
+Порог стоит делать динамическим: растёт лаг fan-out — снижаем,
+разгрузились — поднимаем обратно.
+```
+
+Сравнение с реальностью: у Twitter порог публично не раскрыт, но по описаниям архитектуры он ближе к десяткам тысяч, а не к миллиону.
 
 ---
 
@@ -463,8 +518,19 @@ Twitter's actual threshold: ~10K-20K followers
 Fan-out worker упал:
   Kafka: at-least-once, сообщение остаётся в топике
   Worker перезапустится → продолжит с последнего offset
-  Возможен duplicate fan-out → LPUSH идемпотентен (duplicate tweet_id в feed)
-  Дедупликация: при чтении ленты — убирать дубли (уже есть в LRANGE)
+  Возможен повторный fan-out одного и того же твита
+
+  ВАЖНО: LPUSH НЕ идемпотентен — повтор кладёт tweet_id второй раз.
+  Список придётся чистить на чтении, и дубли съедают окно LTRIM.
+
+  Поэтому лента — Sorted Set, а не List:
+    ZADD feed:{user} {tweet_id} {tweet_id}
+    повтор той же записи ничего не меняет → fan-out идемпотентен
+    ZREVRANGE feed:{user} 0 99   — та же выборка, тот же порядок
+    ZREMRANGEBYRANK feed:{user} 0 -1001  — аналог LTRIM
+
+  Цена: ZSET дороже List по памяти (~2x), но избавляет
+  от дедупликации на чтении и делает повтор безопасным.
 
 Redis упал (feed cache):
   Fallback: fan-out on read для всех (медленнее, но работает)
@@ -486,9 +552,11 @@ Cassandra нода упала:
 > Pure push: при 100M followers у celebrity — 100M Redis writes на один твит. Недопустимо.
 > Pure pull: 300 подписок × SELECT = 300 запросов на каждое открытие ленты. Не масштабируется.
 >
-> Hybrid: fan-out on write для обычных пользователей (< порог, например 10K followers). Для celebrity — fan-out on read: их твиты кешируются отдельно, при загрузке ленты мержатся с precomputed feed.
+> Hybrid: fan-out on write для обычных пользователей, on-read для celebrity. Порог беру в диапазоне 10-50 тысяч подписчиков, а не миллион: при пороге в миллион автор с 999 тысячами ещё считается обычным и даёт сотни тысяч вставок на один твит.
 >
-> Storage: Cassandra, партиционированная по user_id. Snowflake IDs для time-ordering без ORDER BY. Feed в Redis Lists (LPUSH + LTRIM до 1000 записей).
+> Вторая оптимизация, без которой цифры не сходятся: рассылать только активным. Лента нужна тем, кто её откроет; если активны 20%, то 3,6 миллиона вставок в секунду превращаются в 720 тысяч, а память с 4,4 терабайт — в 0,9. Вернувшемуся пользователю ленту достраиваем лениво.
+>
+> Storage: Cassandra, партиционированная по user_id. Счётчики лайков — обязательно отдельной таблицей: Cassandra не разрешает смешивать COUNTER с обычными колонками. Feed держу в Sorted Set, а не в List: fan-out at-least-once, и ZADD повтором не плодит дубликаты, тогда как LPUSH положил бы твит дважды.
 >
 > Likes: Redis INCR + async flush в Cassandra каждые 30 сек. SISMEMBER для 'лайкнул ли пользователь'.
 >

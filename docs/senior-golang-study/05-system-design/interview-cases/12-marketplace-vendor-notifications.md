@@ -1,9 +1,5 @@
 # 12. Marketplace Vendor Notifications
 
-Задача с собеседования. Спроектировать backend-систему которая **уведомляет vendor'ов** о новых заказах. Marketplace типа Amazon: много динамических vendor'ов, customer placed order → vendor должен узнать **как можно быстрее**.
-
-Это **очень популярный** формат задачи: на стыке messaging, reliability и API contract design. Затрагивает все ключевые senior-темы за 45 минут.
-
 ## Содержание
 
 - [Формулировка](#формулировка)
@@ -23,6 +19,11 @@
 - [Стек](#стек)
 - [Тradeoffs и альтернативы](#tradeoffs-и-альтернативы)
 - [Чек-лист ответа на собеседовании](#чек-лист-ответа-на-собеседовании)
+- [Связки](#связки)
+
+Задача с собеседования. Спроектировать backend-систему которая **уведомляет vendor'ов** о новых заказах. Marketplace типа Amazon: много динамических vendor'ов, customer placed order → vendor должен узнать **как можно быстрее**.
+
+Это **очень популярный** формат задачи: на стыке messaging, reliability и API contract design. Затрагивает все ключевые senior-темы за 45 минут.
 
 ---
 
@@ -133,26 +134,34 @@ At-least-once проще, требует idempotency на стороне vendor'
 ## Capacity estimation
 
 ```
-10k orders/sec peak
-Average 2 items per order, 1.5 vendors per order (some items same vendor)
-→ ~15k vendor notifications/sec peak
+10k orders/sec в ПИК
+Average 2 items per order, 1.5 vendors per order (часть товаров одного vendor)
+→ ~15k vendor notifications/sec в пик
 
 Notification payload: order_id + items + shipping → ~2 KB
-→ 30 MB/s sustained
+→ 15k × 2 KB = 30 MB/s в пик
 
-Storage of order events for retry:
-  Keep events for 7 days = 7*86400 = ~600k seconds
-  10k/sec × 600k seconds × 2 KB ≈ 12 TB
+Retention событий для retry — считать по СРЕДНЕМУ, а не по пику:
+  пик 10k/сек держится часами, а не 7 суток подряд
+  допустим среднее 2k orders/сек (в 5 раз ниже пика)
+
+  2k × 1,5 = 3k событий/сек
+  3k × 604 800 с (7 дней) × 2 KB ≈ 3,6 TB
+
+  По пику вышло бы 18 TB — завышение в пять раз,
+  и планировать хранилище по этому числу значит переплатить впятеро.
 
 Active vendor connections:
-  Если WebSocket — 100k persistent connections
-  Если webhook — пиковые ~15k concurrent HTTP requests
+  Если webhook — пиковые ~15k ИСХОДЯЩИХ HTTP-запросов одновременно
+  Если WebSocket — до 100k входящих persistent-соединений
 ```
 
 Числа показывают что:
-- Webhook + queue — easily handle
-- WebSocket pool — 100k connections тоже OK (one server can handle 64k-1M)
-- Storage 12 TB — OK для object store (S3) с lifecycle
+- Webhook + queue — нагрузка укладывается без ухищрений
+- 100k входящих соединений — реалистично: это ~2 ноды по 50k, как в [04. Chat](./04-chat-messaging.md)
+- Хранилище ~3,6 TB — object store с lifecycle-политикой
+
+> **Про «64k соединений».** Часто встречающееся «сервер держит максимум 64k соединений» — это миф, выросший из ограничения на **исходящие** порты: 64k эфемерных портов на одну пару (destination IP, port). Для **входящих** соединений такого предела нет — сокет определяется четвёркой (src ip, src port, dst ip, dst port), и ограничивают его файловые дескрипторы и память, а не номера портов. Здесь это существенно: 15k **исходящих** запросов к vendor'ам как раз упираются в эфемерные порты, если все они идут на один адрес, — лечится пулом соединений с keep-alive и несколькими source IP.
 
 ---
 
@@ -571,29 +580,76 @@ func (r *Relay) Run(ctx context.Context) {
 }
 
 func (r *Relay) processBatch(ctx context.Context) error {
-    // FOR UPDATE SKIP LOCKED — multiple relay workers
-    rows, _ := r.db.Query(ctx, `
-        SELECT id, event_type, payload FROM outbox
+    // FOR UPDATE SKIP LOCKED работает ТОЛЬКО внутри транзакции:
+    // в autocommit блокировка снимается сразу после SELECT,
+    // и два воркера заберут одни и те же строки.
+    tx, err := r.db.BeginTx(ctx, nil)
+    if err != nil {
+        return err
+    }
+    defer tx.Rollback()
+
+    rows, err := tx.QueryContext(ctx, `
+        SELECT id, event_type, vendor_id, payload FROM outbox
         WHERE sent_at IS NULL
         ORDER BY created_at
         LIMIT 100
         FOR UPDATE SKIP LOCKED
     `)
-
-    for rows.Next() {
-        var event Event
-        rows.Scan(&event.ID, &event.Type, &event.Payload)
-
-        // Partition по vendor_id для ordering per vendor
-        if err := r.kafka.Publish(ctx, "orders.placed", event.VendorID, event.Payload); err != nil {
-            continue  // retry в next tick
-        }
-
-        r.db.Exec(ctx, "UPDATE outbox SET sent_at = NOW() WHERE id = $1", event.ID)
+    if err != nil {
+        return err
     }
-    return nil
+
+    // Сначала ВЫЧИТЫВАЕМ всё: выполнять другие запросы на том же
+    // соединении, не закрыв rows, нельзя.
+    var batch []Event
+    for rows.Next() {
+        var e Event
+        if err := rows.Scan(&e.ID, &e.Type, &e.VendorID, &e.Payload); err != nil {
+            rows.Close()
+            return err
+        }
+        batch = append(batch, e)
+    }
+    rows.Close()
+    if err := rows.Err(); err != nil {
+        return err
+    }
+
+    for _, event := range batch {
+        // Ключ партиционирования — vendor_id, поэтому он обязан быть
+        // и в SELECT, и в Scan. Пустой ключ отправил бы ВСЕ события
+        // в одну партицию: ни параллелизма, ни ordering per vendor.
+        if err := r.kafka.Publish(ctx, "orders.placed", event.VendorID, event.Payload); err != nil {
+            return err  // не коммитим: заберём этот батч в следующий тик
+        }
+        if _, err := tx.ExecContext(ctx,
+            "UPDATE outbox SET sent_at = now() WHERE id = $1", event.ID); err != nil {
+            return err
+        }
+    }
+    return tx.Commit()
 }
 ```
+
+Три ошибки, которые здесь исправлены:
+
+```
+1. FOR UPDATE SKIP LOCKED без транзакции — это no-op.
+   Блокировка живёт до конца транзакции; в autocommit её нет,
+   и защита от параллельных воркеров не работает вовсе.
+
+2. vendor_id не выбирался и не сканировался.
+   event.VendorID оставался пустым → Kafka клала ВСЕ события
+   в одну партицию по пустому ключу. Ordering per vendor,
+   ради которого всё затевалось, не работал бы.
+
+3. Exec на том же соединении, пока открыт rows.
+   В database/sql это ошибка «conn busy»: сначала вычитываем
+   батч целиком, потом обновляем.
+```
+
+Остаётся осознанный компромисс: publish в Kafka происходит внутри транзакции, то есть блокировки держатся на время сетевого вызова. Это допустимо, потому что publish занимает единицы миллисекунд, а батч ограничен сотней строк. Альтернатива — коммитить `sent_at` до publish, но тогда падение между ними **теряет** событие, что прямо противоречит требованию «order не должен теряться». Дубликат при повторной публикации безопаснее: он гасится идемпотентностью на стороне vendor'а.
 
 **Partitioning Kafka по `vendor_id`** — гарантирует **ordering per vendor**. Если vendor получает order1 и order2 — order1 будет первым.
 
@@ -612,6 +668,12 @@ type NotificationService struct {
 }
 
 func (s *NotificationService) Run(ctx context.Context) error {
+    // Семафор задаёт РЕАЛЬНУЮ границу параллелизма.
+    // Без него `go s.process(...)` на 15k событий/с при таймауте 10 с
+    // порождает до 150 тысяч горутин и столько же одновременных
+    // HTTP-запросов — это исчерпание памяти и сокетов, а не «worker pool».
+    sem := make(chan struct{}, s.maxInFlight)   // например, 2000
+
     for {
         msg, err := s.consumer.Read(ctx)
         if err != nil {
@@ -619,9 +681,22 @@ func (s *NotificationService) Run(ctx context.Context) error {
         }
 
         var event OrderPlacedEvent
-        json.Unmarshal(msg.Value, &event)
+        if err := json.Unmarshal(msg.Value, &event); err != nil {
+            s.deadLetter(msg)          // битый payload не должен ронять consumer
+            s.consumer.Commit(msg)
+            continue
+        }
 
-        go s.process(ctx, &event)  // bounded concurrency через worker pool
+        sem <- struct{}{}
+        go func(msg kafka.Message, event OrderPlacedEvent) {
+            defer func() { <-sem }()
+            s.process(ctx, &event)
+            // Offset коммитим ТОЛЬКО после того, как событие либо
+            // доставлено, либо durable-положено в retry-очередь.
+            // Иначе падение сервиса теряет заказ, а требование —
+            // «order не должен теряться».
+            s.consumer.Commit(msg)
+        }(msg, event)
     }
 }
 
@@ -638,11 +713,16 @@ func (s *NotificationService) process(ctx context.Context, event *OrderPlacedEve
 
     // 3. Try deliver
     if err := s.dispatcher.Deliver(ctx, req); err != nil {
-        // Schedule retry
-        s.retryQueue.Enqueue(event, 1, computeBackoff(1))
+        // Постановка в retry обязана быть надёжной: если и она упала,
+        // offset коммитить нельзя — пусть Kafka отдаст событие повторно.
+        if err := s.retryQueue.Enqueue(event, 1, computeBackoff(1)); err != nil {
+            panic("retry enqueue failed")   // в проде — вернуть ошибку и не коммитить
+        }
     }
 }
 ```
+
+Важно, что коммит offset'а «сдвинут» за обработку: при асинхронной схеме `go s.process(...)` с автокоммитом Kafka считает событие обработанным сразу после чтения, и падение сервиса теряет все заказы, которые были в полёте. Для требования «no order lost» это недопустимо — коммит только после доставки или надёжной постановки в retry.
 
 ### WebhookDispatcher
 
@@ -991,7 +1071,24 @@ relay.Publish()  // separate process
 
 Outbox **гарантирует** что order не создан без event. См. [outbox-pattern](../../04-architecture-and-patterns/patterns/09-saga-and-outbox.md).
 
-**Trade-off:** outbox adds latency (1-5 sec до event в Kafka). Если P99 < 500ms нужно — реализовать optimistic direct publish + outbox как fallback.
+**Trade-off: outbox добавляет задержку, и её надо сверить с SLO.** В требованиях стоит `P99 < 2 с` от размещения заказа до первой попытки доставки — значит бюджет надо расписать, а не отделываться словами «1-5 секунд»:
+
+```
+Бюджет P99 = 2 с:
+  относ (polling с тикером 1 с)   до 1 000 мс   ← доминирует
+  publish + consume в Kafka       ~50 мс
+  lookup vendor + подпись         ~10 мс
+  HTTP-запрос к vendor            до 500 мс
+  запас                           ~400 мс
+
+Тикер в 1 секунду съедает половину бюджета. Варианты ускорения:
+  - опрашивать чаще (100-200 мс) — просто, но растёт холостая нагрузка на БД
+  - LISTEN/NOTIFY: INSERT в outbox будит relay сразу
+  - CDC по WAL (Debezium) — задержка в единицы миллисекунд,
+    но добавляет отдельный компонент в эксплуатацию
+
+Заявлять «1-5 секунд» при SLO в 2 секунды нельзя: это уже нарушение.
+```
 
 ### Single Kafka topic vs per-vendor topic
 

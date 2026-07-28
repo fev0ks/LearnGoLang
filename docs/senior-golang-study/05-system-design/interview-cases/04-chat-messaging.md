@@ -1,5 +1,16 @@
 # Chat / Messaging System
 
+## Содержание
+
+- [Фаза 1: Уточнение требований](#фаза-1-уточнение-требований)
+- [Фаза 2: Оценка нагрузки](#фаза-2-оценка-нагрузки)
+- [Фаза 3: Высокоуровневый дизайн](#фаза-3-высокоуровневый-дизайн)
+- [Фаза 4: Deep Dive](#фаза-4-deep-dive)
+- [Сквозные потоки](#сквозные-потоки)
+- [Трейдоффы](#трейдоффы)
+- [Что если Chat Server падает?](#что-если-chat-server-падает)
+- [Interview-ready ответ (2 минуты)](#interview-ready-ответ-2-минуты)
+
 Разбор задачи "Спроектируй мессенджер (chat system)". Сложная задача, проверяет знание WebSocket/long-polling, fan-out в реальном времени, storage для истории и online-presence.
 
 ---
@@ -67,7 +78,7 @@ Writes (новые сообщения):
 Storage:
   1 сообщение: ~1KB (текст 500 chars + metadata)
   2.5B × 365 дней × 3 года хранения = 2.7T сообщений
-  2.7T × 1KB = 2.7 PB — нужно распределённое хранилище (Cassandra/ScyllaDB)
+  2.7T × 1KB = 2.7 PB — нужно распределённое хранилище (Cassandra)
 
 Fan-out:
   Групповой чат 500 человек × 10 msg/min = 5000 deliveries/min на чат
@@ -90,17 +101,23 @@ flowchart TB
     end
 
     Kafka[(Kafka<br/>message bus)]
-    DB[(ScyllaDB<br/>message store)]
+    DB[(Cassandra<br/>message store)]
     Presence[(Redis<br/>presence service)]
     Push[Push Notif Service]
 
+    Persist[Persister<br/>присваивает seq]
+    FanOut[Fan-out Worker]
+
     A <-->|WebSocket| S1
     B <-->|WebSocket| S2
-    S1 --> Kafka
-    S2 --> Kafka
-    Kafka --> DB
-    Kafka --> Presence
-    Kafka --> Push
+    S1 -->|publish first| Kafka
+    S2 -->|publish first| Kafka
+    Kafka --> Persist --> DB
+    Kafka --> FanOut
+    FanOut --> S2
+    FanOut --> Push
+    S1 <--> Presence
+    S2 <--> Presence
 
     style Cluster fill:#dbeafe,stroke:#1e40af
 ```
@@ -117,7 +134,7 @@ flowchart TB
 *Зачем:* развязывает приём сообщения и его fan-out/персист; `key=chat_id` сохраняет порядок в рамках чата.
 *Почему отдельно:* при пике 90K msg/сек синхронная доставка всем участникам заблокировала бы отправителя; брокер даёт буфер и durability. См. [message brokers / Kafka](../../07-message-brokers-and-streaming/01-kafka.md).
 
-**ScyllaDB (message store).**
+**Cassandra (message store).**
 *Зачем:* durable-история, партиционирование по `chat_id`, чтение страницами по time-ordered `message_id`.
 *Почему не PostgreSQL:* 2.7 PB и write-heavy 29K msg/сек — это про Cassandra-совместимые БД. Профиль: [Cassandra](../../06-databases/database-systems-catalog/05-cassandra.md).
 
@@ -145,19 +162,49 @@ flowchart TB
 Одна нода держит ~50K WebSocket соединений (Go: ~10KB на goroutine × 50K = 500MB RAM)
 10M / 50K = 200 нод Chat Server
 
-Mapping: user_id → chat_server_id хранится в Redis
-  "ws_node:{user_id}" → "chat-server-42"
+Mapping: user_id → соединения. Не одна строка, а МНОЖЕСТВО:
 
-При подключении клиента:
+  SADD  ws_conns:{user_id}  "chat-server-42|conn-abc"
+  EXPIRE ws_conns:{user_id} 90
+
+  У пользователя одновременно телефон, десктоп и веб — три соединения,
+  возможно на трёх разных нодах. Один ключ "user → server" их не выражает
+  и доставит сообщение только на одно устройство.
+
+При подключении:
   1. LB направляет на любой Chat Server
-  2. Chat Server: SET ws_node:{user_id} chat-server-42 EX 300
-  3. При разрыве: DEL ws_node:{user_id}
+  2. Нода добавляет себя в множество и запоминает conn-id
+
+Пока соединение живо — TTL ПРОДЛЕВАЕТСЯ на каждом heartbeat:
+  EXPIRE ws_conns:{user_id} 90
+
+При разрыве — удаление СВОЕЙ записи, а не всего ключа:
+  SREM ws_conns:{user_id} "chat-server-42|conn-abc"
+```
+
+Две ошибки, которые здесь легко допустить:
+
+```
+1. Поставить TTL и не продлевать его.
+   Соединение живёт часами, а запись маршрутизации протухает через
+   пять минут — пользователь остаётся подключённым, но невидимым
+   для fan-out. TTL обязан обновляться heartbeat'ом, и его величина
+   должна быть согласована с детектором офлайна (90 с при ping 30 с),
+   а не выбираться независимо.
+
+2. Удалять ключ целиком (DEL) при разрыве.
+   Классическая гонка: клиент уже переподключился к ноде B и записал
+   себя туда, после чего на ноде A срабатывает таймаут старого
+   соединения и стирает запись — живой пользователь становится
+   недоступен. Поэтому удаляется конкретный элемент множества,
+   а не ключ; удаление своего элемента идемпотентно и безопасно.
 ```
 
 **Heartbeat:**
 ```
 Клиент → сервер: ping каждые 30 сек
-Сервер: при отсутствии ping 60 сек → считать offline, закрыть соединение
+Сервер: нет ping 60 сек → закрыть соединение, SREM своей записи
+        каждый ping → EXPIRE ws_conns:{user_id} 90
 ```
 
 ---
@@ -172,21 +219,38 @@ Mapping: user_id → chat_server_id хранится в Redis
 
 2. Chat-Server-1:
    a. Валидация (user A — участник chat 42?)
-   b. Assign message_id (глобально уникальный, ordered)
-   c. Сохранить в ScyllaDB:
-      INSERT INTO messages (chat_id, message_id, sender_id, content, created_at)
-   d. Publish в Kafka: topic=chat.messages, key=chat_id, value=message
+   b. Publish в Kafka: topic=chat.messages, key=chat_id
+      → ack от Kafka = сообщение принято, отправителю возвращается "sent"
 
-3. Kafka → Fan-out Worker:
+3. Persister (консьюмер того же топика):
+   Присваивает seq в порядке партиции и пишет в Cassandra
+
+4. Fan-out Worker (консьюмер того же топика):
    Получить список участников chat 42
    Для каждого участника B:
-     - Если B online → найти его Chat-Server через Redis → deliver via pub/sub
+     - Если B online → найти его Chat-Server через Redis → deliver
      - Если B offline → поставить в очередь push notification
 
-4. Delivery confirmation:
-   B получил → B отправляет ACK → статус = DELIVERED
-   A получает WebSocket event: { "type": "status_update", "message_id": X, "status": "delivered" }
+5. Delivery confirmation:
+   B получил → ACK → двигается watermark last_delivered_id (см. ниже)
+   A получает WebSocket event со статусом
 ```
+
+**Почему запись идёт в Kafka, а не в базу первой.** Порядок «сначала `INSERT` в Cassandra, потом publish в Kafka» — это классический dual-write:
+
+```
+Сервер записал сообщение в Cassandra и упал до publish.
+
+  → сообщение лежит в истории, но никому не доставлено
+    и push не ушёл: получатель узнает о нём, только открыв чат
+  → отправитель при этом видел успех
+
+Обратный порядок такой дыры не создаёт: Kafka — durable-лог,
+и всё, что в него попало, будет и записано, и разослано.
+Оба консьюмера читают один и тот же поток.
+```
+
+Это тот же принцип, что outbox в [11. Payment](./11-payment-system.md) и [12. Marketplace](./12-marketplace-vendor-notifications.md): одна durable-запись, из которой производится всё остальное.
 
 ---
 
@@ -206,21 +270,55 @@ Mapping: user_id → chat_server_id хранится в Redis
    5 бит: machine_id
   12 бит: sequence (4096 msg/ms на одной ноде)
 
-  → Монотонно возрастающий
+  → Монотонно возрастающий В ПРЕДЕЛАХ ОДНОЙ НОДЫ
   → Уникальный
   → Можно извлечь timestamp
-
-Реализация: centralized ID generator service (или per-node sequence в пределах chat_id)
 ```
 
-**Альтернатива:** использовать Cassandra UUID Type 1 (time-based) или ScyllaDB TIMEUUID — они уже time-ordered.
+**Важная оговорка: Snowflake сам по себе НЕ даёт строгого порядка в чате.**
+
+```
+Участники одного чата подключены к разным Chat Server:
+  A → Chat-Server-1 (machine_id = 1)
+  B → Chat-Server-7 (machine_id = 7)
+
+Snowflake монотонен внутри ноды, а между нодами упорядочен ровно
+настолько, насколько синхронизированы их часы. При расхождении
+даже в десятки миллисекунд ответ B может получить id МЕНЬШЕ,
+чем у сообщения A, на которое он отвечает.
+
+То есть требование «строгий порядок в рамках чата» этим способом
+не выполняется — только «примерно по времени».
+```
+
+**Как получить настоящий порядок.** Источником истины делаем не часы, а партицию Kafka: все сообщения чата идут с `key=chat_id`, то есть в одну партицию и в строгом порядке. Persister, читая её, присваивает монотонный `seq` в пределах чата:
+
+```
+chat_id=42, partition offset 1001 → seq 5001
+chat_id=42, partition offset 1002 → seq 5002
+
+Порядок определяется тем, кто раньше попал в лог,
+а не тем, у кого точнее часы.
+```
+
+Тогда роли разделяются так:
+
+| Идентификатор | Кто присваивает | Для чего |
+|---|---|---|
+| `client_msg_id` | клиент | дедупликация ретраев отправки |
+| `message_id` (Snowflake) | Chat Server | глобальная уникальность, грубая сортировка по времени |
+| `seq` | Persister из порядка партиции | **строгий порядок внутри чата**, курсор пагинации |
+
+**Альтернатива:** `TIMEUUID` в Cassandra — тоже time-ordered, но упирается ровно в ту же проблему часов на разных нодах. Она решает уникальность, а не согласованность порядка.
 
 ---
 
-### Хранилище сообщений (ScyllaDB/Cassandra)
+### Хранилище сообщений (Cassandra)
+
+> Если в других материалах встретится **ScyllaDB** — это та же Cassandra, переписанная на C++ и совместимая с ней по протоколу CQL и модели данных. Дизайн от замены не меняется, отличается только реализация движка (меньше узлов на ту же нагрузку). Пример такой миграции — история Discord в [highload-design-patterns](../highload-design-patterns.md).
 
 **Почему не PostgreSQL?**
-- 2.7 PB данных → шардирование обязательно, Cassandra/ScyllaDB designed for this
+- 2.7 PB данных → шардирование обязательно, Cassandra для этого и создана
 - Write-heavy workload (29K msg/sec)
 - Partitioning по chat_id даёт locality для пагинации истории
 
@@ -319,25 +417,42 @@ Fan-out Worker:
 
 ---
 
-### Read Receipts
+### Статусы доставки и прочтения: watermark, а не запись на сообщение
+
+Наивный вариант «хранить статус каждого сообщения для каждого получателя» не выдерживает арифметики:
 
 ```
-Client при прочтении чата:
-  WebSocket: { "type": "mark_read", "chat_id": 42, "last_read_message_id": "..." }
+Сообщение в группе на 500 человек = 500 записей статуса
+При 833K доставок/с статусы дают БОЛЬШЕ записи, чем сами сообщения
 
-Server:
-  UPDATE read_receipts SET last_read_message_id = ? WHERE chat_id = ? AND user_id = ?
-  Notify sender через WebSocket: { "type": "read_receipt", "chat_id": 42, "user_id": B, "up_to": "..." }
-
-Schema:
-  CREATE TABLE read_receipts (
-    chat_id         UUID,
-    user_id         BIGINT,
-    last_read_id    TIMEUUID,
-    updated_at      TIMESTAMP,
-    PRIMARY KEY (chat_id, user_id)
-  );
+2,5 млрд сообщений/сутки × среднее число получателей
+→ поток статусов на порядок превышает поток контента
 ```
+
+Поэтому статус хранится как **watermark — одна строка на пару (чат, пользователь)**, а не на каждое сообщение:
+
+```sql
+CREATE TABLE chat_cursors (
+  chat_id            UUID,
+  user_id            BIGINT,
+  last_delivered_seq BIGINT,   -- докуда доставлено
+  last_read_seq      BIGINT,   -- докуда прочитано
+  updated_at         TIMESTAMP,
+  PRIMARY KEY (chat_id, user_id)
+);
+```
+
+```
+Клиент при получении:  { "type": "ack",       "chat_id": 42, "up_to_seq": 5007 }
+Клиент при прочтении:  { "type": "mark_read", "chat_id": 42, "up_to_seq": 5007 }
+
+Сервер двигает watermark вперёд (только вперёд, назад не откатываем)
+и уведомляет отправителя: { "type": "read_receipt", "user_id": B, "up_to_seq": 5007 }
+```
+
+Запись на пользователя в чате одна и обновляется, а не растёт. Отсюда же дешёвый счётчик непрочитанного: `unread = last_seq_в_чате − last_read_seq`, без пересчёта по сообщениям.
+
+Здесь и виден смысл монотонного `seq` из предыдущего раздела: watermark работает только на строго упорядоченной шкале. По Snowflake с разных нод «докуда прочитано» определить нельзя.
 
 ---
 
@@ -358,19 +473,19 @@ Server:
 ## Сквозные потоки
 
 **1. Доставка при обоих online.**
-A шлёт по WebSocket → Chat-Server-1 валидирует, присваивает Snowflake `message_id`, пишет в ScyllaDB → publish в Kafka (`key=chat_id`) → Fan-out Worker находит Chat-Server B через Redis → доставляет → B шлёт ACK → A получает `delivered`.
-*Итог:* сообщение durable до доставки; порядок в чате гарантирован монотонным `message_id`.
+A шлёт по WebSocket → Chat-Server-1 валидирует и публикует в Kafka (`key=chat_id`) → ack от Kafka, отправителю «sent» → Persister присваивает `seq` в порядке партиции и пишет в Cassandra, Fan-out Worker параллельно находит соединения B через Redis и доставляет → B шлёт ACK → двигается `last_delivered_seq`, A видит статус.
+*Итог:* сообщение durable до любой обработки; порядок в чате задаёт порядок партиции, а не часы отправляющей ноды.
 
 **2. Получатель offline.**
 Fan-out Worker не находит B в Redis presence → событие в `notifications.push` → Push Service шлёт FCM/APNs.
-*Итог:* сообщение уже в ScyllaDB; пользователь догрузит его при следующем подключении, push лишь будит клиент.
+*Итог:* сообщение уже в Cassandra; пользователь догрузит его при следующем подключении, push лишь будит клиент.
 
 **3. Reconnect и пропущенные сообщения.**
 Нода упала / клиент потерял сеть → reconnect с exponential backoff на любую ноду → `sync { last_seen_message_id }` → `SELECT ... WHERE message_id > X` по чатам → отдать пропущенное.
 *Итог:* in-memory соединения потеряны, данные — нет; клиент детерминированно доезжает до актуального состояния.
 
 **4. Read receipt.**
-Клиент `mark_read { last_read_message_id }` → апдейт `read_receipts` → уведомить отправителя через WebSocket.
+Клиент `mark_read { up_to_seq }` → двигается `last_read_seq` в `chat_cursors` → уведомить отправителя через WebSocket.
 *Итог:* статусы eventual-consistent (по требованиям допустимо), отдельная таблица не нагружает горячий путь записи сообщений.
 
 ---
@@ -380,8 +495,12 @@ Fan-out Worker не находит B в Redis presence → событие в `no
 | Решение | Принятое | Альтернатива | Причина |
 |---|---|---|---|
 | Протокол | WebSocket | Long-polling, SSE | Bidirectional, persistent |
-| Хранилище | ScyllaDB | PostgreSQL + sharding | Built-in partitioning, write throughput |
-| Message ID | Snowflake | UUID v4 | Time-ordered, sortable |
+| Порядок записи | Сначала Kafka, потом БД | Сначала БД, потом Kafka | Обратный порядок = dual-write: сообщение сохранено, но не доставлено |
+| Порядок в чате | `seq` из порядка партиции | Snowflake / TIMEUUID | Часы разных нод не дают строгого порядка |
+| Хранилище | Cassandra | PostgreSQL + sharding | Built-in partitioning, write throughput |
+| Message ID | Snowflake | UUID v4 | Уникальность и грубая сортировка по времени |
+| Статусы | Watermark на (чат, юзер) | Запись на сообщение × получателя | В группе 500 человек статусов больше, чем сообщений |
+| Маршрутизация соединений | Set с TTL, продлеваемым heartbeat | Один ключ user→server | Мультидевайс; DEL при разрыве ломает переподключение |
 | Fan-out большие группы | Pull (inbox pointer) | Push всем | Контроль write amplification |
 | Presence | Redis TTL | DB с polling | Latency < 1ms, volatility OK |
 
@@ -395,10 +514,10 @@ Fan-out Worker не находит B в Redis presence → событие в `no
   1. 50K клиентов теряют соединение
   2. Клиенты начинают reconnect (exponential backoff: 1s, 2s, 4s, ...)
   3. LB направляет на другие ноды
-  4. При reconnect: sync пропущенных сообщений через Kafka/ScyllaDB
+  4. При reconnect: sync пропущенных сообщений через Kafka/Cassandra
 
 Важно: никаких in-memory state для соединений — только routing в Redis.
-  Все сообщения персистентно в ScyllaDB/Kafka.
+  Все сообщения персистентно в Cassandra/Kafka.
   → Падение ноды = потеря in-flight соединений, не данных.
 ```
 
@@ -410,7 +529,13 @@ Fan-out Worker не находит B в Redis presence → событие в `no
 >
 > WebSocket: 200+ нод, каждая держит ~50K соединений. Routing user→node через Redis — любая нода знает, на каком сервере подключён пользователь. Heartbeat каждые 30 секунд, падение ноды → клиенты переподключаются + sync пропущенных сообщений.
 >
-> Storage: ScyllaDB, partitioned по chat_id, clustered по time-ordered message_id (Snowflake). Write throughput 30K msg/sec, объём ~2.7 PB за 3 года — Cassandra-совместимые БД для этого и созданы.
+> Порядок записи важен: сначала publish в Kafka, и только потом персист и fan-out из этого же лога. Обратный порядок — сначала в базу, потом в брокер — это dual-write: при падении между ними сообщение окажется в истории, но никому не доставленным, а отправитель увидит успех.
+>
+> Отдельно оговорю порядок сообщений. Snowflake сам по себе строгого порядка в чате не даёт: участники сидят на разных нодах, и при расхождении часов ответ может получить id меньше, чем у сообщения, на которое отвечают. Поэтому источником порядка беру партицию Kafka — все сообщения чата идут с key=chat_id, и persister присваивает монотонный seq по порядку лога. Snowflake остаётся для уникальности, seq — для порядка и курсора пагинации.
+>
+> Storage: Cassandra, partitioned по chat_id, clustered по seq. Write throughput 30K msg/sec, объём ~2.7 PB за 3 года — wide-column хранилища для такого и созданы.
+>
+> Статусы доставки и прочтения храню как watermark — одна строка на пару чат-пользователь с last_delivered_seq и last_read_seq. Запись на каждое сообщение для каждого получателя не выдержала бы арифметики: в группе на 500 человек статусов получается больше, чем самих сообщений.
 >
 > Fan-out: для малых групп (< 100) — push всем при отправке. Для больших — inbox model: храним только pointer, клиент сам тянет сообщение при получении события.
 >

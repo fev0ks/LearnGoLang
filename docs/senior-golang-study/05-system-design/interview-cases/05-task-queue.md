@@ -1,5 +1,16 @@
 # Distributed Task Queue
 
+## Содержание
+
+- [Фаза 1: Уточнение требований](#фаза-1-уточнение-требований)
+- [Фаза 2: Оценка нагрузки](#фаза-2-оценка-нагрузки)
+- [Фаза 3: Высокоуровневый дизайн](#фаза-3-высокоуровневый-дизайн)
+- [Фаза 4: Deep Dive](#фаза-4-deep-dive)
+- [Сквозные потоки](#сквозные-потоки)
+- [Трейдоффы](#трейдоффы)
+- [Что если Redis падает?](#что-если-redis-падает)
+- [Interview-ready ответ (2 минуты)](#interview-ready-ответ-2-минуты)
+
 Разбор задачи "Спроектируй распределённую очередь задач" (job queue, background processing system). Аналоги: Celery, Sidekiq, BullMQ, Temporal. Проверяет понимание at-least-once delivery, idempotency, dead letter queues, scheduling.
 
 ---
@@ -53,24 +64,50 @@
 
 ## Фаза 2: Оценка нагрузки
 
+Первое, что нужно проверить, — сходится ли приём с обработкой:
+
 ```
-Enqueue:
-  10K tasks/sec = 864M tasks/day
-  Peak = 3x = 30K tasks/sec
+Enqueue  10K задач/с — это ПИК, не среднее
+Execute   5K задач/с — устойчивая пропускная способность
 
-Storage для задач (pending/active):
-  Одна задача: ~5KB (payload + metadata)
-  In-flight в любой момент: 5K tasks × 60 sec avg execution = 300K задач
-  300K × 5KB = 1.5GB — умещается в Redis
+Если 10K/с держится постоянно, очередь растёт на 5K задач/с:
+  5 000 × 86 400 ≈ 432 млн задач backlog за сутки
+  → это не «нагрузка», это неработающая система
 
-История выполненных задач:
-  864M/day × 7 дней хранения × 5KB = 30 TB
-  → Нужна отдельная хранилище для history (PostgreSQL или ClickHouse)
-  → В Redis хранить только active/pending задачи
+Значит согласуем: 5K/с в среднем, 10K/с в пике на десятки минут.
+Пик поглощается очередью, разбирается за счёт запаса воркеров.
+```
 
-Воркеры:
-  5K tasks/sec, avg 1 сек на задачу → 5K параллельных воркеров
-  При 50 goroutines на под → 100 Pod'ов
+Дальше считаем воркеров через закон Литтла (`параллелизм = поток × длительность`):
+
+```
+Длительность задачи сильно разная — считать надо по классам:
+
+  быстрые (~1 с):   4K/с × 1 с   = 4 000 одновременных
+  медленные (~60 с): 1K/с × 60 с = 60 000 одновременных
+                                   ─────────────────────
+                                   ~64 000 конкурентных задач
+
+При 50 goroutine на под → ~1 300 подов
+```
+
+Отсюда важный вывод: **пул должен быть не один.** Медленные задачи при общем пуле съедят все слоты, и быстрые встанут в очередь за ними — классическая проблема head-of-line blocking. Нужны раздельные пулы по классам длительности (см. [reliability / bulkhead](../reliability-patterns/07-bulkhead.md)).
+
+```
+Хранилище активных задач:
+  одна задача ~5 KB (payload + metadata)
+  64 000 in-flight × 5 KB ≈ 320 MB — свободно умещается в Redis
+
+История выполненных:
+  5K/с × 86 400 = 432 млн задач/сутки
+  432 млн × 7 дней × 5 KB ≈ 15 TB
+
+  Но хранить в истории ПОЛНЫЙ payload не нужно: после выполнения он
+  бесполезен. Оставляем метаданные (id, type, статус, тайминги, ошибка)
+  ~500 B → ~1,5 TB, а payload обнуляем при переводе в терминальный статус.
+
+  → активные задачи в Redis, живые записи в PostgreSQL,
+    история старше нескольких дней — в ClickHouse или S3
 ```
 
 ---
@@ -168,6 +205,20 @@ Redis List/Stream:
 Worker читает: сначала queue:high, если пусто → queue:normal, если пусто → queue:low
 ```
 
+**Строгий приоритет голодает.** Если `queue:high` не пустеет, `queue:low` не выполнится никогда — а «никогда» на практике означает задачи, висящие сутками, и жалобу «отчёты не формируются».
+
+```
+Взвешенный обход вместо строгого:
+  из 10 итераций 7 → high, 2 → normal, 1 → low
+  low выполняется медленно, но выполняется
+
+Плюс старение (aging):
+  задача, ждущая дольше N минут, повышается в приоритете
+  → ограничивает худшее время ожидания сверху
+```
+
+Ещё нюанс Redis Streams: блокирующий `XREADGROUP` по нескольким стримам возвращает то, что пришло раньше, **без учёта приоритета**. Поэтому приоритет реализуется на стороне воркера — неблокирующими чтениями по очереди, и только при пустоте всех очередей уходим в блокирующее ожидание. Иначе получится либо busy-poll, либо потеря приоритета.
+
 **Delayed tasks (sorted set по timestamp):**
 ```
 Redis ZSET: delayed_tasks
@@ -222,8 +273,8 @@ type Task struct {
 ```go
 func (w *Worker) Run(ctx context.Context) {
     for {
-        // 1. Claim задачу из Redis Stream
-        task, err := w.broker.Claim(ctx, w.queues, timeout=30*time.Second)
+        // 1. Claim задачу из Redis Stream (блокирующее чтение с таймаутом)
+        task, err := w.broker.Claim(ctx, w.queues, 30*time.Second)
         if err != nil { /* handle */ continue }
 
         // 2. Обновить статус: running + worker_id
@@ -251,20 +302,44 @@ func (h *SendEmailHandler) Handle(ctx context.Context, payload []byte) error {
     var p SendEmailPayload
     json.Unmarshal(payload, &p)
 
-    // Idempotency check: не отправлять email если уже отправили
-    sent, _ := h.cache.Get(ctx, "email_sent:" + p.IdempotencyKey)
-    if sent != "" {
-        return nil  // уже отправили, успех
+    key := "email_sent:" + p.IdempotencyKey
+
+    // Атомарный ЗАХВАТ права на отправку, а не «проверить и потом сделать».
+    ok, err := h.cache.SetNX(ctx, key, "in_progress", 24*time.Hour)
+    if err != nil {
+        return err   // ошибку кеша НЕЛЬЗЯ глотать: иначе отправим повторно
+    }
+    if !ok {
+        return nil   // ключ уже занят — задачу обрабатывают либо обработали
     }
 
     if err := h.emailClient.Send(ctx, p); err != nil {
+        h.cache.Del(ctx, key)   // освободить, чтобы retry имел шанс
         return err
     }
 
-    h.cache.Set(ctx, "email_sent:" + p.IdempotencyKey, "1", 24*time.Hour)
+    h.cache.Set(ctx, key, "sent", 24*time.Hour)
     return nil
 }
 ```
+
+Три ошибки, которые убирает этот вариант:
+
+```
+1. Раздельные Get и Set — гонка.
+   XCLAIM отдаёт задачу второму воркеру, пока первый ещё жив, но тормозит.
+   Оба читают пустой ключ, оба отправляют письмо.
+
+2. Проглоченная ошибка кеша (sent, _ := ...).
+   Redis недоступен → sent == "" → отправляем письмо повторно.
+   Причём именно в момент, когда инфраструктура и так нездорова.
+
+3. Ключ ставится ПОСЛЕ отправки.
+   Падение между отправкой и записью ключа даёт дубликат при retry.
+   Захват до отправки сужает окно до «упали ровно во время вызова».
+```
+
+Полностью окно не закрывается — это и есть цена at-least-once. Если дубликат недопустим, идемпотентность должна быть на стороне получателя (провайдер с idempotency key, `INSERT ... ON CONFLICT` в целевой таблице).
 
 ---
 
@@ -283,9 +358,16 @@ func (w *Worker) handleFailure(ctx context.Context, task *Task, err error) {
         return
     }
 
-    // Exponential backoff: 30s, 2min, 15min, 2h
-    delay := time.Duration(math.Pow(8, float64(task.Attempt))) * time.Second
+    // Exponential backoff с jitter: 30s → 2m → 8m → 32m, потолок 2h
+    base := 30 * time.Second
+    delay := base << (task.Attempt - 1)        // 30s, 60s... растёт вдвое
     delay = min(delay, 2*time.Hour)
+
+    // Jitter ОБЯЗАТЕЛЕН, а не «желателен»: без него тысяча задач,
+    // упавших из-за одного недоступного сервиса, вернётся ровно
+    // в одну и ту же секунду и положит его повторно.
+    jitter := time.Duration(rand.Int63n(int64(delay) / 5))  // ±20%
+    delay = delay - delay/10 + jitter
 
     // Добавить обратно с задержкой
     task.ScheduledAt = time.Now().Add(delay)
@@ -453,10 +535,13 @@ Handle вернул ошибку → attempt++ → если < max: reschedule с
 | Решение | Принятое | Альтернатива | Когда менять |
 |---|---|---|---|
 | Broker | Redis Streams | Kafka | При > 100K tasks/sec или retention > 7 дней |
-| Delivery | at-least-once | exactly-once | Если idempotency у worker невозможна |
+| Delivery | at-least-once | exactly-once | Недостижимо в общем виде; идемпотентность переносится к получателю |
+| Приоритеты | Взвешенный обход + aging | Строгий приоритет | Строгий голодает: low не выполнится, пока есть high |
+| Пулы воркеров | Раздельные по классам длительности | Один общий пул | Общий пул: медленные задачи блокируют быстрые (head-of-line) |
+| Backoff | Экспоненциальный **с jitter** | Без jitter | Без jitter тысяча упавших задач вернётся в одну секунду |
 | Scheduling | Redis ZSET + Cron Service | DB polling | При > 1M scheduled tasks |
 | Worker | Stateless goroutines | Actor model | При complex state в workflow |
-| Persistence | PostgreSQL | Cassandra | При > 10M tasks/day с retention > 30 дней |
+| История | Метаданные без payload | Полная задача | Payload после выполнения бесполезен: 15 TB против 1,5 TB |
 
 ---
 
@@ -483,7 +568,11 @@ Handle вернул ошибку → attempt++ → если < max: reschedule с
 
 > "Task queue — это три основных challenge: надёжная доставка (at-least-once), эффективная диспетчеризация с приоритетами и delayed tasks, плюс масштабируемые воркеры.
 >
-> Broker: Redis Streams с consumer groups. Три очереди по приоритетам — воркер берёт сначала из high. Delayed tasks через Sorted Set по timestamp, Scheduler service раз в 500ms перекладывает готовые задачи в основную очередь.
+> Сначала проверю, сходятся ли числа: приём 10K/с при обработке 5K/с — это рост очереди на 432 миллиона задач в сутки, то есть неработающая система. Поэтому 10K трактую как пик на десятки минут, а 5K — как устойчивую пропускную способность.
+>
+> Воркеров считаю по закону Литтла и обязательно по классам длительности: 4K/с быстрых по секунде дают 4 тысячи конкурентных, 1K/с минутных — 60 тысяч. Отсюда раздельные пулы: в общем пуле медленные задачи заняли бы все слоты и заблокировали быстрые.
+>
+> Broker: Redis Streams с consumer groups. Три очереди по приоритетам, но обход взвешенный, а не строгий — при строгом low-очередь не выполнится никогда, пока есть high. Delayed tasks через Sorted Set по timestamp, Scheduler раз в 500ms перекладывает готовые в основную очередь.
 >
 > At-least-once: Redis XREADGROUP + XACK. Задача остаётся в Pending Entry List до явного ACK. При падении воркера — redelivery через XCLAIM после timeout.
 >

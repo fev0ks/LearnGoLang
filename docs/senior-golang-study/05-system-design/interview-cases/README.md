@@ -15,7 +15,7 @@
 - [01. URL Shortener](./01-url-shortener.md) — Base62, кеш, redirect 301 vs 302, click counter async
 - [02. Notification Service](./02-notification-service.md) — fan-out, Kafka per channel, retry + DLQ, transactional vs marketing
 - [03. Rate Limiter](./03-rate-limiter.md) — алгоритмы (fixed/sliding/token bucket), Redis Lua, fail-open
-- [04. Chat / Messaging](./04-chat-messaging.md) — WebSocket, Snowflake IDs, ScyllaDB, fan-out для групп, presence
+- [04. Chat / Messaging](./04-chat-messaging.md) — WebSocket, Kafka-first запись и seq из порядка партиции, Cassandra, fan-out для групп, presence, watermark-статусы
 - [05. Task Queue](./05-task-queue.md) — Redis Streams, priority queues, delayed tasks, at-least-once, retry backoff
 
 ### Сложные кейсы
@@ -27,7 +27,8 @@
 - [11. Payment System](./11-payment-system.md) — double-entry bookkeeping, idempotency, Saga + Outbox, reconciliation, strong consistency
 - [12. Marketplace Vendor Notifications](./12-marketplace-vendor-notifications.md) — webhook delivery (Stripe-style), outbox + Kafka, per-vendor circuit breaker, HMAC signing, dead letter
 - [13. Avito / Classifieds](./13-avito-classifieds.md) — фасетный поиск (Elasticsearch), category-specific атрибуты (JSONB + денорм), Outbox→ES, медиа-пайплайн, горячее чтение карточек, view counter, модерация/антифрод
-- [14. Stock / Inventory Service](./14-stock-inventory-service.md) — двухфазный резерв (hold→commit/cancel) + TTL, защита от overselling (atomic условный декремент), горячий SKU при flash sale (бакетирование / Redis fast-path), шардинг по product_id, sync-репликация, чтение из кеша vs решение на записи
+- [14. Stock / Inventory Service](./14-stock-inventory-service.md) — interview-case на 45–60 минут: условный резерв без overselling, multi-warehouse allocations, exact read vs preview, saga и batch writer для hot SKU
+- [14.1 Stock / Inventory Service — расширенный разбор](./14.1-stock-inventory-service.md) — подробные DDL, capacity-расчёты, shortage/recovery, failure scenarios, SLO и альтернативы hot-shard design
 - [15. TMS / Transport Management](./15-tms-transport-management.md) — нормализация разнородных источников (anti-corruption adapters), заказ↔маршрут many-to-many (консолидация ~1300/маршрут), типы маршрутов (line-haul/первая/последняя миля/смешанный), составной заказ как бизнес-сага (DAG этапов через хабы), назначение исполнителя (Redis geo + NX-лок), трекинг 10K водителей (stateless WS-gateway)
 - [16. Gmail / Email Service](./16-gmail-email-service.md) — тонкий SMTP-приём + durable-лог (250 OK = Kafka ack), immutable blob + mutable metadata, дедуп рассылок по body_hash, labels вместо папок, wide-column шард по user_id (ящик = один range-scan), per-user поисковый индекс, threading по RFC-заголовкам, outbound-ретраи с backoff до 24ч
 
@@ -65,6 +66,8 @@ Interview-ready ответ
 6. **Термины не всухую** — расшифровать или сослаться на расшифровку.
 7. **Контраст-таблицы** для альтернатив (выбор / альтернатива / причина) + явное «почему X, а не Y».
 8. **Кросс-ссылки без `#якоря`** (их не открывает Markdown-превью IntelliJ) — ссылаться на файл и называть нужный раздел текстом рядом; делать двунаправленно (кейс ↔ профиль).
+9. **Числа пересчитывать, а не переписывать.** Сплошная вычитка этих кейсов дала около полусотни содержательных ошибок, и почти все — однотипные: перепутанные единицы, пик вместо среднего при накоплении, вывод без расчёта («это много»), несогласованные разделы, невозможные в конкретном продукте конструкции (`COUNTER` рядом с обычными колонками в Cassandra, TTL на поле хеша в Redis, `FOR UPDATE` вне транзакции). Чек-лист перед правкой кейса — в [AGENTS.md](../../../../AGENTS.md), раздел «Проверка технической точности»; краткая версия под интервью — в [00. Как проходить](./00-how-to-approach.md), раздел «Как вычитывать собственный разбор».
+10. **Меняя число, синхронизировать файл целиком** — оно обычно встречается ещё в диаграмме, ролях компонентов, сквозных потоках, трейдоффах и interview-ready.
 
 ## Перекрёстные ссылки
 

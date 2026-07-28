@@ -1,5 +1,16 @@
 # Payment System
 
+## Содержание
+
+- [Фаза 1: Уточнение требований](#фаза-1-уточнение-требований)
+- [Фаза 2: Оценка нагрузки](#фаза-2-оценка-нагрузки)
+- [Фаза 3: Ключевые концепции](#фаза-3-ключевые-концепции)
+- [Фаза 4: Архитектура](#фаза-4-архитектура)
+- [Фаза 5: Deep Dive](#фаза-5-deep-dive)
+- [Сквозные потоки](#сквозные-потоки)
+- [Трейдоффы](#трейдоффы)
+- [Interview-ready ответ (2 минуты)](#interview-ready-ответ-2-минуты)
+
 Разбор задачи "Спроектируй платёжную систему". Проверяет знание ACID транзакций в распределённых системах, idempotency, двойных списаний, reconciliation. Критично для fintech компаний.
 
 ---
@@ -218,11 +229,16 @@ POST /payments
 5. Complete payment:
    BEGIN TRANSACTION
      UPDATE payments SET status = COMPLETED, psp_id = "ch_xyz" WHERE id = ?
-     UPDATE accounts SET reserved = reserved - amount WHERE id = user_id
+
      -- Double-entry ledger entries:
-     INSERT INTO ledger_entries (account_id=user, amount=-100, type=DEBIT)
-     INSERT INTO ledger_entries (account_id=merchant, amount=+95, type=CREDIT)
-     INSERT INTO ledger_entries (account_id=platform, amount=+5, type=CREDIT)
+     INSERT INTO ledger_entries (account_id=user,     amount=-100, type=DEBIT)
+     INSERT INTO ledger_entries (account_id=merchant, amount=+95,  type=CREDIT)
+     INSERT INTO ledger_entries (account_id=platform, amount=+5,   type=CREDIT)
+
+     -- Материализованные балансы ВСЕХ трёх счетов, а не только плательщика:
+     UPDATE account_balances SET reserved = reserved - 100  WHERE account_id = user
+     UPDATE account_balances SET balance  = balance  + 95   WHERE account_id = merchant
+     UPDATE account_balances SET balance  = balance  + 5    WHERE account_id = platform
    COMMIT
 
 6. Publish event: Kafka topic=payment.completed
@@ -265,8 +281,14 @@ Step 3: INSERT INTO payments ...             ← записали
 Step 4: Call Stripe → charge success         ← Stripe списал деньги!
 Step 5: COMMIT  ←── CRASH! Транзакция откатилась
 
-Результат: деньги у Stripe списаны, в нашей БД — нет. Пользователь заплатил дважды (при retry).
+Результат: деньги у Stripe списаны, в нашей БД следов НЕТ.
+Для системы платежа не существует: заказ не оплачен, продавцу
+ничего не начислено, а с карты пользователя деньги ушли.
+Это «потерянный платёж» — хуже дубля, потому что о нём
+никто не узнает, пока не придёт обращение от клиента.
 ```
+
+Отсюда правило: **внешний вызов не должен находиться внутри транзакции БД.** Транзакция держит блокировки всё время сетевого вызова (сотни миллисекунд и таймауты по 30 секунд), а её откат не отменяет того, что уже произошло у PSP.
 
 **Решение: Saga Pattern (Outbox Pattern)**
 
@@ -283,9 +305,15 @@ Outbox Table:
     INSERT INTO outbox (event_type='CALL_PSP', payload={...})
   COMMIT
   
-  Outbox Worker:
-    Читать из outbox WHERE processed = false
-    Вызвать PSP
+  Outbox Worker (воркеров несколько — забирать строки надо атомарно):
+    SELECT * FROM outbox
+    WHERE processed = false
+    ORDER BY created_at
+    LIMIT 100
+    FOR UPDATE SKIP LOCKED       -- иначе два воркера возьмут одну строку
+                                 -- и дважды дёрнут PSP
+
+    Вызвать PSP (с idempotency key)
     BEGIN TRANSACTION
       UPDATE payments SET status = COMPLETED WHERE id = ?
       UPDATE outbox SET processed = true WHERE id = ?
@@ -316,17 +344,43 @@ CREATE TABLE ledger_entries (
   CONSTRAINT chk_nonzero CHECK (amount != 0)
 );
 
--- Текущий баланс = SUM всех entries для account
--- Проверка целостности: SUM(amount) для всех entries = 0
-
 -- Для performance: материализованный баланс
 CREATE TABLE account_balances (
-  account_id  UUID          PRIMARY KEY,
-  balance     NUMERIC(15,2) NOT NULL DEFAULT 0,
-  reserved    NUMERIC(15,2) NOT NULL DEFAULT 0,  -- pre-authorized
-  updated_at  TIMESTAMPTZ   NOT NULL
+  account_id  UUID          NOT NULL,
+  currency    CHAR(3)       NOT NULL,
+  balance     NUMERIC(20,4) NOT NULL DEFAULT 0,
+  reserved    NUMERIC(20,4) NOT NULL DEFAULT 0,  -- pre-authorized
+  updated_at  TIMESTAMPTZ   NOT NULL,
+  -- Баланс ведётся ПО ВАЛЮТЕ: у одного счёта их может быть несколько
+  PRIMARY KEY (account_id, currency)
 );
 ```
+
+**Инвариант нулевой суммы держится ПО КАЖДОЙ ВАЛЮТЕ отдельно.** Формулировка «SUM(amount) всех entries = 0» без оговорки неверна: складывать рубли с долларами бессмысленно, и такая проверка либо не сойдётся, либо сойдётся случайно, замаскировав ошибку.
+
+```sql
+-- Правильная проверка: ноль внутри каждой валюты
+SELECT currency, SUM(amount) FROM ledger_entries
+GROUP BY currency
+HAVING SUM(amount) <> 0;     -- должно вернуть 0 строк
+```
+
+При конвертации валют платёж порождает записи в двух валютах, и «свести к нулю» их можно только через **отдельный FX-счёт**: списание рублей закрывается зачислением на FX-счёт в рублях, а выдача долларов — списанием с FX-счёта в долларах. Обе валюты сходятся в ноль по отдельности, а курсовая разница оседает на FX-счёте как явная величина, а не растворяется в округлениях.
+
+**Внутренняя сверка — отдельная джоба, а не только сверка с PSP.** Проверять надо два инварианта:
+
+```
+1. Ledger сам по себе:  SUM(amount) по каждой валюте = 0
+2. Материализованные балансы соответствуют журналу:
+     account_balances.balance == SUM(ledger_entries.amount)
+     для каждой пары (account_id, currency)
+
+Расхождение во втором = баг в коде, который обновляет баланс
+мимо журнала. Ловится только такой сверкой: сам по себе
+материализованный баланс «выглядит правильно» и ничего не сигналит.
+```
+
+**Про точность:** `NUMERIC(15,2)` подразумевает два знака после запятой для всех валют, но это неверно — у JPY и KRW знаков нет вовсе, у KWD и BHD их три. Поэтому масштаб берётся с запасом (`NUMERIC(20,4)`), а количество значащих знаков определяется валютой по ISO 4217 на уровне приложения.
 
 **Audit и compliance:**
 ```
@@ -454,7 +508,10 @@ Saga/Outbox: PENDING + outbox-запись закоммичены атомарн
 | Хранение | PostgreSQL | NoSQL | ACID, SUM(entries) = 0 проверяемо |
 | Idempotency | DB unique key | Redis cache | DB: durability, Redis: может упасть |
 | PSP | Внешний (Stripe) | Кастомный | PCI DSS: огромные требования |
-| Баланс | Материализованный | SUM каждый раз | Performance: баланс нужен на каждый запрос |
+| Баланс | Материализованный + сверка с журналом | SUM каждый раз | Performance: баланс нужен на каждый запрос; расхождение ловится только сверкой |
+| Инвариант нуля | По каждой валюте отдельно | Одна сумма по всем | Складывать рубли с долларами бессмысленно; конвертация — через FX-счёт |
+| Точность сумм | `NUMERIC(20,4)` + масштаб по ISO 4217 | `NUMERIC(15,2)` для всех | У JPY знаков нет, у KWD их три |
+| Outbox-воркеры | `FOR UPDATE SKIP LOCKED` | Простой `WHERE processed = false` | Иначе два воркера дёрнут PSP по одной строке |
 
 ### Почему не NoSQL?
 
@@ -478,7 +535,9 @@ ACID нужен там где нарушение = потеря денег / р�
 >
 > Идемпотентность обязательна: клиент генерирует UUID один раз для платежа, сервер при повторном запросе возвращает кешированный результат. Без этого network error → retry → двойное списание.
 >
-> Double-entry: каждый платёж = набор ledger entries с нулевой суммой. Пользователь -100, продавец +95, платформа +5. Математически проверяемо, стандарт бухгалтерии. Entries — append-only, ничего не удаляется.
+> Double-entry: каждый платёж = набор ledger entries с нулевой суммой. Пользователь -100, продавец +95, платформа +5. Entries — append-only, ничего не удаляется, исправления — только сторнирующей записью.
+>
+> Две оговорки, которые обычно теряют. Первая: ноль сходится **по каждой валюте отдельно** — суммировать рубли с долларами бессмысленно, а конвертация закрывается через отдельный FX-счёт, где курсовая разница видна явной величиной. Вторая: материализованные балансы обновляются для **всех** счетов проводки, а не только для плательщика, и отдельная джоба сверяет их с журналом — расхождение здесь означает код, который меняет баланс мимо ledger, и другим способом оно не ловится.
 >
 > Распределённые транзакции через Saga + Outbox Pattern: атомарно сохраняю PENDING + event в outbox, worker вызывает PSP с idempotency key, при успехе — обновляет статус. При crash → retry от outbox, PSP не дублирует списание.
 >

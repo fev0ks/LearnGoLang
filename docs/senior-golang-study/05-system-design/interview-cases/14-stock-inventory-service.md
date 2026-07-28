@@ -1,439 +1,733 @@
-# Stock / Inventory Service
+# Stock / Inventory Service — interview case
 
-Разбор задачи "Спроектируй сервис управления остатками товаров на складах". Проверяет понимание strong consistency на горячей строке, защиты от overselling (продать больше, чем есть), двухфазного резерва и того, как масштабировать запись при flash sale на один SKU.
+## Содержание
 
-> **SKU** (Stock Keeping Unit) — единица складского учёта, конкретный товар на конкретном складе. Дальше «SKU» и «товар на складе» взаимозаменяемы.
+- [Что проверяет задача](#что-проверяет-задача)
+- [Фаза 1: уточнение требований](#фаза-1-уточнение-требований)
+- [Фаза 2: числа, которые определяют дизайн](#фаза-2-числа-которые-определяют-дизайн)
+- [Ключевая концепция: модель остатков](#ключевая-концепция-модель-остатков)
+- [Фаза 3: высокоуровневый дизайн](#фаза-3-высокоуровневый-дизайн)
+- [Фаза 4: deep dive](#фаза-4-deep-dive)
+- [Сквозные сценарии](#сквозные-сценарии)
+- [Отказы и пограничные случаи](#отказы-и-пограничные-случаи)
+- [Трейдоффы](#трейдоффы)
+- [Фаза 5: финал](#фаза-5-финал)
+- [Interview-ready ответ](#interview-ready-ответ-2-минуты)
+- [Разбор по вопросам](#разбор-по-вопросам)
+- [Связанные материалы](#связанные-материалы)
 
----
+Практический разбор задачи для 45–60-минутного system design interview.
+Цель — показать ход рассуждения, а не спроектировать production-систему до
+последней таблицы и метрики.
 
-## Фаза 1: Уточнение требований
+Подробные расчёты, альтернативы и эксплуатационные нюансы вынесены в
+[расширенный design document](./14.1-stock-inventory-service.md).
 
-### Функциональные требования
+## Что проверяет задача
 
+В условии есть несколько сигналов:
+
+| Признак | Архитектурный ход | Цена |
+| --- | --- | --- |
+| Нельзя резервировать закончившийся товар | Условная атомарная запись | Записи одного ключа сериализуются |
+| Остаток должен быть актуальным | Точный read с leader | Leader получает критичную read-нагрузку |
+| Витринных чтений много | Отдельная асинхронная проекция | Число на карточке может отставать |
+| Retry не должен удваивать резерв | Idempotency в транзакции balance-шарда | Нужно хранить ключ, hash и результат |
+| Один SKU получает экстремальный пик | Считать capacity строки и шарда | Нужен отдельный hot path |
+| Корзина пересекает шарды | Дочерние резервы + saga | Временно возможны partial holds |
+
+На интервью достаточно выбрать два deep dive:
+
+1. Как доказать отсутствие overselling.
+2. Как обслужить hot SKU, не перегрузив весь шард.
+
+## Фаза 1: уточнение требований
+
+### Что спросить
+
+```text
+1. Остаток нужен по складу или суммарно по всем складам?
+2. Кто выбирает склад: Stock Service или Fulfillment Service?
+3. Один SKU можно разделить между несколькими складами?
+4. Корзина из нескольких SKU должна резервироваться "всё или ничего"?
+5. Есть ли TTL у резерва?
+6. Что означает commit: продажу и физическое списание?
+7. Разрешены ли backorder и отрицательный остаток?
+8. Один регион или глобальное active-active развёртывание?
 ```
-Вопросы:
-  - Один склад или много (товар лежит на N складах)?
-  - Резерв — это «холд» под заказ или сразу списание?
-  - Кто вызывает: checkout/order service (внутренний клиент) или внешний API?
-  - Резерв многотоварный (корзина из N позиций) — атомарный (всё или ничего)?
-  - Есть ли TTL у резерва (брошенная корзина) или висит вечно?
-  - Нужна ли история движений (audit) остатков?
-  - Допустим ли отрицательный сток / backorder (предзаказ)?
+
+### Зафиксированный scope
+
+- физических складов много;
+- Fulfillment Service выбирает склады по адресу, сроку и стоимости доставки;
+- один stock-резерв относится к одному SKU, но может содержать несколько
+  складских распределений;
+- разные SKU заказа резервируются дочерними операциями;
+- `reserve` создаёт hold, `commit` списывает товар, `cancel` освобождает hold;
+- TTL выбирается серверной политикой;
+- backorder запрещён;
+- рабочий регион один, внутри него несколько зон доступности.
+
+### Контракт
+
+```text
+Correctness:
+  успешный reserve возможен только при available >= quantity
+
+Consistency:
+  точные операции линеаризуемы для одного SKU
+
+Durability:
+  подтверждённый резерв переживает отказ одного узла
+
+Availability:
+  99,99% в принятой модели отказов
+
+Latency:
+  p99 < 200 мс для exact get / reserve / commit / cancel
 ```
 
-**Договорились (scope):**
-- Много складов; у товара остаток на каждом складе свой (`on_hand` per `(sku, warehouse)`).
-- Резерв — **двухфазный**: `reserve` (холд) → `commit` (закрытие = продажа) **или** `cancel` (отмена холда). Прямое списание из корзины запрещено.
-- Клиент — внутренний order/checkout service.
-- Резерв многотоварный и **атомарный**: либо зарезервированы все позиции, либо ни одной.
-- У резерва есть **TTL** (брошенная корзина → авто-освобождение).
-- Три публичных интерфейса: `reserve`, `commit` (закрытие резерва), `cancel` (отмена резерва).
+При потере кворума сервис возвращает `503`, а не отвечает по устаревшей копии.
+Это осознанный fail-closed выбор ради корректности.
 
-**Out of scope:** backorder/предзаказ, перемещения между складами (replenishment), прогноз спроса, ценообразование, мультивалютность.
+## Фаза 2: числа, которые определяют дизайн
 
-### Нефункциональные требования
+Чисел в условии нет, поэтому на интервью их нужно согласовать. Например:
 
-```
-- Корректность: НИКОГДА не зарезервировать больше, чем есть (no overselling).
-                Чтение всегда отдаёт актуальный остаток.
-- Availability: 99.99% (≈ 52 минуты downtime/год) → см. SLO-доку
-- Durability:   подтверждённый резерв нельзя потерять при отказе железа
-- Latency:      p99 < 200 мс на reserve / commit / cancel
-- Scalability:  горизонтальный рост по числу товаров и транзакций
-- Consistency:  per-SKU strong (linearizable); разные SKU независимы
-```
-
-> **Главный конфликт.** «Никогда не оверселлить» требует строгой консистентности на одной строке остатка, а «p99 < 200 мс при flash sale» требует огромного write-throughput на эту же строку. Весь дизайн — про то, как совместить.
-
----
-
-## Фаза 2: Оценка нагрузки
-
-```
+```text
 Каталог:
-  50M SKU (товаров) × ~4 склада на товар = ~200M строк остатков
-  1 строка остатка: ~80 B + индексы → ~200M × 200B ≈ 40 GB
-  → влезает в один узел, но шардируем ради write-throughput и HA
+  50 млн SKU × 4 склада = 200 млн balance-строк
 
-Транзакции (резервы):
-  Норма пик:      ~5 000 reserve/сек
-  reserve обычно → commit или cancel → ~2-3 stock-операции на заказ
-  → ~15 000 stock-операций/сек в пике
+Обычный пик:
+  5 000 заказов/с
+  3 SKU в заказе
+  5 000 × 3 = 15 000 резервов SKU/с
 
-  Flash sale (дроп, Чёрная пятница):
-    один SKU собирает 10 000+ reserve/сек → ГОРЯЧАЯ СТРОКА
-    → это не средняя нагрузка, это точечный hotspot на 1 строке
+Multi-warehouse:
+  в среднем 1,2 складской строки на SKU
+  15 000 × 1,2 = 18 000 balance mutations/с на reserve
 
-История резервов:
-  ~5K/сек × 86400 ≈ 432M записей/день в пике (в среднем меньше)
-  hot-окно 90 дней → партиционирование по времени + архив в холодное хранилище
+Commit/cancel:
+  ещё примерно 18 000 balance mutations/с
 
-Latency-бюджет p99 < 200 мс:
-  reserve = один индексированный atomic UPDATE (sub-ms в БД) + сеть
-  → легко укладывается... ПОКА нет contention на горячей строке
-  → весь tail-риск концентрируется в hot-SKU сценарии
+Итого:
+  около 36 000 balance mutations/с
+
+Чтение:
+  до 15 000 точных get-stock/с для checkout/Fulfillment
+  50 000 preview/с для каталога — не с leader
+
+Hotspot:
+  до 10 000 успешных mutations/с на один SKU
 ```
 
-**Выводы, влияющие на архитектуру:**
-1. **Overselling недопустим → CP per SKU**, атомарный условный декремент (не `SELECT` потом `UPDATE`).
-2. **Разные SKU независимы → шардируем** по `product_id`; весь сток одного товара (все его склады) — на одном шарде, чтобы многотоварный/многоскладской резерв был single-shard транзакцией.
-3. **Tail-latency живёт только в hot-SKU** → отдельный fast-path (Redis / бакетирование), а не «ускоряем всё подряд».
-4. **Подтверждённый резерв durable → синхронная репликация** на каждом шарде.
+### Сколько DB-шардов
 
----
+Допустим, нагрузочный тест полной транзакции с синхронной репликацией даёт:
 
-## Фаза 3: Ключевые концепции
+```text
+raw capacity шарда = 5 000 mutations/с
+рабочая загрузка 60% = 3 000 mutations/с
 
-Прежде чем архитектура — модель, на которой держится корректность.
-
-### Available = on_hand − reserved
-
-```
-on_hand   — физически лежит на складе
-reserved  — захолдено под незакрытые резервы
-available = on_hand − reserved   ← вот это можно ещё зарезервировать
-
-reserve:  reserved += qty                      (available уменьшился)
-commit:   on_hand  −= qty,  reserved −= qty     (товар уехал, available не меняется)
-cancel:   reserved −= qty                       (available вернулся)
+ceil(36 000 / 3 000) = 12 шардов
+запас ×2 = 24 физических DB-шарда
 ```
 
-Ключ: **резерв трогает только `reserved`**, физический `on_hand` уменьшается лишь при `commit`. Это и есть двухфазность.
+Это пример метода расчёта. Настоящее число определяется benchmark, размером
+данных, временем восстановления и mixed read/write workload.
 
-### Двухфазный резерв = pre-auth/capture из платежей
+Главный вывод: в этом примере `3 000 mutations/с` — безопасный бюджет не одной
+таблицы, а суммы всех операций и buckets, оставшихся на этом шарде.
 
-Прямая аналогия с [платёжной системой](./11-payment-system.md) (раздел «Payment Flow» и pre-authorization):
+## Ключевая концепция: модель остатков
 
-| Платежи | Сток | Смысл |
-|---|---|---|
-| pre-authorization (hold) | `reserve` | заморозили, но не списали |
-| capture | `commit` | списали окончательно |
-| void / release | `cancel` | разморозили |
-| auth expiry | TTL резерва | холд протух — отпустить |
+Для каждого `(sku_id, warehouse_id)`:
 
-### Защита от overselling — атомарный условный декремент
-
-```
-ОПАСНО (race → oversell):
-  available = SELECT on_hand - reserved FROM stock WHERE sku=?   -- читаем: 1
-  IF available >= qty:                                           -- два потока видят 1
-      UPDATE stock SET reserved = reserved + qty                 -- оба резервируют → reserved=2 > on_hand
-  → продали 2 штуки при остатке 1
-
-ПРАВИЛЬНО (single atomic statement):
-  UPDATE stock SET reserved = reserved + :qty
-    WHERE sku=:sku AND warehouse=:wh
-      AND on_hand - reserved >= :qty           -- условие проверяется под row-lock
-  → если 0 строк затронуто → OUT_OF_STOCK
+```text
+on_hand   — физически найдено на складе
+reserved  — удерживается живыми резервами
+available = max(on_hand - reserved, 0)
+shortage  = max(reserved - on_hand, 0)
 ```
 
-Проверка и инкремент — **одна** SQL-команда. БД берёт row-lock на время `UPDATE`, поэтому условие `on_hand - reserved >= qty` вычисляется на актуальном значении. Никакого `SELECT ... FOR UPDATE` + ручной проверки не нужно — это и медленнее, и легче ошибиться. См. [транзакции и блокировки в PostgreSQL](../../06-databases/database-systems-catalog/postgresql/04-transactions-and-locking.md), раздел про row-level locks.
+Обычный жизненный цикл:
 
-### Идемпотентность всех трёх операций
+```text
+Исходно:
+  on_hand=10, reserved=3, available=7
 
-`reserve`/`commit`/`cancel` вызываются по сети → retry при таймауте неизбежен. Без идемпотентности retry `reserve` = двойной холд. Каждый запрос несёт `idempotency_key`; повтор возвращает прежний результат, а не делает операцию заново. Детали — [reliability-patterns / idempotency](../reliability-patterns/06-idempotency.md).
+reserve(2):
+  on_hand=10, reserved=5, available=5
 
----
+commit(2):
+  on_hand=8, reserved=3, available=5
 
-## Фаза 4: Архитектура
+cancel(2) вместо commit:
+  on_hand=10, reserved=3, available=7
+```
+
+`commit` не меняет `available`: товар исключён из продажи ещё при `reserve`.
 
 ```mermaid
-flowchart TB
-    Client[Order / Checkout Service]
-    LB[API Gateway / LB]
-
-    subgraph SS[Stock Service - stateless]
-        API[reserve / commit / cancel API]
-        Idemp[Idempotency Guard]
-        Resv[Reservation Manager]
-        Hot[Hot-SKU Fast Path]
-    end
-
-    Redis[(Redis<br/>горячие счётчики + display-кеш)]
-
-    subgraph Shards[Шарды по product_id]
-        direction LR
-        S1[(PG shard 1<br/>primary + sync standby)]
-        S2[(PG shard 2<br/>primary + sync standby)]
-        S3[(PG shard N)]
-    end
-
-    Sweeper[Expiry Sweeper<br/>освобождает протухшие резервы]
-    Kafka[(Kafka<br/>stock.changed events)]
-
-    Client -->|reserve/commit/cancel<br/>Idempotency-Key: X| LB --> API
-    API --> Idemp --> Resv
-    Resv -->|flash-sale SKU| Hot --> Redis
-    Resv --> S1
-    Resv --> S2
-    Resv --> S3
-    Sweeper --> S1
-    Resv -->|outbox| Kafka
-    Kafka -->|обновить display-кеш| Redis
-
-    style SS fill:#dbeafe,stroke:#1e40af
-    style Shards fill:#dcfce7,stroke:#166534
+stateDiagram-v2
+    [*] --> PENDING: reserve
+    PENDING --> HELD: stock captured
+    PENDING --> REJECTED: not enough stock
+    HELD --> COMMITTED: commit
+    HELD --> CANCELLED: cancel
+    HELD --> EXPIRED: TTL
 ```
 
-### Роль каждого компонента
+## Фаза 3: высокоуровневый дизайн
 
-**API / Stock Service (stateless).**
-*Зачем:* принимает три операции, валидирует, маршрутизирует на нужный шард по `product_id`.
-*Почему отдельно / stateless:* всё состояние — в БД и Redis, поэтому сервис масштабируется простым добавлением инстансов за LB (нужно для 99.99% — любой инстанс взаимозаменяем).
+### Контекст системы
 
-**Idempotency Guard.**
-*Зачем:* по `idempotency_key` отсекает повторные `reserve`/`commit`/`cancel`.
-*Почему отдельно:* retry по сети неизбежен, а каждая из трёх операций изменяет остаток — без дедупликации retry искажает сток. Ключ хранится в той же БД (durability), не только в Redis.
+```mermaid
+flowchart LR
+    subgraph Clients["Клиенты"]
+        Web["Web / PC"]
+        Mobile["iOS / Android"]
+    end
 
-**Reservation Manager.**
-*Зачем:* выполняет двухфазную логику — атомарный условный декремент при `reserve`, перенос `reserved→on_hand` при `commit`, возврат при `cancel`; пишет запись резерва с `expires_at`.
-*Почему именно так:* резерв и движение остатка должны меняться **в одной транзакции** на одном шарде — иначе рассинхрон «резерв есть, остаток не тронут».
+    subgraph Edge["Edge"]
+        Protection["Edge reverse proxy<br/>CDN / WAF / DDoS protection"]
+        Gateway["Load Balancer<br/>API Gateway"]
+        Protection --> Gateway
+    end
 
-**PG-шарды (primary + sync standby).**
-*Зачем:* source of truth остатков и резервов. Шард = хэш `product_id`; весь сток товара по всем складам — на одном шарде.
-*Почему PostgreSQL и шардирование:* нужен ACID на декремент (overselling недопустим), а независимость SKU позволяет линейно растить запись добавлением шардов. Синхронный standby → подтверждённый резерв переживает отказ узла. См. [репликацию](../../06-databases/database-systems-catalog/postgresql/06-replication.md) и [шардирование](../../06-databases/database-systems-catalog/postgresql/12-sharding.md).
+    Checkout["Checkout / Order API"]
+    Saga["Multi-SKU Saga Coordinator<br/>в Order Service"]
+    Fulfillment["Fulfillment<br/>выбор складов"]
+    StockAPI["Stock Service<br/>child reservations"]
+    Catalog["Catalog / Product API"]
+    Redis[("Redis<br/>availability preview")]
 
-**Hot-SKU Fast Path + Redis.**
-*Зачем:* при flash sale тысячи `reserve/сек` бьют в **одну строку** — Postgres сериализует их row-lock'ом, p99 взрывается. Fast-path обслуживает горячий счётчик атомарно в Redis.
-*Почему отдельно:* это исключение, а не норма; выносим точечный hotspot, не трогая основной путь. Детали ниже.
+    Web --> Protection
+    Mobile --> Protection
+    Gateway --> Checkout
+    Gateway --> Catalog
+    Checkout --> Saga
+    Saga -->|"1. получить allocations"| Fulfillment
+    Saga -->|"2. reserve / commit / compensate"| StockAPI
+    Catalog --> Redis
+```
 
-**Expiry Sweeper.**
-*Зачем:* находит `HELD`-резервы с истёкшим `expires_at` и освобождает `reserved` (как `cancel`).
-*Почему отдельно:* брошенные корзины иначе навсегда заблокируют сток. Важно: протухший резерв лишь **занижает** `available` до подметания — это безопасное направление (ложное «нет в наличии»), оверселла не вызывает.
+`Cloudflare / Edge`, load balancer и API Gateway — логические роли, а не
+обязательно три отдельных продукта. Edge защищает публичный периметр, но
+конечные клиенты не обращаются к Stock Service напрямую: резерв инициирует
+Checkout. Saga Coordinator получает от Fulfillment распределение по складам,
+создаёт в Stock по одному child reservation на SKU и отменяет уже созданные
+holds при частичном отказе.
 
-**Kafka (outbox).**
-*Зачем:* публикует `stock.changed` для обновления display-кеша и downstream (поиск, аналитика).
-*Почему через outbox:* событие пишется в той же транзакции, что и изменение остатка → не теряется при сбое. Паттерн как в [платёжной](./11-payment-system.md) и [marketplace-notifications](./12-marketplace-vendor-notifications.md) кейсах.
+### Внутри Stock Service
 
----
+```mermaid
+flowchart LR
+    subgraph Stock["Stock Service"]
+        API["Exact Stock API"]
+        Router["Shard Router<br/>sku_id → shard"]
+        Manager["Reservation Manager"]
+        Hot["Hot SKU Writer<br/>batching"]
+        Relay["Outbox Relay"]
 
-## Фаза 5: Deep Dive
+        API --> Router --> Manager
+        Manager -->|"extreme hot SKU"| Hot
+    end
 
-### Модель данных
+    subgraph Shard["Один из N DB-шардов"]
+        Leader[("Leader<br/>balances + reservations<br/>outbox")]
+        Replica[("Synchronous replica")]
+        Leader -->|"synchronous WAL"| Replica
+    end
+
+    Expiry["Expiry Workers"]
+    Broker[("Event Broker")]
+
+    Expiry --> Router
+    Manager -->|"обычный SKU"| Leader
+    Hot -->|"микропакет"| Leader
+    Relay -->|"poll outbox / mark published"| Leader
+    Relay -->|"publish domain events"| Broker
+```
+
+На схеме показан один выбранный шард. В системе их `N`; `Shard Router`
+направляет конкретный `sku_id` ровно в один из них. У каждого шарда собственные
+leader, synchronous replica и одинаковый набор таблиц.
+
+PostgreSQL не отправляет события самостоятельно. `Reservation Manager`
+фиксирует изменение balance и domain event в `outbox` одной транзакцией, а
+`Outbox Relay` читает неопубликованные строки, отправляет их в broker и
+записывает результат публикации. Relay может быть отдельным процессом, но
+логически принадлежит Stock Service.
+
+Redis здесь не является источником истины. Он хранит асинхронную витринную
+проекцию для каталога, поэтому его отсутствие или отставание не влияет на
+корректность `reserve`: точные чтения и все mutations идут в leader выбранного
+DB-шарда.
+
+### Для чего нужен Event Broker
+
+Stock Service сохраняет изменение остатка и запись в `outbox` одной
+DB-транзакцией. Outbox relay публикует событие в broker уже после commit, а
+несколько независимых потребителей строят свои представления данных:
+
+```mermaid
+flowchart LR
+    Broker[("Event Broker<br/>stock events")]
+
+    Broker --> Preview["Availability Projector"]
+    Preview --> Redis[("Redis<br/>быстрый preview")]
+
+    Broker --> SearchIndexer["Search Indexer"]
+    SearchIndexer --> Search[("Elasticsearch / OpenSearch<br/>витрина и поиск")]
+
+    Broker --> Analytics["Analytics Consumer"]
+    Analytics --> DWH[("DWH / ClickHouse / Data Lake")]
+
+    Broker --> LowStock["Low Stock Consumer"]
+    LowStock --> Alerts["Пополнение склада<br/>и уведомления"]
+```
+
+Примеры событий:
+
+```text
+StockReserved
+ReservationCommitted
+ReservationCancelled
+ReservationExpired
+StockAdjusted
+StockBecameUnavailable
+StockBecameAvailable
+```
+
+Broker нужен для асинхронного распространения изменений, но не участвует в
+решении о резерве. Redis, поисковый индекс и аналитика могут отставать или
+временно быть недоступны — Stock Service всё равно фиксирует корректный
+результат в своей БД.
+
+Доставка событий обычно `at-least-once`, поэтому каждый consumer дедуплицирует
+их по `event_id`. События одного `sku_id` отправляются в одну partition, если
+для конкретной проекции важен их порядок.
+
+### Роли компонентов
+
+| Компонент | Роль |
+| --- | --- |
+| Edge reverse proxy / CDN / WAF | Защищает публичный периметр от DDoS и может кешировать статический контент |
+| Load Balancer / API Gateway | Распределяет внешний трафик, маршрутизирует API, применяет auth и rate limits |
+| Checkout / Order API | Принимает пользовательскую команду и запускает оформление заказа |
+| Multi-SKU Saga Coordinator | Координирует child reservations и выполняет компенсацию при частичном отказе |
+| Fulfillment | Выбирает физические склады; Stock повторно проверяет остаток |
+| Stock API | Даёт exact read и меняет жизненный цикл резерва |
+| DB Shard Router | Находит технический шард по `sku_id`; склад не выбирает |
+| Reservation Manager | Выполняет balance, reservation и outbox одной транзакцией |
+| Outbox Relay | Читает сохранённые domain events и публикует их в broker |
+| DB leader + sync replica | Источник истины и RPO=0 в принятой модели отказа |
+| Hot SKU Writer | Микропакетами уменьшает число sync commits и balance updates |
+| Expiry Workers | Освобождают просроченные holds через `SKIP LOCKED` |
+| Event Broker | Рассылает stock events независимым асинхронным потребителям |
+| Availability Projector + Redis | Обслуживает приблизительные чтения витрины; не участвует в решении о reserve |
+| Search Indexer + Elasticsearch | Обновляет фильтры и наличие в поиске; не подтверждает возможность покупки |
+| Analytics Consumer | Загружает историю изменений в аналитическое хранилище |
+
+### Два read-контракта
+
+```text
+Exact Stock API:
+  клиенты: Checkout, Fulfillment
+  источник: leader
+  гарантия: линеаризуемое чтение
+  SLO: p99 < 200 мс
+
+Availability Preview:
+  клиенты: каталог, поиск, карточка товара
+  источник: кеш / проекция
+  гарантия: приблизительное значение с as_of
+  пример SLO: p99 < 50 мс, freshness < 2 с
+```
+
+Витрина может показать «в наличии», а конкурентный `reserve` вернуть
+`OUT_OF_STOCK`. Это допустимо только для preview; Exact Stock API обязан
+вернуть канонический balance.
+
+## Фаза 4: deep dive
+
+### 4.1 Корректный резерв
+
+#### API
+
+Один SKU можно разделить между физическими складами:
+
+```http
+POST /v1/stocks/sku-100/reservations
+Idempotency-Key: checkout-789-line-1
+```
+
+```json
+{
+  "order_id": "order-789",
+  "allocations": [
+    {"warehouse_id": 42, "quantity": 2},
+    {"warehouse_id": 77, "quantity": 1}
+  ],
+  "reservation_policy": "CHECKOUT"
+}
+```
+
+Все склады одного SKU хранятся на одном DB-шарде. Физический склад и DB-шард —
+разные сущности.
+
+#### Минимальная модель данных
+
+```text
+stock_balances:
+  (sku_id, warehouse_id) → on_hand, reserved, state, version
+
+reservations:
+  reservation_id, sku_id, status, idempotency_key,
+  request_hash, expires_at
+
+reservation_allocations:
+  reservation_id, warehouse_id, quantity
+
+outbox:
+  event_id, aggregate_id, event_type, payload
+```
+
+Idempotency — не отдельное хранилище перед routing. Сначала `sku_id` определяет
+шард, затем уникальный ключ фиксируется в `reservations` в той же транзакции,
+что и balance.
+
+#### Защита от overselling
+
+Опасный вариант:
+
+```text
+T1: SELECT available → 1
+T2: SELECT available → 1
+T1: reserved += 1
+T2: reserved += 1
+```
+
+Правильный вариант объединяет проверку и изменение:
 
 ```sql
-CREATE TABLE stock (
-  product_id   BIGINT      NOT NULL,
-  warehouse_id INT         NOT NULL,
-  on_hand      INT         NOT NULL CHECK (on_hand >= 0),
-  reserved     INT         NOT NULL CHECK (reserved >= 0),
-  updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-  PRIMARY KEY (product_id, warehouse_id),
-  CHECK (reserved <= on_hand)          -- инвариант: нельзя захолдить больше, чем лежит
-);
-
-CREATE TABLE reservations (
-  id              UUID         PRIMARY KEY,
-  idempotency_key TEXT         NOT NULL UNIQUE,    -- дедупликация
-  order_id        BIGINT       NOT NULL,
-  status          TEXT         NOT NULL,           -- HELD / COMMITTED / CANCELLED / EXPIRED
-  expires_at      TIMESTAMPTZ  NOT NULL,
-  created_at      TIMESTAMPTZ  NOT NULL DEFAULT now()
-);
-
-CREATE TABLE reservation_items (
-  reservation_id UUID   NOT NULL REFERENCES reservations(id),
-  product_id     BIGINT NOT NULL,
-  warehouse_id   INT    NOT NULL,
-  qty            INT    NOT NULL CHECK (qty > 0)
-);
-
--- частичный индекс для sweeper'а: только живые резервы
-CREATE INDEX idx_resv_expiry ON reservations (expires_at) WHERE status = 'HELD';
+UPDATE stock_balances
+SET reserved = reserved + :quantity,
+    version = version + 1
+WHERE sku_id = :sku_id
+  AND warehouse_id = :warehouse_id
+  AND state = 'OK'
+  AND on_hand - reserved >= :quantity;
 ```
 
-`CHECK (reserved <= on_hand)` — последняя линия обороны от overselling на уровне БД: даже при баге в коде транзакция упадёт, а не оверселлит.
+Если изменено ноль строк — `OUT_OF_STOCK`. Конкурентные обновления одной строки
+сериализуются, поэтому второй запрос повторно проверяет условие уже после
+изменения первого.
 
-### Операция reserve (многотоварная, всё-или-ничего)
+#### Транзакция reserve
 
-```
-POST /reservations
-  Idempotency-Key: "order-789-attempt-1"
-  { "order_id": 789, "ttl_sec": 900,
-    "items": [ {"sku": 100, "wh": 1, "qty": 2}, {"sku": 205, "wh": 1, "qty": 1} ] }
-
+```text
 BEGIN
-  -- 1. идемпотентность
-  INSERT INTO reservations(id, idempotency_key, order_id, status, expires_at)
-    VALUES (:id, :key, :order, 'HELD', now() + :ttl)
-    ON CONFLICT (idempotency_key) DO NOTHING;
-  IF not inserted:
-      SELECT ... вернуть существующий резерв (повтор) → 200
 
-  -- 2. сортируем позиции по (sku, wh) — детерминированный порядок против deadlock
-  FOR item IN sorted(items):
-      UPDATE stock SET reserved = reserved + :qty, updated_at = now()
-        WHERE product_id = :sku AND warehouse_id = :wh
-          AND on_hand - reserved >= :qty;          -- атомарный условный декремент
-      IF rows_affected = 0:
-          ROLLBACK → 409 { "error": "OUT_OF_STOCK", "sku": :sku }
-
-  INSERT INTO reservation_items ...
-COMMIT
-→ 201 { "reservation_id": :id, "status": "HELD", "expires_at": ... }
+1. INSERT reservation(PENDING, idempotency_key, request_hash).
+2. INSERT allocations.
+3. SAVEPOINT stock_attempt.
+4. В порядке warehouse_id выполнить условные UPDATE balance.
+5. Если один склад не прошёл:
+   ROLLBACK TO SAVEPOINT;
+   reservation → REJECTED;
+   сохранить OUT_OF_STOCK;
+   COMMIT.
+6. Если прошли все:
+   reservation → HELD;
+   записать movements и outbox;
+   COMMIT.
 ```
 
-Два важных момента:
-- **Детерминированный порядок блокировок** (сортировка по `(sku, wh)`): две корзины с пересекающимися товарами иначе словят deadlock (A держит X ждёт Y, B держит Y ждёт X).
-- **Всё-или-ничего**: первый же `OUT_OF_STOCK` откатывает уже захолдённые позиции — частичный резерв недопустим.
+Savepoint одновременно даёт:
 
-### Операции commit и cancel (идемпотентны через guard статуса)
+- «все склады одного SKU или ни одного»;
+- сохранённый идемпотентный результат `OUT_OF_STOCK`.
 
-```
--- commit (закрытие резерва = продажа)
-BEGIN
-  UPDATE reservations SET status='COMMITTED'
-    WHERE id=:id AND status='HELD';               -- guard: повтор/после отмены → 0 строк
-  IF rows_affected = 0:
-      SELECT ... вернуть текущий статус (идемпотентно) → 200
-  FOR item IN items:
-      UPDATE stock SET on_hand = on_hand - qty, reserved = reserved - qty
-        WHERE product_id=:sku AND warehouse_id=:wh;
-COMMIT
+`commit`, `cancel` и expiry сначала блокируют reservation row и разрешают
+только один переход из `HELD`. Повтор достигнутого перехода возвращает прежний
+результат без второго изменения balance.
 
--- cancel (отмена резерва)
-BEGIN
-  UPDATE reservations SET status='CANCELLED' WHERE id=:id AND status='HELD';
-  IF rows_affected = 0: вернуть текущий статус → 200
-  FOR item IN items:
-      UPDATE stock SET reserved = reserved - qty
-        WHERE product_id=:sku AND warehouse_id=:wh;
-COMMIT
+#### Несколько SKU в заказе
+
+```text
+SKU 100 → child reservation на shard 7
+SKU 200 → child reservation на shard 3
 ```
 
-`WHERE ... status='HELD'` — идемпотентность без отдельной таблицы: повторный `commit` уже закоммиченного резерва меняет 0 строк и возвращает текущее состояние. Терминальные статусы (`COMMITTED`/`CANCELLED`/`EXPIRED`) необратимы.
+Order/Fulfillment Service хранит aggregate-сагу:
 
-### Expiry Sweeper — освобождение брошенных корзин
+1. параллельно создаёт дочерние holds;
+2. если все успешны — подтверждает aggregate;
+3. если один неуспешен — отменяет успешные holds.
 
-```
-LOOP каждые N секунд:
-  SELECT id FROM reservations
-    WHERE status='HELD' AND expires_at < now()
-    ORDER BY expires_at LIMIT 500
-    FOR UPDATE SKIP LOCKED;                -- несколько воркеров не дерутся за одни строки
-  FOR each → выполнить как cancel, но status='EXPIRED'
-```
+Это не мгновенная межшардовая атомарность: во время компенсации часть товара
+временно недоступна. Настоящая атомарность потребовала бы 2PC или
+распределённой SQL-транзакции.
 
-`FOR UPDATE SKIP LOCKED` — стандартный приём «очереди в БД»: воркеры разбирают разные пачки без блокировок друг друга. Частичный индекс `WHERE status='HELD'` держит скан дешёвым даже при сотнях миллионов исторических резервов.
+### 4.2 Hot SKU
 
-**Почему sweeper, а не lazy-проверка `expires_at` при чтении:** иначе `available` пришлось бы считать как `on_hand - reserved + (протухшие)` на каждом чтении — дорого и хрупко. Sweeper держит `reserved` всегда «честным».
+Здесь нужно проверить два потолка.
 
-### Горячий SKU (flash sale) — главный челлендж
+#### Capacity одной строки
 
-```
-Проблема: 10 000 reserve/сек в ОДНУ строку stock.
-  - Postgres сериализует их row-lock'ом → реальный throughput ~сотни/сек,
-    очередь ожидающих растёт → p99 пробивает 200 мс.
-  - MVCC: каждый UPDATE строки = новая версия кортежа → 10K dead tuples/сек
-    → bloat + давление на autovacuum. См. ../../06-databases/.../postgresql/01-mvcc-and-vacuum.md
-```
+Row lock удерживается до завершения synchronous commit:
 
-Три решения (по нарастанию сложности):
+```text
+C_row ≈ 1 / t_lock_hold
 
-**1. Бакетирование остатка (sharded counter в Postgres).** Разбить `N` единиц SKU на `K` под-строк-бакетов; резерв хэшируется в случайный бакет → contention падает в `K` раз; при пустом бакете — пробуем следующий. `available = SUM(buckets)`. Остаёмся в Postgres → durability сохранена. Так делают тикетинг-системы.
+t_lock_hold=5 мс:
+  C_row_theoretical≈200/с
 
-```
-stock_bucket(product_id, warehouse_id, bucket_id, on_hand, reserved)  -- K строк на SKU
-reserve: bucket = hash(reservation_id) % K
-         UPDATE ... WHERE bucket_id=:b AND on_hand-reserved>=:qty
-         если не вышло → перебрать остальные бакеты
+при рабочей загрузке 50%:
+  C_row_safe≈100/с
 ```
 
-**2. Redis fast-path (экстремальный flash sale).** На время распродажи горячий счётчик живёт в Redis; атомарный декремент через Lua (`DECRBY`, при уходе в минус — откат и reject). Один ключ держит 100K+ ops/сек, sub-ms. Постоянное состояние периодически чекпойнтится в Postgres, который остаётся source of truth до/после окна. Риск durability Redis закрывается AOF + тем, что окно распродажи ограничено. Подробно — [Redis](../../06-databases/database-systems-catalog/08-redis.md), атомарные счётчики и Lua.
+#### Capacity всего шарда
 
-**3. Сериализация через очередь per-SKU.** Один writer на горячий SKU разбирает очередь резервов → нулевой lock-contention, но +latency и сложность. Применять только при экстремальной горячести.
+Из benchmark выше:
 
-**Выбор:** бакетирование как дефолт для умеренно горячих SKU (durable, в Postgres); Redis fast-path подключается для заранее известных дропов с последующей сверкой в БД.
+```text
+C_shard_safe=3 000 mutations/с
+λ_hot=10 000 mutations/с
 
-### Чтение остатка — разделение «отображение» vs «решение»
-
-```
-GET /stock/{sku}?warehouse=1   → "осталось N штук"
-
-Display (витрина):  из Redis display-кеша, обновляется по stock.changed (Kafka).
-                    Eventually consistent — для показа «осталось N» это ок.
-Решение (reserve):  ТОЛЬКО атомарный UPDATE ... WHERE on_hand-reserved>=qty.
-                    Кешу для решения не доверяем НИКОГДА.
+10 000 > 3 000
 ```
 
-Это ключевой принцип: **корректность обеспечивается на записи, скорость — на чтении**. Витрина может на секунды показать «осталось 3», а резерв честно вернёт `OUT_OF_STOCK` — пользователь увидит это на чекауте. Так read-path не нагружает primary и легко кешируется, а строгий инвариант живёт в одной atomic-команде. (Тот же CQRS-мотив, что в [Avito-кейсе](./13-avito-classifieds.md): горячее чтение отдельно от записи.)
+Отсюда три режима:
 
-### Доступность 99.99% и durability
+| Нагрузка SKU | Решение |
+| --- | --- |
+| `λ <= C_row_safe` | Одна balance-строка |
+| `C_row_safe < λ <= C_shard_safe` | Escrow buckets внутри шарда |
+| `λ > C_shard_safe` | Batch writer или cross-shard hot group |
 
-```
-Durability подтверждённого резерва:
-  synchronous_commit = on (или remote_write) + синхронный standby
-  → COMMIT не вернётся клиенту, пока запись не на двух узлах
-  → отказ primary не теряет резерв. См. репликацию PostgreSQL.
+#### Почему buckets внутри шарда не подходят для 10K
 
-Failover:
-  Patroni + etcd, авто-промоут standby, мульти-AZ.
+Сто buckets уберут row contention, но сохранят около
+10 000 транзакций/с на одном шарде:
 
-Error budget 99.99% ≈ 52 мин/год:
-  - stateless сервис за LB (любой инстанс взаимозаменяем)
-  - пул соединений (pgbouncer) — см. .../postgresql/09-connection-pooling.md
-  - каждый шард: свой primary+standby; отказ одного шарда роняет лишь его товары
-  → SLO/SLI и бюджет ошибок: ../reliability-patterns/08-slo-sli-error-budgets.md
+```text
+10 000 tx/с > C_shard_raw=5 000 > C_shard_safe=3 000
 ```
 
----
+Выделенный шард защитит соседние SKU, но не увеличит принятую по benchmark
+capacity одного DB-узла.
 
-## Сквозные потоки
+Cross-shard escrow потребовал бы:
 
-**1. Успешный заказ (reserve → commit).**
-`reserve` холдит позиции (atomic декремент, `reserved += qty`) → пользователь оплачивает → checkout зовёт `commit` → `on_hand -= qty, reserved -= qty`, резерв `COMMITTED` → `stock.changed` в Kafka обновляет витрину.
-*Итог:* физический остаток уменьшился ровно один раз; повтор `commit` (retry) ничего не меняет.
+```text
+ceil(10 000 / 3 000) = 4 hot-шарда
+```
 
-**2. Отмена / таймаут оплаты (reserve → cancel или expire).**
-`reserve` прошёл, оплата не случилась. Явный `cancel` или Sweeper по `expires_at` возвращает `reserved -= qty`, статус `CANCELLED`/`EXPIRED`.
-*Итог:* `available` восстановлен; брошенная корзина не держит сток вечно.
+Это усложняет exact total, routing reservation, replenishment и recovery.
 
-**3. Гонка за последней единицей (overselling-защита).**
-Двое одновременно резервируют последнюю штуку. Оба исполняют `UPDATE ... WHERE on_hand-reserved>=1`; row-lock сериализует — первый увеличивает `reserved`, второму условие уже не выполняется → `0 строк` → `409 OUT_OF_STOCK`.
-*Итог:* продано ровно столько, сколько было. Оверселла нет без единого явного лока в коде.
+#### Выбранный ход: batch writer
 
-**4. Flash sale на один SKU.**
-Тысячи `reserve/сек` на горячую строку → Reservation Manager уводит их в Hot-SKU Fast Path: Redis-счётчик (или бакеты в Postgres) обслуживает декремент атомарно, p99 держится; БД-state чекпойнтится/сверяется.
-*Итог:* tail-latency под контролем, overselling по-прежнему исключён.
+Writer упорядочивает команды одного hot SKU и фиксирует их микропакетами:
 
----
+```text
+10 000 команд/с
+batch size B=50
+
+10 000 / 50 = 200 DB-транзакций/с
+```
+
+Одна batch-транзакция:
+
+1. определяет, какие команды получают `HELD`, а какие `OUT_OF_STOCK`;
+2. сохраняет 50 idempotency results;
+3. меняет balance агрегированно;
+4. записывает durable результат до ответа клиентам.
+
+Так исчезают 10 000 sync commits и 10 000 balance updates. Но остаются
+10 000 reservation rows и соответствующий WAL, поэтому batch writer обязательно
+проверяется отдельным benchmark.
+
+## Сквозные сценарии
+
+### 1. Последняя единица
+
+```text
+on_hand=1, reserved=0
+
+T1 reserve(1) → HELD
+T2 reserve(1) → UPDATE затронул 0 строк → OUT_OF_STOCK
+```
+
+**Итог:** overselling невозможен.
+
+### 2. Один SKU с двух складов
+
+```text
+warehouse 42 → reserve 2
+warehouse 77 → reserve 1
+```
+
+Обе строки находятся на одном DB-шарде и меняются одной транзакцией. Если на
+складе 77 товара нет, savepoint откатывает hold склада 42.
+
+**Итог:** наружу не выходит частичный резерв одного SKU.
+
+### 3. Таймаут после commit
+
+```text
+1. COMMIT зафиксирован.
+2. Ответ потерялся.
+3. Клиент повторяет запрос.
+4. Сервис возвращает уже сохранённый COMMITTED.
+```
+
+**Итог:** сетевой timeout не вызывает второе списание.
+
+## Отказы и пограничные случаи
+
+| Ситуация | Поведение |
+| --- | --- |
+| Падает экземпляр Stock Service | Запрос принимает другой stateless-инстанс |
+| Падает DB leader после commit до ответа | Failover, retry возвращает результат по idempotency |
+| Теряется кворум | `503`, а не запись по устаревшей копии |
+| Недоступен брокер | Outbox накапливается, Stock API продолжает работать до лимита |
+| Expiry workers отстают | `available` временно занижен; overselling не возникает |
+| Инвентаризация находит `on_hand < reserved` | `SHORTAGE`, reserve/commit блокируются, затем reallocation/cancel |
+| Корзина пересекает шарды | Saga компенсирует успешные дочерние holds |
+| Hot SKU превышает capacity шарда | Batch writer либо специальная hot-shard group |
+
+### TTL как бизнес-параметр
+
+```text
+500 резервов/с × 65% брошенных checkout × TTL 900 с
+= 292 500 активных брошенных holds
+```
+
+Длинный TTL помогает медленному клиенту завершить оплату, но замораживает
+продаваемый остаток. Поэтому клиент выбирает policy, а конкретный TTL ограничен
+сервером. При явном отказе оплаты Order Service сразу вызывает `cancel`.
 
 ## Трейдоффы
 
-| Решение | Принятое | Альтернатива | Причина |
-|---|---|---|---|
-| Consistency per SKU | Strong (linearizable) | Eventual | Overselling недопустим — нельзя продать чего нет |
-| Защита от оверселла | Atomic `UPDATE … WHERE available>=qty` | `SELECT` потом `UPDATE` | Read-then-write → гонка → оверселл; условный декремент атомарен |
-| Модель резерва | Двухфазная (hold→commit/cancel) + TTL | Прямое списание из корзины | Брошенные корзины иначе блокируют сток навсегда |
-| Хранилище | PostgreSQL, шард по `product_id` | NoSQL eventual | Нужен ACID на декремент; SKU независимы → линейный шардинг |
-| Co-location | Весь сток товара на одном шарде | Шард по `(sku, warehouse)` | Многоскладской резерв = single-shard транзакция |
-| Горячий SKU | Redis fast-path / бакетирование | Одна строка в Postgres | Row-lock сериализует; MVCC → bloat на горячей строке |
-| Durability | Синхронная репликация | Async | Потеря подтверждённого резерва недопустима |
-| Чтение остатка | Кеш best-effort (витрина) | Strong read каждый раз | Показу «осталось N» точность не нужна; корректность — на записи |
+| Выбор | Альтернатива | Почему и чем платим |
+| --- | --- | --- |
+| Exact read с leader | Все reads из кеша | Корректность checkout ценой нагрузки на leader |
+| Preview из проекции | Все reads с leader | Низкая latency ценой окна устаревания |
+| Условный `UPDATE` | `SELECT`, затем `UPDATE` | Нет race, но один row сериализуется |
+| Idempotency на balance-шарде | Отдельный global guard | Нет dual-write, но сначала нужен routing |
+| Sync replica | Async replica | RPO=0 ценой commit latency |
+| Saga для multi-SKU | Двухфазный commit (Two-Phase Commit) | Выше availability ценой временных partial holds |
+| Batch writer для 10K hot SKU | Buckets на одном шарде | Меньше commits; нужен ordered writer и batch benchmark |
+| Явный `SHORTAGE` | `CHECK (reserved <= on_hand)` | База принимает физическую реальность, но нужен resolver |
 
-### Почему не NoSQL / eventual consistency?
+## Фаза 5: финал
 
-```
-Cassandra/Mongo (eventual): reserved=0 на одной реплике, reserved=1 на другой
-  → оба клиента резервируют последнюю единицу → оверселл.
-Атомарный INCR в Redis быстрый, но Redis не source of truth для всего каталога
-  (durability и память) → Redis только для точечных горячих SKU.
-PostgreSQL: один atomic UPDATE с условием + CHECK(reserved<=on_hand)
-  → инвариант остатка гарантирован на источнике истины.
-```
+### Что осталось за scope
 
----
+- алгоритм Fulfillment для выбора складов, стоимости и срока доставки;
+- команды приёмки, возврата, брака и разрешение состояния `SHORTAGE`;
+- multi-region active-active и глобальное распределение запасов;
+- детальные схемы мониторинга, disaster recovery и нагрузочного тестирования.
+
+### Что менять при росте ×10
+
+При росте обычной нагрузки с `36K` до `360K mutations/с` сначала повторяем
+benchmark на реальном mixed workload. При той же безопасной capacity потребуется
+120 рабочих DB-шардов и около 240 с запасом ×2; виртуальные buckets позволят
+перебалансировать SKU без изменения публичного API.
+
+Горячий SKU нельзя лечить только добавлением обычных шардов: весь его поток
+по-прежнему попадёт в одну точку. Для него нужно независимо масштабировать
+партиции ordered writers, при необходимости выносить inventory в несколько
+hot-шардов и заранее определить протокол exact total и восстановления.
+Параллельно придётся партиционировать историю reservations, масштабировать
+outbox relay и архивировать завершённые операции.
 
 ## Interview-ready ответ (2 минуты)
 
-> "Stock-сервис — это про две вещи, которые тянут в разные стороны: строгая консистентность на одной строке остатка (чтобы не оверселлить) и высокий write-throughput на эту же строку при flash sale.
+> Я разделил выбор склада и учёт остатков. Fulfillment может собрать один SKU
+> с нескольких физических складов, а Stock Service атомарно проверяет и
+> резервирует переданные allocations. Для каждой пары `(sku_id, warehouse_id)`
+> он хранит `on_hand` и `reserved`, а доступный остаток считает как
+> `max(on_hand-reserved, 0)`.
 >
-> Модель: `available = on_hand − reserved`. Резерв двухфазный, как pre-auth/capture в платежах: `reserve` холдит (`reserved += qty`), `commit` списывает (`on_hand -= qty`), `cancel`/TTL возвращает. Прямого списания из корзины нет — иначе брошенные корзины блокируют сток.
+> На обычном пути stateless-инстансы маршрутизируют все данные одного SKU на
+> один DB-шард. Reserve выполняется условным `UPDATE`, поэтому два клиента не
+> смогут забрать последнюю единицу. Reservation, idempotency result, balance и
+> outbox фиксируются одной транзакцией. Checkout читает точное значение с
+> leader, а витрина использует отдельную приблизительную проекцию.
 >
-> Защита от оверселла — один атомарный условный декремент: `UPDATE stock SET reserved=reserved+qty WHERE on_hand-reserved>=qty`. Если 0 строк — OUT_OF_STOCK. Никакого read-then-write, гонки исключены row-lock'ом, плюс `CHECK(reserved<=on_hand)` как страховка. Все три операции идемпотентны по ключу и через guard статуса.
+> В согласованном примере оценка общего пика равна `36 000 mutations/с`.
+> Предположим, benchmark полной транзакции показал `5 000 mutations/с` на
+> шард; при целевой загрузке 60% для расчёта берём `3 000 mutations/с`. Тогда
+> нужно 12 рабочих шардов, а с запасом ×2 — 24. Это метод sizing, а не
+> универсальная capacity PostgreSQL. Для hot SKU с `10 000 mutations/с`
+> обычные buckets внутри одного шарда не помогут:
+> нагрузка выше capacity всего шарда. Поэтому я направлю такой SKU в ordered
+> batch writer. При batch size 50 он создаст около 200 DB-транзакций/с, но этот
+> путь нужно отдельно проверить по WAL и объёму reservation rows.
 >
-> Хранилище — PostgreSQL, шард по `product_id`; весь сток товара по всем складам на одном шарде, так что многоскладской резерв — single-shard ACID-транзакция. Durability — синхронная репликация: подтверждённый резерв переживает отказ узла. 99.99% — stateless сервис за LB, у каждого шарда свой standby.
->
-> Главный челлендж — горячий SKU на распродаже: тысячи резервов в одну строку, Postgres сериализует их row-lock'ом и плодит MVCC-bloat. Решаю бакетированием счётчика по K под-строк либо Redis fast-path на время дропа со сверкой в БД.
->
-> И разделяю чтение: витринное «осталось N» — из кеша, eventually consistent; решение о резерве — только атомарный UPDATE на источнике истины. Корректность на записи, скорость на чтении."
+> Корзина из нескольких SKU резервируется сагой: по одному child reservation
+> на шард, с компенсацией успешных holds при частичном отказе. Для сохранности
+> commit подтверждается после синхронной репликации; при потере quorum система
+> временно отказывает в записи, а неопределённый результат клиент повторяет с
+> тем же idempotency key.
+
+## Разбор по вопросам
+
+После устного финала этот блок можно использовать как тренажёр уточняющих
+вопросов.
+
+**1. Как представить остаток?**
+
+`available=max(on_hand-reserved, 0)`. Reserve увеличивает `reserved`, commit
+уменьшает `on_hand` и `reserved`, cancel/expiry уменьшают только `reserved`.
+
+**2. Как исключить overselling?**
+
+Одним условным `UPDATE ... WHERE state='OK' AND on_hand-reserved>=quantity`.
+Проверка и запись происходят атомарно под row lock.
+
+**3. Как обеспечить актуальное чтение?**
+
+Checkout и Fulfillment читают leader. Каталог использует явно приблизительную
+Availability Projection и не принимает по ней решение о reserve.
+
+**4. Где хранить idempotency?**
+
+После routing по `sku_id`, в `reservations` того же DB-шарда и в одной
+транзакции с balance. Отдельный guard создал бы dual-write.
+
+**5. Как масштабировать обычную нагрузку?**
+
+Stateless Stock Service и шардирование по `sku_id`. В примере
+`36K / 3K = 12` рабочих шардов, с запасом — 24.
+
+**6. Что делать с 10K mutations/с одного SKU?**
+
+Сначала проверить `C_row_safe`, затем `C_shard_safe`. Buckets внутри одного
+шарда не проходят его capacity. Batch size 50 уменьшает поток до примерно
+200 DB-транзакций/с; альтернативой являются минимум четыре hot-шарда.
+
+**7. Как резервировать корзину из нескольких SKU?**
+
+Один child reservation на SKU, а Order/Fulfillment Service координирует их
+сагой и отменяет уже созданные holds при частичном отказе.
+
+**8. Как пережить отказ оборудования?**
+
+Подтверждать commit после записи на синхронную реплику, использовать fencing
+при failover и повторять неопределённый запрос с тем же idempotency key.
+
+## Связанные материалы
+
+- [Расширенный Stock / Inventory design document](./14.1-stock-inventory-service.md)
+- [Как проходить System Design Interview](./00-how-to-approach.md)
+- [Транзакции и блокировки PostgreSQL](../../06-databases/database-systems-catalog/postgresql/04-transactions-and-locking.md)
+- [Репликация PostgreSQL](../../06-databases/database-systems-catalog/postgresql/06-replication.md)
+- [Шардирование PostgreSQL](../../06-databases/database-systems-catalog/postgresql/12-sharding.md)
+- [Idempotency](../reliability-patterns/06-idempotency.md)
+- [Saga и Transactional Outbox](../../04-architecture-and-patterns/patterns/09-saga-and-outbox.md)
