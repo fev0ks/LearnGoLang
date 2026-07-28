@@ -4,6 +4,7 @@
 
 ## Категории
 
+- [Алгоритмические задачи с собеседований](./company-algorithmic-tasks.md) — 19 задач на массивы, hash map, два указателя, heap, графы и деревья; решения скрыты для самостоятельной тренировки
 - [Concurrency](./concurrency/) — горутины, каналы, синхронизация. **Самое частое для Go.**
 - [Data Structures](./data-structures/) — LRU cache, top-K (heap), bloom filter, trie, sliding window counter
 - [System Primitives](./system-primitives/) — connection pool, retry, circuit breaker, distributed lock, idempotency
