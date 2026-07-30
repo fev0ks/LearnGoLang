@@ -1,9 +1,5 @@
 # Историческая map до Go 1.24: hmap и buckets
 
-Эта глава описывает реализацию Go 1.23 и ниже. Она полезна для чтения старых статей и интервью, но современный runtime использует [Swiss Tables](./02-swiss-tables-since-1.24.md).
-
-Главная идея этой реализации: hash выбирает bucket из восьми slots; при коллизиях bucket получает overflow chain, а рост постепенно переносит старые buckets в новый массив.
-
 ## Содержание
 
 - [Ментальная модель](#ментальная-модель)
@@ -20,6 +16,12 @@
 - [Что объясняет эта модель](#что-объясняет-эта-модель)
 - [Сравнение со Swiss Tables](#сравнение-со-swiss-tables)
 - [Interview-ready answer](#interview-ready-answer)
+
+Эта глава описывает реализацию Go 1.23 и ниже. Она полезна для чтения старых статей и интервью, но современный runtime использует [Swiss Tables](./01-swiss-tables-since-1.24.md) — их и стоит прочитать первыми.
+
+Главная идея прежней реализации: hash выбирает bucket из восьми slots; при коллизиях bucket получает overflow chain, а рост постепенно переносит старые buckets в новый массив.
+
+---
 
 ## Ментальная модель
 
@@ -67,9 +69,11 @@ type bmap struct {
 }
 ```
 
-Это иллюстрация layout Go 1.23, а не типы для application code. Runtime использует `unsafe` и metadata конкретных `K`/`V`, чтобы вычислять offsets.
+Это иллюстрация layout Go 1.23, а не типы для коде приложения. Runtime использует `unsafe` и metadata конкретных `K`/`V`, чтобы вычислять offsets.
 
 </details>
+
+---
 
 ## Что хранит hmap
 
@@ -87,7 +91,7 @@ type bmap struct {
 | `nevacuate` | Номер следующего старого bucket, который runtime планирует эвакуировать |
 | `extra` | Дополнительные ссылки на overflow buckets и свободные buckets |
 
-Seed хранится отдельно для каждой map. Поэтому одинаковые keys в двух разных maps не обязаны попадать в одинаковые buckets. Это усложняет атаки, которые пытаются заранее подобрать множество keys с одинаковыми hashes, и не позволяет application code полагаться на внутреннее расположение entries.
+Seed хранится отдельно для каждой map. Поэтому одинаковые keys в двух разных maps не обязаны попадать в одинаковые buckets. Это усложняет атаки, которые пытаются заранее подобрать множество keys с одинаковыми hashes, и не позволяет коде приложения полагаться на внутреннее расположение entries.
 
 ```text
 m1.hash0 = 0xA17F...  ─┐
@@ -96,6 +100,8 @@ m2.hash0 = 0x03C2...  ─┘
 ```
 
 `B` описывает только число **основных** buckets. Overflow buckets в `1 << B` не входят.
+
+---
 
 ## Как устроен bmap
 
@@ -134,7 +140,7 @@ Keys и values лежат не как восемь чередующихся па
 
 - scan metadata остаётся коротким;
 - часто весь bucket или значительная его часть помещается в небольшое число cache lines;
-- при умеренных collisions не нужна отдельная allocation на каждый entry;
+- при умеренных коллизиях не нужна отдельная allocation на каждый entry;
 - стоимость последовательного просмотра ограничена восемью slots до перехода в overflow.
 
 Это не универсальное «идеальное число» и не обещание языка. В Go 1.24 реализация меняется, хотя новая group тоже содержит восемь slots.
@@ -157,6 +163,8 @@ large key: slot -> [ *key ] ──> [ key bytes in separate allocation ]
 
 </details>
 
+---
+
 ## Как выполняется lookup
 
 Для `value, ok := m[key]` runtime делает примерно следующее:
@@ -174,7 +182,7 @@ hash = 10110110 ... 01101
        tophash         B low bits -> bucket index
 ```
 
-Hash collision не означает равенство. `tophash` лишь отбрасывает большинство неподходящих slots; candidate key всё равно сравнивается полностью.
+Совпадение hash не означает равенство ключей. `tophash` лишь отбрасывает большинство неподходящих slots; candidate key всё равно сравнивается полностью.
 
 Упрощённо lookup можно представить так:
 
@@ -243,6 +251,8 @@ new bucket 1+2^B ───┘
 
 Так lookup находит key независимо от того, успел ли runtime перенести конкретный bucket.
 
+---
+
 ## Зачем нужен tophash
 
 Сравнение большого string или struct key дороже сравнения одного metadata byte. Поэтому bucket хранит маленький fingerprint hash для каждого slot.
@@ -271,6 +281,8 @@ new bucket 1+2^B ───┘
 ```
 
 Точные числа — implementation details Go 1.23, но сами роли помогают понять lookup, delete и grow.
+
+---
 
 ## Insert и overflow
 
@@ -339,7 +351,7 @@ again:
 
 </details>
 
-Overflow chains решают collisions просто, но ухудшают locality: lookup переходит по pointers между отдельными buckets. Большое число overflow buckets может запустить same-size grow — перепаковку без увеличения числа основных buckets.
+Overflow chains решают коллизии просто, но ухудшают локальность: lookup переходит по указателям между отдельными buckets. Большое число overflow buckets может запустить same-size grow — перепаковку без увеличения числа основных buckets.
 
 ```text
 main bucket i        overflow #1         overflow #2
@@ -349,7 +361,7 @@ main bucket i        overflow #1         overflow #2
 └─────────────┘      └─────────────┘     └─────────────┘
 ```
 
-Overflow не обязательно означает плохую hash-функцию: несколько buckets могут переполниться и при нормальном распределении. Проблемой становятся многочисленные или длинные chains, потому что они добавляют pointer chasing, comparisons и cache misses.
+Overflow не обязательно означает плохую hash-функцию: несколько buckets могут переполниться и при нормальном распределении. Проблемой становятся многочисленные или длинные chains, потому что они добавляют переходы по указателям, лишние сравнения и промахи кэша.
 
 ### Когда начинается grow
 
@@ -360,7 +372,7 @@ Legacy runtime проверяет две разные причины:
 | Средняя заполненность становится слишком высокой | Grow в два раза | Даёт entries больше основных buckets |
 | Overflow buckets становится слишком много при невысокой заполненности | Same-size grow | Перепаковывает entries и убирает накопившиеся пустые overflow buckets |
 
-В Go 1.23 порог load factor составляет примерно `6.5` entries на основной bucket, причём `count` также должен превышать восемь. Это параметр реализации, а не основание заранее вычислять точное число allocations в application code.
+В Go 1.23 порог load factor составляет примерно `6.5` entries на основной bucket, причём `count` также должен превышать восемь. Это параметр реализации, а не основание заранее вычислять точное число allocations в коде приложения.
 
 Same-size grow нужен, например, после такой истории:
 
@@ -371,6 +383,8 @@ Same-size grow нужен, например, после такой истори�
 4. len(map) уже невелик, но выделенные overflow buckets и разреженные chains остаются.
 5. Следующая серия writes запускает перепаковку в то же число основных buckets.
 ```
+
+---
 
 ## Почему существует mapextra
 
@@ -391,6 +405,8 @@ type mapextra struct {
 - `nextOverflow` помогает переиспользовать заранее выделенные overflow buckets.
 
 Это хороший пример связи runtime layout с GC: отсутствие pointers в `K` и `V` меняет не семантику map, а способ, которым runtime сохраняет служебные allocations живыми.
+
+---
 
 ## Инкрементальный рост
 
@@ -434,6 +450,8 @@ old bucket i
 ```
 
 Runtime не начинает следующий grow, пока текущая evacuation не завершена. Это ограничивает число одновременно живых поколений bucket arrays двумя.
+
+---
 
 ## Как runtime эвакуирует bucket
 
@@ -526,6 +544,8 @@ m["a"] = p
 
 </details>
 
+---
+
 ## Delete и память
 
 `delete(m, key)` находит slot, очищает key/value для GC и отмечает metadata как empty. Bucket allocation при этом не исчезает.
@@ -557,7 +577,7 @@ for i := range 1_000_000 {
 for i := range 1_000_000 {
 	delete(m, i)
 }
-fmt.Println(len(m)) // 0; это ничего не обещает о retained backing memory
+fmt.Println(len(m)) // 0; это ничего не обещает об удержанной памяти
 ```
 
 Если долгоживущий cache проходит через большой peak, практическое решение — заменить map новым экземпляром и позволить GC собрать старый. Возврат RSS операционной системе всё равно не гарантирован немедленно.
@@ -581,6 +601,8 @@ func (c *Cache) Reset() {
 
 </details>
 
+---
+
 ## Как работает итератор
 
 Итератор `range` хранит больше состояния, чем просто индекс текущего bucket:
@@ -591,7 +613,7 @@ func (c *Cache) Reset() {
 - текущий bucket и overflow chain;
 - состояние, необходимое для grow и уже эвакуированных entries.
 
-Случайный старт и offset мешают application code случайно привыкнуть к одному порядку. Но правильный контракт ещё проще: specification не гарантирует порядок iteration, поэтому нельзя использовать детали runtime для его предсказания.
+Случайный старт и offset мешают коде приложения случайно привыкнуть к одному порядку. Но правильный контракт ещё проще: specification не гарантирует порядок iteration, поэтому нельзя использовать детали runtime для его предсказания.
 
 Во время grow iterator должен избегать потери и повторной выдачи entries. Для этого он учитывает старый массив и evacuation state. Из-за этой логики `hmap.flags` также сообщает runtime, что активна iteration и что старые overflow buckets пока могут понадобиться.
 
@@ -615,29 +637,35 @@ func (c *Cache) Reset() {
 
 </details>
 
+---
+
 ## Что объясняет эта модель
 
 Историческая реализация полезно объясняет:
 
 - зачем hash делится на bucket index и fingerprint;
-- почему collision требует полного сравнения key;
-- как overflow ухудшает locality;
+- почему коллизия требует полного сравнения key;
+- как overflow ухудшает локальность;
 - как работает incremental grow;
 - почему runtime layout нельзя считать API.
 
 Но пользовательская семантика не выводится из `hmap`: правила nil map, `range`, comparable keys и concurrency задаются language/runtime contract и разобраны в [gotchas](./03-puzzles-and-gotchas.md).
 
+---
+
 ## Сравнение со Swiss Tables
 
 | | hmap до Go 1.24 | Swiss Tables с Go 1.24 |
 | --- | --- | --- |
-| Collision strategy | bucket + overflow chaining | open addressing по groups |
+| Стратегия коллизий | bucket + overflow chaining | open addressing по groups |
 | Metadata | `tophash[8]` | 8 control bytes с H2/state |
 | Candidate scan | slots bucket по одному | metadata восьми slots проверяется вместе |
 | Growth | incremental evacuation старого массива | rebuild одной table; большие maps split на tables |
 | Deleted slot | empty metadata | empty или tombstone |
 
-В обоих случаях hash только сужает поиск, а равенство подтверждает full key comparison.
+В обоих случаях hash только сужает поиск, а равенство подтверждает полное сравнение ключей.
+
+---
 
 ## Interview-ready answer
 
@@ -647,7 +675,7 @@ func (c *Cache) Reset() {
 
 **2. Зачем нужны overflow buckets?**
 
-- Они хранят элементы, которым не хватает восьми slots основного bucket. Это простое collision handling, но длинная chain ухудшает cache locality и lookup.
+- Они хранят элементы, которым не хватает восьми slots основного bucket. Это простая обработка коллизий, но длинная chain ухудшает локальность кэша и lookup.
 
 **3. Что хранится в `tophash`?**
 
@@ -680,6 +708,8 @@ func (c *Cache) Reset() {
 **10. Почему нельзя взять адрес `m[key]`?**
 
 - Map element по правилам языка неaddressable. В legacy-модели grow физически переносит entries между buckets, поэтому стабильный pointer на slot мешает реализации. Для struct value используют read-modify-write или хранят `*T` как value.
+
+---
 
 ## Официальные источники
 

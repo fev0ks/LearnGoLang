@@ -13,7 +13,7 @@
 - [07. Strings](./07-strings.md) — string header (ptr/len), immutability, byte vs rune, UTF-8, len=байты, range по рунам, конверсии и аллокации, substring retention, strings.Builder, string(int) ловушка, unsafe-конверсии
 - [08. Unsafe And Low-Level](./08-unsafe-and-low-level.md) — unsafe.Pointer vs uintptr, Sizeof/Alignof/Offsetof, padding/alignment, zero-copy string↔[]byte, layout, где используется в рантайме
 - [Runtime Scheduler](./runtime-scheduler/) — GMP scheduler, syscall handoff, netpoller (подраздел)
-- [Map Internals](./map-internals/) — актуальные Swiss Tables, поведение map, `sync.Map` и короткая история hmap (подраздел)
+- [Map Internals](./map-internals/) — актуальные Swiss Tables, поведение map, `sync.Map` и исторические реализации до Go 1.24 (подраздел)
 - [Memory Internals](./memory-internals/) — стек и heap, аллокатор, escape analysis, GC (подраздел)
 - [Concurrency & Performance](./concurrency-and-performance/) — goroutines/channels, sync-примитивы, worker pool, context (подраздел)
 - [Profiling](./profiling/) — pprof, CPU/memory/goroutine/block/mutex профили, execution tracer, benchmarks (подраздел)
@@ -29,12 +29,12 @@
 
 ## Map Internals (подраздел)
 
-Сначала актуальная реализация и наблюдаемое поведение; старая hmap оставлена как исторический контекст:
+`sync.Map` вынесена в отдельную подпапку без номера. Главы про builtin map идут по порядку от актуальной реализации к исторической, затем к задачкам на пользовательскую семантику:
 
-- [02. Swiss Tables](./map-internals/02-swiss-tables-since-1.24.md) — с Go 1.24: groups, control bytes, H1/H2, probing, tombstones и directory
+- [sync.Map](./map-internals/sync-map/README.md) — выбор структуры, API, concurrent hash-trie, практические приёмы и прежняя read/dirty реализация
+- [01. Swiss Tables](./map-internals/01-swiss-tables-since-1.24.md) — с Go 1.24: groups, control bytes, H1/H2, probing, tombstones и directory
+- [02. Историческая hmap + bmap](./map-internals/02-hmap-before-1.24.md) — Go 1.23 и ниже: buckets, tophash, overflow chains и incremental evacuation
 - [03. Задачки и подводные камни](./map-internals/03-puzzles-and-gotchas.md) — nil map, addressability, range, comparable keys, NaN и concurrency
-- [04. sync.Map](./map-internals/04-sync-map.md) — выбор структуры, API и concurrent hash-trie с Go 1.24
-- [01. Историческая hmap + bmap](./map-internals/01-hmap-before-1.24.md) — Go 1.23 и ниже: buckets, tophash, overflow chains и incremental evacuation
 
 ## Memory Internals (подраздел)
 

@@ -1,7 +1,5 @@
 # Map: задачи и подводные камни
 
-Здесь важна семантика языка, а не Swiss Table layout. Сначала попробуйте ответить сами, затем раскройте `<details>`.
-
 ## Содержание
 
 - [Задача 1: missing key и nil map](#задача-1-missing-key-и-nil-map)
@@ -14,6 +12,10 @@
 - [Задача 8: concurrent access](#задача-8-concurrent-access)
 - [Задача 9: delete, clear и память](#задача-9-delete-clear-и-память)
 - [Interview-ready answer](#interview-ready-answer)
+
+Все задачи ниже проверяют семантику языка, а не раскладку Swiss Table: ответы одинаковы и для Go 1.23, и для Go 1.26. Формат — сначала попытка ответить самостоятельно, затем разбор под `<details>`.
+
+---
 
 ## Задача 1: missing key и nil map
 
@@ -47,6 +49,8 @@ counts[word]++ // missing key читается как 0, затем записы
 ```
 
 </details>
+
+---
 
 ## Задача 2: значение map не addressable
 
@@ -82,6 +86,8 @@ Pointer-вариант меняет ownership, nil handling и allocation profil
 По той же причине нельзя вызвать pointer receiver method на `map[K]T` element, если для вызова compiler должен взять адрес элемента.
 
 </details>
+
+---
 
 ## Задача 3: range и модификация
 
@@ -121,6 +127,8 @@ slices.Sort(keys)
 
 </details>
 
+---
+
 ## Задача 4: присваивание не клонирует map
 
 ```go
@@ -148,6 +156,8 @@ fmt.Println(first["x"]) // 1
 `maps.Clone` не делает deep copy значений: pointers, slices и вложенные maps внутри values продолжат разделять underlying data.
 
 </details>
+
+---
 
 ## Задача 5: comparable и interface key
 
@@ -178,6 +188,8 @@ panic: runtime error: hash of unhashable type []int
 
 </details>
 
+---
+
 ## Задача 6: NaN как key
 
 ```go
@@ -199,10 +211,12 @@ fmt.Println(len(m))
 Типичный результат:
 
 ```text
-2
-
-2
+2          <- len(m): обе вставки создали отдельные entries
+           <- m[nan]: пустая строка, zero value для string
+2          <- len(m) после delete: ничего не удалилось
 ```
+
+Вторая строка вывода действительно пустая — это не опечатка в примере, а zero value типа `string`, который возвращает промах по ключу.
 
 IEEE-754 задаёт `NaN != NaN`. Поэтому повторная вставка не находит existing key, lookup возвращает zero value, а `delete` тоже не находит equality match.
 
@@ -211,6 +225,8 @@ IEEE-754 задаёт `NaN != NaN`. Поэтому повторная встав
 Практическое правило: normalise/forbid NaN до использования float как key.
 
 </details>
+
+---
 
 ## Задача 7: сравнение maps
 
@@ -232,11 +248,13 @@ fmt.Println(left == right)
 equal := maps.Equal(left, right)
 ```
 
-Если values требуют custom equality, используйте `maps.EqualFunc`. Помните, что NaN и pointer-containing values подчиняются equality выбранной функции.
+Если values требуют custom equality, подходит `maps.EqualFunc`. NaN и values с указателями внутри при этом подчиняются equality выбранной функции, а не `==`.
 
 Следствие: map нельзя использовать как key другой map; struct с map field тоже не comparable.
 
 </details>
+
+---
 
 ## Задача 8: concurrent access
 
@@ -284,6 +302,8 @@ go test -race ./...
 
 </details>
 
+---
+
 ## Задача 9: delete, clear и память
 
 ```go
@@ -296,7 +316,7 @@ clear(m)
 fmt.Println(len(m))
 ```
 
-Гарантирует ли `len(m)==0`, что backing memory вернулась ОС?
+Гарантирует ли `len(m)==0`, что выделенная память вернулась ОС?
 
 <details>
 <summary>Ответ</summary>
@@ -314,6 +334,8 @@ m = make(map[int][]byte)
 После этого старая map становится eligible for GC, если других references нет. Даже после GC runtime может оставить освобождённые pages себе, поэтому решение проверяют по heap profile и RSS, а не по `len`.
 
 </details>
+
+---
 
 ## Interview-ready answer
 
@@ -336,6 +358,24 @@ m = make(map[int][]byte)
 **5. Безопасна ли builtin map для concurrency?**
 
 - Только если нет concurrent write либо доступ синхронизирован. Runtime fatal — best-effort detection, не механизм защиты; корректность дают happens-before и race-free program.
+
+**6. Что происходит при `second := first` для map?**
+
+- Копируется небольшое map value, а записи остаются общими — запись через `second` видна через `first`. Независимая копия — `maps.Clone`, но она shallow: вложенные slices, maps и объекты за pointer продолжают разделяться.
+
+**7. Почему нельзя написать `left == right` для двух maps?**
+
+- Map сравнивается только с `nil`, полноценного `==` у неё нет. Содержимое сравнивают через `maps.Equal` или `maps.EqualFunc`. Следствие — map нельзя использовать как ключ другой map, а структура с полем-map не comparable.
+
+**8. Что не так с `NaN` в роли ключа?**
+
+- По IEEE-754 `NaN != NaN`, поэтому каждая вставка создаёт новую запись, lookup по тому же значению её не находит, и `delete` тоже. Такие записи убирает только `clear` или замена map. Практическое правило — запрещать или нормализовать NaN до использования float как ключа.
+
+**9. Освобождает ли `delete` или `clear` память map?**
+
+- Записи исчезают и значения перестают удерживаться GC, но capacity и RSS ничего не обещают: текущая реализация сохраняет внутренние tables для переиспользования. После редкого большого пика map пересоздают, а эффект проверяют по heap profile и RSS, а не по `len`.
+
+---
 
 ## Официальные источники
 

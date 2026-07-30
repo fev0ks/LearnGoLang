@@ -637,7 +637,7 @@ n := 0; _ = 1 / n                     // panic: runtime error: integer divide by
 
 `throw` нельзя обработать — его можно только **не допустить**:
 
-- map под конкуренцией → `sync.RWMutex` / `sync.Map` (детали детектора — в [01-hmap-before-1.24](./map-internals/01-hmap-before-1.24.md), раздел «Concurrent access»);
+- map под конкуренцией → `sync.RWMutex` / `sync.Map` (детали детектора — в [02-hmap-before-1.24](./map-internals/02-hmap-before-1.24.md), раздел «Concurrent access»);
 - гонки искать через `go test -race` (детектор гонок надёжнее встроенной проверки map);
 - дедлоки — следить за тем, чтобы у каждого `<-ch`/`ch<-` был партнёр, и за порядком взятия локов;
 - `recover()` в этом не помощник: он для `panic`, а не для `fatal error`.
