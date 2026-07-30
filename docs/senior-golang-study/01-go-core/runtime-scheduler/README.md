@@ -1,66 +1,77 @@
 # Runtime Scheduler
 
-Раздел объясняет, как Go runtime исполняет множество goroutines поверх меньшего числа OS threads и что происходит, когда goroutine ждёт syscall, network I/O или timer.
+Раздел объясняет, как runtime Go исполняет множество goroutines поверх меньшего числа потоков операционной системы и что происходит, когда goroutine ждёт системный вызов, сетевой ввод-вывод или таймер.
 
-Описание ориентировано на Go 1.25. Детали `runtime` — implementation details, а не часть language specification: названия функций, очереди и эвристики могут меняться между версиями.
+Описание ориентировано на Go 1.26. Детали `runtime` — реализация, а не часть спецификации языка: названия функций, очереди и эвристики могут меняться между версиями.
+
+---
 
 ## Материалы
 
-1. [Scheduler и preemption](./01-scheduler-and-preemption.md) — mental model G/M/P, run queues, work stealing, preemption, `sysmon`, `GOMAXPROCS`.
-2. [Syscall](./02-syscall.md) — почему blocking syscall удерживает OS thread, как runtime передаёт P и откуда берётся thread exhaustion.
-3. [Netpoller](./03-netpoller.md) — как network I/O паркует goroutine без отдельного blocked thread на каждое соединение.
-4. [Timers](./04-timers.md) — почему `time.Sleep` не блокирует M, где хранятся timers и что изменилось в Go 1.23.
-5. 🧪 [schedtrace demo](./examples/schedtrace/) — наблюдаем `GOMAXPROCS`, run queues, waiting goroutines и async preemption.
+1. [Scheduler и preemption](./01-scheduler-and-preemption.md) — ментальная модель G/M/P, очереди готовых goroutines, work stealing, вытеснение, `sysmon`, `GOMAXPROCS`.
+2. [Syscall](./02-syscall.md) — почему блокирующий системный вызов удерживает поток, как runtime передаёт P и откуда берётся исчерпание потоков.
+3. [Netpoller](./03-netpoller.md) — как сетевой ввод-вывод паркует goroutine без отдельного заблокированного потока на каждое соединение.
+4. [Timers](./04-timers.md) — почему `time.Sleep` не блокирует M, где хранятся таймеры и что изменилось в Go 1.23.
+5. 🧪 [schedtrace demo](./examples/schedtrace/) — наблюдаем `GOMAXPROCS`, очереди, ждущие goroutines и асинхронное вытеснение.
+
+---
 
 ## Одна схема на весь раздел
 
 ```mermaid
 flowchart LR
-    G1["G: runnable"] --> P["P: local run queue"]
-    P --> M["M: OS thread"]
-    M --> CPU["executes Go code"]
+    G1["G: готова"] --> P["P: локальная очередь"]
+    P --> M["M: поток ОС"]
+    M --> CPU["исполняет код на Go"]
 
-    CPU -->|blocking syscall| SYS["M waits in kernel"]
-    SYS -->|return| G1
+    CPU -->|блокирующий системный вызов| SYS["M ждёт в ядре"]
+    SYS -->|возврат| G1
 
-    CPU -->|network not ready| NP["netpoller parks G"]
-    NP -->|fd ready / deadline / close| G1
+    CPU -->|сеть не готова| NP["netpoller паркует G"]
+    NP -->|дескриптор готов / дедлайн / закрытие| G1
 
-    CPU -->|time.Sleep / Timer| T["runtime timer parks G"]
-    T -->|deadline reached| G1
+    CPU -->|time.Sleep или Timer| T["таймер runtime паркует G"]
+    T -->|наступил срок| G1
 ```
 
 Ключевая разница:
 
 | Ожидание | Что ждёт | Что происходит с P |
 | --- | --- | --- |
-| regular blocking syscall / cgo | OS thread M | P может перейти к другому M |
-| network I/O через netpoller | только goroutine G | M и P исполняют другую работу |
-| timer / `time.Sleep` | goroutine G | M и P исполняют другую работу |
+| обычный блокирующий системный вызов или cgo | поток M | P зарезервирован за M, а после перехвата уходит другому M |
+| сетевой ввод-вывод через netpoller | только goroutine | M и P сразу исполняют другую работу |
+| таймер или `time.Sleep` | только goroutine | M и P сразу исполняют другую работу |
+
+---
 
 ## Что нужно уметь объяснить на интервью
 
 - зачем в модели нужен P, если код физически исполняет M;
-- почему `GOMAXPROCS` ограничивает parallel Go execution, но не число threads;
-- как local queues и work stealing уменьшают contention;
-- почему долгий blocking syscall может увеличить число M;
-- почему тысячи network connections не требуют тысячи blocked threads;
-- чем readiness notification отличается от готового application message;
-- почему `time.Sleep` паркует G, а не M;
-- как preemption не даёт CPU-bound goroutine монополизировать P;
-- как `schedtrace`, goroutine dump и execution trace помогают диагностике.
+- почему `GOMAXPROCS` ограничивает параллельное исполнение кода на Go, но не число потоков;
+- как локальные очереди и work stealing уменьшают конкуренцию за блокировку;
+- почему долгий блокирующий системный вызов может увеличить число потоков;
+- почему тысячи сетевых соединений не требуют тысячи заблокированных потоков;
+- почему ядро не будит goroutine само и в какой момент runtime забирает готовые события из поллера;
+- чем уведомление о готовности отличается от готового сообщения приложения;
+- почему `time.Sleep` паркует goroutine, а не поток;
+- как вытеснение не даёт goroutine с тяжёлыми вычислениями монополизировать P;
+- как `schedtrace`, дамп goroutines и трассировка исполнения помогают диагностике.
+
+---
 
 ## Практические эксперименты
 
 | Что проверить | Где |
 | --- | --- |
-| concurrency без FIFO и async preemption | [scheduler examples](./01-scheduler-and-preemption.md#run-queues-и-work-stealing) |
-| bounded file I/O и рост OS threads | [syscall examples](./02-syscall.md#почему-context-не-всегда-отменяет-syscall) |
-| TCP framing, deadlines и backpressure | [netpoller examples](./03-netpoller.md#readiness-не-равно-сообщению) |
-| Reset, debounce и dropped ticker events | [timer examples](./04-timers.md#что-изменилось-в-go-123) |
-| live scheduler queues и execution trace | [schedtrace playground](./examples/schedtrace/) |
+| конкурентность без FIFO и асинхронное вытеснение | [scheduler examples](./01-scheduler-and-preemption.md) |
+| ограниченный файловый ввод-вывод и рост числа потоков | [syscall examples](./02-syscall.md) |
+| разбиение на кадры в TCP, дедлайны и backpressure | [netpoller examples](./03-netpoller.md) |
+| Reset, debounce и пропущенные события тикера | [timer examples](./04-timers.md) |
+| очереди планировщика вживую и трассировка исполнения | [schedtrace playground](./examples/schedtrace/) |
 
-Расширенные листинги спрятаны под `<details>`, чтобы теория читалась последовательно, а experiments оставались рядом с объясняемым механизмом.
+Расширенные листинги спрятаны под `<details>`, чтобы теория читалась последовательно, а эксперименты оставались рядом с объясняемым механизмом.
+
+---
 
 ## Официальные источники
 
