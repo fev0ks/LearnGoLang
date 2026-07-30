@@ -14,7 +14,7 @@
 - [gRPC Streaming против брокера](#grpc-streaming-против-брокера)
 - [Interview-ready answer](#interview-ready-answer)
 
-gRPC streaming — альтернатива брокеру для связи сервис-сервис в реальном времени: постоянное соединение HTTP/2 вместо опроса очереди. Основы gRPC — [01-grpc.md](../08-networking-and-api/protocols/01-grpc.md), механика потоков и управления окнами HTTP/2 — [14-http2-and-http3.md](../08-networking-and-api/protocols/14-http2-and-http3.md).
+gRPC streaming — альтернатива брокеру для связи сервис-сервис в реальном времени: постоянное соединение HTTP/2 вместо опроса очереди. Основы gRPC — [06-grpc.md](../08-networking-and-api/protocols/06-grpc.md), механика потоков и управления окнами HTTP/2 — [02-http2-and-http3.md](../08-networking-and-api/protocols/02-http2-and-http3.md).
 
 ---
 
@@ -352,7 +352,7 @@ func (s *Server) subscribeBackplane() {
 
 ## Backpressure в gRPC streams
 
-У HTTP/2 есть встроенное управление потоком по окнам: получатель объявляет, сколько байт готов принять, и отправитель останавливается, когда окно исчерпано. Механика окон разобрана в [14-http2-and-http3.md](../08-networking-and-api/protocols/14-http2-and-http3.md).
+У HTTP/2 есть встроенное управление потоком по окнам: получатель объявляет, сколько байт готов принять, и отправитель останавливается, когда окно исчерпано. Механика окон разобрана в [02-http2-and-http3.md](../08-networking-and-api/protocols/02-http2-and-http3.md).
 
 Для сервиса это означает, что `Send` — потенциально блокирующий вызов, и вся конструкция из раздела про сервер существует именно из-за этого. Три уровня, на которых давление нужно куда-то девать:
 
@@ -364,7 +364,7 @@ func (s *Server) subscribeBackplane() {
 
 Выбор политики при переполнении буфера зависит от смысла данных. Для живых обновлений и статусов правильно отбросить сообщение: следующее всё равно перезапишет состояние. Для чата или ленты событий отбрасывание незаметно ломает историю, и честнее отключить клиента, чтобы он переподключился и загрузил состояние заново.
 
-Hub-паттерн с буфером на клиента и горутинами-писателями разобран в [05-websocket.md](../08-networking-and-api/protocols/05-websocket.md), backplane на Redis — в [05-redis-pubsub.md](./05-redis-pubsub.md).
+Hub-паттерн с буфером на клиента и горутинами-писателями разобран в [10-websocket.md](../08-networking-and-api/protocols/10-websocket.md), backplane на Redis — в [05-redis-pubsub.md](./05-redis-pubsub.md).
 
 ---
 
