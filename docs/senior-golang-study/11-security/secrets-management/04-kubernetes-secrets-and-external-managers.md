@@ -70,9 +70,11 @@ volumes:
 ## Ограничения нативного Secret
 
 - **Plaintext в etcd** — без дополнительной настройки (`EncryptionConfiguration`) секреты в etcd не зашифрованы
-- **Нет аудита доступа** — стандартный Kubernetes audit log не отслеживает кто читал Secret
-- **Нет ротации** — изменение Secret не перезапускает Pod автоматически (нужен `reloader`)
+- **Аудит доступа не включён по умолчанию** — audit log умеет записывать `get`/`list`/`watch` по секретам, но для этого нужна политика аудита нужного уровня; из коробки таких записей нет
+- **Ротация не доходит до процесса автоматически** — значение в томе `kubelet` обновит асинхронно, а переменная окружения останется прежней до пересоздания Pod (отсюда `reloader` или checksum-аннотация)
 - **Нет GitOps** — хранить plaintext YAML с секретами в git нельзя
+
+Как именно значение доходит до процесса — через env, том или CSI-драйвер — разобрано в [материале про доставку конфигурации и секретов](../../10-devops-and-observability/kubernetes/10-config-and-secret-delivery.md).
 
 ---
 
@@ -81,7 +83,7 @@ volumes:
 [external-secrets.io](https://external-secrets.io) — CRD, который синхронизирует секреты из внешнего хранилища в Kubernetes Secret:
 
 ```yaml
-apiVersion: external-secrets.io/v1beta1
+apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
   name: app-secrets
@@ -102,7 +104,7 @@ spec:
 ```
 
 ```yaml
-apiVersion: external-secrets.io/v1beta1
+apiVersion: external-secrets.io/v1
 kind: ClusterSecretStore
 metadata:
   name: gcp-secret-manager
@@ -149,7 +151,7 @@ spec:
     JWT_SECRET: AgBy3i4OJSWK+PiTySYZZA9rO...
 ```
 
-**SOPS** ([mozilla/sops](https://github.com/mozilla/sops)) — шифрует YAML/JSON через KMS/PGP/age:
+**SOPS** ([getsops/sops](https://github.com/getsops/sops), проект передан в CNCF) — шифрует YAML/JSON через KMS/PGP/age:
 
 ```bash
 sops --encrypt --gcp-kms projects/my-project/locations/global/keyRings/my-ring/cryptoKeys/my-key \
@@ -162,12 +164,16 @@ sops --encrypt --gcp-kms projects/my-project/locations/global/keyRings/my-ring/c
 
 ## Vault
 
-[HashiCorp Vault](https://www.vaultproject.io/) — полноценный secret management platform:
+[HashiCorp Vault](https://www.vaultproject.io/) — полноценная платформа управления секретами:
 
 **Dynamic secrets** — Vault генерирует временные credentials специально для конкретного Pod:
 
 ```go
-import vault "github.com/hashicorp/vault/api"
+import (
+    "fmt"
+
+    vault "github.com/hashicorp/vault/api"
+)
 
 func loadFromVault(addr, token, path string) (map[string]string, error) {
     cfg := vault.DefaultConfig()
