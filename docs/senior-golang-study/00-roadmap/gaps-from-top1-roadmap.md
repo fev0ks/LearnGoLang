@@ -65,7 +65,7 @@
 | 1 | CI/CD пайплайны (GitHub Actions/GitLab CI, тесты на PR, secrets, zero-downtime) | ✅ | `10-devops-and-observability/ci-cd/` (GitHub Actions, GitLab CI) |
 | 2 | Логи и observability (JSON, correlation IDs, уровни, Grafana+Loki/Datadog, алерты) | ✅ | `10-devops-and-observability/logging-and-log-shipping/`, `tracing-and-opentelemetry/`, `prometheus-and-metrics/` |
 | 3 | Облако — одна платформа (AWS: EC2, RDS, S3, SQS, IAM, VPC, security groups, managed vs self-hosted) | ✅ | `10-devops-and-observability/cloud/01-aws-core-services.md` + `02-cloud-cost-and-architecture.md` |
-| 4 | Профилировка и нагрузка (flame graphs, slow query log, p95/p99) | ✅ | `01-go-core/profiling/`, `10-devops-and-observability/incident-investigation-and-profiling/` |
+| 4 | Профилировка и нагрузка (flame graphs, slow query log, p95/p99) | ✅ | `01-go-core/profiling/`, `10-devops-and-observability/incident-response-and-investigation/` |
 | 4a | **Нагрузочное тестирование** (k6/Locust, bottleneck → фикс → перетест) | ❌ | **Создать:** `09-testing-and-quality/12-load-testing.md` — k6 примеры, интерпретация результатов, p95/p99 |
 | 5 | Безопасность вглубь — OWASP Top 10 (SQL injection, XSS, SSRF, IDOR + AI-аудит) | ✅ | `11-security/owasp-top10/` (SQL injection, XSS, SSRF). IDOR — в `authentication/07-authorization-and-rbac.md` |
 | 6 | **Edge и Serverless** (Cloudflare Workers, AWS Lambda, cold start, лимиты, биллинг) | ❌ | **Создать:** `10-devops-and-observability/serverless/` или `05-system-design/edge-and-serverless/` |
@@ -83,7 +83,7 @@
 | 4 | **RAG и vector БД** (pgvector, Qdrant, Weaviate, эмбеддинги, чанкинг, гибридный поиск, стейл-данные, prompt injection через документы) | 🟡 | `17-llm-and-ai-integration/rag/01-rag-fundamentals.md` есть. **Создать:** vector БД, chunking/embeddings, hybrid search, pitfalls |
 | 5 | Очереди и event streaming (Kafka: партиции, consumer groups, exactly-once, event sourcing, DLQ) | ✅ | `07-message-brokers-and-streaming/01-kafka.md` |
 | 6 | Микросервисы — когда и как (gRPC vs REST, service mesh, distributed tracing, "монолит сначала") | ✅ | `04-architecture-and-patterns/service-topologies/`, `03-go-libraries-and-ecosystem/grpc/`, `10-devops-and-observability/tracing-and-opentelemetry/` |
-| 7 | Kubernetes — основы (pods, services, deployments, ingress, ConfigMaps, secrets, HPA) | ✅ | `10-devops-and-observability/kubernetes/` (01–07) |
+| 7 | Kubernetes — основы (pods, services, deployments, ingress, ConfigMaps, secrets, HPA) | ✅ | `10-devops-and-observability/kubernetes/` (01–09) |
 | 8 | Reliability engineering (SLO, SLI, error budgets, circuit breakers, chaos engineering, graceful degradation, постмортемы) | ✅ | `05-system-design/reliability-patterns/` — все включая `08-slo-sli-error-budgets.md`, `09-postmortem.md`, `10-chaos-engineering.md`, circuit breaker, retries, backoff, idempotency |
 
 ---

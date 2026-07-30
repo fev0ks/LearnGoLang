@@ -65,4 +65,4 @@ GODEBUG=gctrace=1 ./myapp
 - [Scheduler](../../01-go-core/runtime-scheduler/01-scheduler-and-preemption.md) — GMP модель, P handoff, work stealing
 - [Syscall](../../01-go-core/runtime-scheduler/02-syscall.md) — почему file I/O блокирует M
 - [Netpoller](../../01-go-core/runtime-scheduler/03-netpoller.md) — почему network I/O не блокирует M
-- [Incident Investigation](../../10-devops-and-observability/incident-investigation-and-profiling/01-how-to-investigate-production-issues.md) — как профилирование вписывается в общую диагностику
+- [Incident Response Workflow](../../10-devops-and-observability/incident-response-and-investigation/01-incident-response-workflow.md) — как профилирование вписывается в общую диагностику
