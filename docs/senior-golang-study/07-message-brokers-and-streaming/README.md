@@ -4,14 +4,14 @@
 
 ## Материалы
 
-- [01. Kafka](./01-kafka.md) — архитектура (topic/partition/offset/ISR/consumer group), delivery semantics, producer acks/batching, consumer poll loop, franz-go vs sarama, DLQ, log compaction
-- [02. RabbitMQ](./02-rabbitmq.md) — exchange/queue/binding, типы exchange (fanout/direct/topic/headers), ack/nack/prefetch, DLQ, Go publisher/subscriber
-- [03. Redis Streams](./03-redis-streams.md) — XADD/XREADGROUP/XACK, consumer groups, PEL, XCLAIM для failover, Go producer/consumer
-- [04. Redis Pub/Sub](./04-redis-pubsub.md) — PUBLISH/SUBSCRIBE/PSUBSCRIBE, at-most-once, backplane паттерн, Go publisher/subscriber
-- [05. Cloud Pub/Sub](./05-cloud-pubsub.md) — Google Cloud Pub/Sub (topics/subscriptions/ack deadline/DLT), AWS SNS+SQS (fan-out), cloud vs self-hosted
-- [06. gRPC Streaming](./06-grpc-streaming.md) — bidirectional stream как transport, server registry, multi-broker Redis backplane, backpressure
-- [07. Comparison](./07-comparison.md) — большая таблица (включая NATS и cloud), decision tree, типичные ошибки выбора
-- [08. NATS](./08-nats.md) — Core NATS (subjects/wildcards, request-reply, queue groups, at-most-once) vs JetStream (streams/consumers, ack/redelivery, dedup window, KV store), nats.go, когда NATS vs Kafka/RabbitMQ
+- [00. Comparison](./00-comparison.md) — точка входа: decision tree, большая таблица по всем брокерам, каталог реальных задач с выбором инструмента, разборы с числами, эволюция одного кейса под разной нагрузкой, что ломается первым при росте, типичные ошибки выбора
+- [01. Kafka](./01-kafka.md) — архитектура (topic/partition/offset/ISR/consumer group), хранение лога на диске, KRaft, репликация и high watermark, delivery semantics с разбором exactly-once, producer acks/batching, consumer poll loop и static membership, партиционирование, DLQ и retry-топики, compaction и tiered storage, schema evolution
+- [02. RabbitMQ](./02-rabbitmq.md) — exchange/queue/binding, типы exchange, немаршрутизируемые сообщения (mandatory, alternate exchange), confirms/ack/nack/prefetch, порядок и single active consumer, хранение и flow control, quorum queues, Streams, Khepri
+- [03. NATS](./03-nats.md) — Core NATS (subjects/wildcards, request-reply, queue groups, at-most-once) и slow consumer, JetStream (streams/consumers, ack/redelivery, AckWait и MaxAckPending, dedup window, KV store), nats.go, когда NATS вместо Kafka или RabbitMQ
+- [04. Redis Streams](./04-redis-streams.md) — XADD/XREADGROUP/XACK, идентификатор как позиция, consumer groups и PEL, обрезка потока и потеря выданных записей, память и забытые consumers, durability, отставание группы через XINFO, шардирование
+- [05. Redis Pub/Sub](./05-redis-pubsub.md) — PUBLISH/SUBSCRIBE/PSUBSCRIBE, at-most-once, медленный подписчик и лимиты буфера, RESP2 против RESP3, sharded Pub/Sub в кластере, keyspace notifications, backplane-паттерн
+- [06. Cloud Pub/Sub](./06-cloud-pubsub.md) — Google Cloud Pub/Sub (topics/subscriptions/ack deadline/DLT, ordering keys, exactly-once, seek), push против pull, AWS SNS+SQS (fan-out, standard против FIFO, visibility timeout), лимиты и стоимость
+- [07. gRPC Streaming](./07-grpc-streaming.md) — bidirectional stream как транспорт, реестр стримов с горутиной-писателем на клиента, backplane на Redis, backpressure, переподключение и балансировка долгих соединений
 
 ## Темы
 - RabbitMQ, Kafka, NATS, Redis Streams, SQS/SNS;

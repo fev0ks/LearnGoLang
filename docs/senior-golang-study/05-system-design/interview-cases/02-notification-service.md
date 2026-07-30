@@ -131,7 +131,7 @@ flowchart LR
 
 **Kafka (per-channel topics).**
 *Зачем:* буфер между приёмом и доставкой; отдельный топик на канал + priority-топик для транзакционных + DLQ.
-*Почему именно брокер с retention:* при недоступности провайдера сообщения копятся (retention 7 дней), а не теряются; replay и consumer groups из коробки. Выбор брокера — [brokers / comparison](../../07-message-brokers-and-streaming/07-comparison.md), профиль — [Kafka](../../07-message-brokers-and-streaming/01-kafka.md).
+*Почему именно брокер с retention:* при недоступности провайдера сообщения копятся (retention 7 дней), а не теряются; replay и consumer groups из коробки. Выбор брокера — [brokers / comparison](../../07-message-brokers-and-streaming/00-comparison.md), профиль — [Kafka](../../07-message-brokers-and-streaming/01-kafka.md).
 
 **Dispatcher Workers (push / email / sms).**
 *Зачем:* читают свой топик, вызывают провайдера, троттлят под его лимит, ретраят, пишут статус.

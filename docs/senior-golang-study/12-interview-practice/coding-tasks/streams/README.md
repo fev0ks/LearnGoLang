@@ -48,7 +48,7 @@ Stream может производить миллионы событий в се
 ## Связки
 
 - [Kafka](../../../07-message-brokers-and-streaming/01-kafka.md) — production stream broker
-- [Redis Streams](../../../07-message-brokers-and-streaming/03-redis-streams.md)
+- [Redis Streams](../../../07-message-brokers-and-streaming/04-redis-streams.md)
 - [Sliding window counter](../data-structures/05-sliding-window-counter.md) — родственно aggregation
 - [Pipeline](../concurrency/04-pipeline.md) — stages-based streaming
 - [Pub/Sub](../concurrency/05-pubsub.md) — base для streams

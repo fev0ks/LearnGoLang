@@ -428,7 +428,7 @@
 
 - Kafka — распределённый durable лог: сообщения пишутся в партиции на диск, потребители читают по offset, при чтении сообщение не удаляется (retention по времени/размеру), pull-модель, высокий throughput, возможен реплей и много независимых consumer-групп.
 - RabbitMQ — классический брокер очередей (AMQP): умная маршрутизация через exchange/binding/routing key, push-модель, сообщение удаляется после ack, per-message приоритеты и TTL, гибкие топологии.
-- Когда что: Kafka — событийные стримы, большой поток, аналитика, реплей; RabbitMQ — task-queue, RPC, сложная маршрутизация и приоритеты. См. [07-message-brokers-and-streaming/01-kafka.md](../07-message-brokers-and-streaming/01-kafka.md), [02-rabbitmq.md](../07-message-brokers-and-streaming/02-rabbitmq.md) и [07-comparison.md](../07-message-brokers-and-streaming/07-comparison.md).
+- Когда что: Kafka — событийные стримы, большой поток, аналитика, реплей; RabbitMQ — task-queue, RPC, сложная маршрутизация и приоритеты. См. [07-message-brokers-and-streaming/01-kafka.md](../07-message-brokers-and-streaming/01-kafka.md), [02-rabbitmq.md](../07-message-brokers-and-streaming/02-rabbitmq.md) и [00-comparison.md](../07-message-brokers-and-streaming/00-comparison.md).
 
 **Какие плюсы и минусы у Kafka?**
 

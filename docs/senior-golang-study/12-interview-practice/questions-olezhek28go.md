@@ -931,7 +931,7 @@ func (b *Broadcast[T]) Close() {
 Политика «дропать при переполнении» — выбор; альтернативы: блокироваться (нарушает условие), отписывать медленного, расширять буфер. На собесе важно проговорить компромисс.
 </details>
 
-Глубже: [Pub/Sub (coding-task)](coding-tasks/concurrency/05-pubsub.md), [Redis Pub/Sub](../07-message-brokers-and-streaming/04-redis-pubsub.md).
+Глубже: [Pub/Sub (coding-task)](coding-tasks/concurrency/05-pubsub.md), [Redis Pub/Sub](../07-message-brokers-and-streaming/05-redis-pubsub.md).
 
 ---
 

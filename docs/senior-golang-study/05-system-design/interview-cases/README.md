@@ -71,5 +71,7 @@ Interview-ready ответ
 
 ## Перекрёстные ссылки
 
-- [Общие паттерны системного дизайна](../patterns/) — кеширование, очереди, шардирование
+- [Highload Design Patterns](../highload-design-patterns.md) — шардирование, репликация, многоуровневое кеширование, горячий ключ, fan-out, backpressure
+- [Reliability Patterns](../reliability-patterns/README.md) — таймауты, повторные попытки, circuit breaker, идемпотентность, SLO
+- [Брокеры сообщений и стриминг](../../07-message-brokers-and-streaming/00-comparison.md) — выбор брокера под задачу, разборы с числами
 - [Как проходить System Design Interview](./00-how-to-approach.md) — фреймворк и тайминг

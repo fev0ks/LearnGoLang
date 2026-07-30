@@ -148,7 +148,7 @@ flowchart LR
 
 **Broker (Redis Streams + Sorted Sets).**
 *Зачем:* очереди по приоритетам (XREADGROUP/XACK), delayed-задачи в ZSET по timestamp.
-*Почему Redis, а не Kafka:* при 10K/сек нужны нативные delayed-задачи, приоритеты и атомарный claim — у Redis это из коробки. Сравнение — [brokers / comparison](../../07-message-brokers-and-streaming/07-comparison.md); профиль — [Redis Streams](../../07-message-brokers-and-streaming/03-redis-streams.md), [Redis сценарии](../../06-databases/database-systems-catalog/08a-redis-real-scenarios.md).
+*Почему Redis, а не Kafka:* при 10K/сек нужны нативные delayed-задачи, приоритеты и атомарный claim — у Redis это из коробки. Сравнение — [brokers / comparison](../../07-message-brokers-and-streaming/00-comparison.md); профиль — [Redis Streams](../../07-message-brokers-and-streaming/04-redis-streams.md), [Redis сценарии](../../06-databases/database-systems-catalog/08a-redis-real-scenarios.md).
 
 **Worker Pool.**
 *Зачем:* claim задачи, выполнение с timeout, retry/DLQ, ACK.

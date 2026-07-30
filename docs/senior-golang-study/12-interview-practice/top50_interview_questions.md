@@ -327,7 +327,7 @@
 - Kafka — durable-лог: партиции на диске, чтение по offset без удаления (retention, реплей), pull-модель, высокий throughput, много независимых consumer-групп.
 - RabbitMQ — брокер очередей (AMQP): умная маршрутизация через exchange и routing key, push-модель, сообщение удаляется после ack, приоритеты и TTL.
 - Когда что — Kafka для событийных стримов, больших потоков и реплея; RabbitMQ для task-очередей, RPC и сложной маршрутизации.
-- См. [07-message-brokers-and-streaming/07-comparison.md](../07-message-brokers-and-streaming/07-comparison.md).
+- См. [07-message-brokers-and-streaming/07-comparison.md](../07-message-brokers-and-streaming/00-comparison.md).
 
 **Что такое graceful shutdown? Как реализовать? (~30×)**
 
