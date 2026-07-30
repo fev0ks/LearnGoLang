@@ -134,11 +134,11 @@
 
 ## Внутренние ссылки
 
-- [Раздел про gRPC и protobuf](../protocols/06-grpc.md)
-- [HTTP-сервер на Go](../protocols/03-http-server.md)
-- [Webhooks](../protocols/13-webhooks.md)
-- [Idempotency](../protocols/14-idempotency.md)
-- [OpenAPI и Swagger](../protocols/08-openapi-and-swagger.md)
+- [Раздел про gRPC и protobuf](../protocols/03-api-styles/02-grpc.md)
+- [HTTP-сервер на Go](../protocols/02-http/02-server-in-go.md)
+- [Webhooks](../protocols/05-integration-patterns/01-webhooks.md)
+- [Idempotency](../protocols/05-integration-patterns/02-idempotency.md)
+- [OpenAPI и Swagger](../protocols/03-api-styles/04-openapi-and-swagger.md)
 - [Раздел про архитектуру и паттерны](../../04-architecture-and-patterns/)
 
 ---

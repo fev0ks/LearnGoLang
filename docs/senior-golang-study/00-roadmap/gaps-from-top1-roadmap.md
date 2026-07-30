@@ -33,7 +33,7 @@
 |---|---|---|---|
 | 1 | Один язык, на глубину (Go) | ✅ | `01-go-core/` — глубоко |
 | 2 | Как реально работает интернет (TCP/IP, DNS, HTTP/HTTPS) | ✅ | `08-networking-and-api/request-lifecycle/` |
-| 3 | Сырой HTTP-сервер | ✅ | `08-networking-and-api/protocols/02-http-server.md`, `03-go-libraries-and-ecosystem/http-servers/` |
+| 3 | Сырой HTTP-сервер | ✅ | `08-networking-and-api/protocols/02-http/02-server-in-go.md`, `03-go-libraries-and-ecosystem/http-servers/` |
 | 4 | Linux и командная строка (SSH, права, cron, grep, curl, jq) | ✅ | `10-devops-and-observability/linux/` (01–06) |
 | 5 | SQL и базы данных (PostgreSQL, EXPLAIN, индексы) | ✅ | `06-databases/` — очень глубоко |
 | 6 | **Git глубже базы** (branching, rebase, merge conflicts, git bisect) | ❌ | **Создать:** `10-devops-and-observability/git/` — branching, rebase, bisect, advanced |
@@ -53,7 +53,7 @@
 | 6 | Аутентификация (OAuth 2.0, bcrypt, JWT refresh, CSRF, session fixation) | ✅ | `11-security/authentication/` (01–07) |
 | 7 | Async, очереди, фоновые задачи (горутины, Redis Streams, Kafka, воркеры) | ✅ | `01-go-core/concurrency-and-performance/`, `07-message-brokers-and-streaming/`, `04-architecture-and-patterns/patterns/04-background-workers.md` |
 | 8 | Тесты (unit, интеграционные, API, моки внешних сервисов) | ✅ | `09-testing-and-quality/` (01–11) |
-| 9 | Реалтайм-протоколы (WebSockets, SSE, long polling — когда что выбирать) | ✅ | WebSocket: `08-networking-and-api/protocols/05-websocket.md`. SSE и long polling: `08-networking-and-api/protocols/12-sse-and-realtime.md` |
+| 9 | Реалтайм-протоколы (WebSockets, SSE, long polling — когда что выбирать) | ✅ | WebSocket: `08-networking-and-api/protocols/04-realtime/01-websocket.md`. SSE и long polling: `08-networking-and-api/protocols/04-realtime/02-sse.md` |
 | 10 | Docker — контейнеризуй всё (Dockerfile, Compose, multi-stage, слои) | ✅ | `10-devops-and-observability/docker*/`, `dockerfiles-for-go/`, `docker-compose/` |
 
 ---
@@ -69,7 +69,7 @@
 | 4a | **Нагрузочное тестирование** (k6/Locust, bottleneck → фикс → перетест) | ❌ | **Создать:** `09-testing-and-quality/12-load-testing.md` — k6 примеры, интерпретация результатов, p95/p99 |
 | 5 | Безопасность вглубь — OWASP Top 10 (SQL injection, XSS, SSRF, IDOR + AI-аудит) | ✅ | `11-security/owasp-top10/` (SQL injection, XSS, SSRF). IDOR — в `authentication/07-authorization-and-rbac.md` |
 | 6 | **Edge и Serverless** (Cloudflare Workers, AWS Lambda, cold start, лимиты, биллинг) | ❌ | **Создать:** `10-devops-and-observability/serverless/` или `05-system-design/edge-and-serverless/` |
-| 7 | API-дизайн на масштаб (idempotency, webhook design, версионирование, OpenAPI spec, backward compatibility) | ✅ | Idempotency: `05-system-design/reliability-patterns/06-idempotency.md`. Webhooks: `08-networking-and-api/protocols/06-webhooks.md`. Версионирование: `04-architecture-and-patterns/patterns/03-api-versioning.md`. OpenAPI: `08-networking-and-api/protocols/13-openapi-and-swagger.md` |
+| 7 | API-дизайн на масштаб (idempotency, webhook design, версионирование, OpenAPI spec, backward compatibility) | ✅ | Idempotency: `05-system-design/reliability-patterns/06-idempotency.md`. Webhooks: `08-networking-and-api/protocols/05-integration-patterns/01-webhooks.md`. Версионирование: `04-architecture-and-patterns/patterns/03-api-versioning.md`. OpenAPI: `08-networking-and-api/protocols/03-api-styles/04-openapi-and-swagger.md` |
 
 ---
 

@@ -113,7 +113,7 @@ flowchart TB
 
 **Trip Service.**
 *Зачем:* state machine поездки (PENDING→…→COMPLETED), real-time tracking пассажиру через WebSocket.
-*Почему отдельно + Postgres:* переходы статусов финансово значимы, нужен ACID. Протокол трекинга — [networking / WebSocket](../../08-networking-and-api/protocols/10-websocket.md).
+*Почему отдельно + Postgres:* переходы статусов финансово значимы, нужен ACID. Протокол трекинга — [networking / WebSocket](../../08-networking-and-api/protocols/04-realtime/01-websocket.md).
 
 **Redis (H3-indexed locations).**
 *Зачем:* текущие позиции водителей по H3-ячейкам, booking-локи, surge-значения.

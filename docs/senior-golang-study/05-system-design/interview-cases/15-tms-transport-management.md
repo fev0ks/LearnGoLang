@@ -220,7 +220,7 @@ flowchart TB
 
 **Mobile Gateway.**
 *Зачем:* persistent-соединения с 10K водителей — пуш назначений и приём статусов/гео.
-*Почему stateless + Redis routing:* 10K соединений не помещаются на одну ноду; маршрутизация `driver→node` в Redis делает ноды взаимозаменяемыми — как connection-слой в [04. Chat](./04-chat-messaging.md). Протокол — [networking / WebSocket](../../08-networking-and-api/protocols/10-websocket.md).
+*Почему stateless + Redis routing:* 10K соединений не помещаются на одну ноду; маршрутизация `driver→node` в Redis делает ноды взаимозаменяемыми — как connection-слой в [04. Chat](./04-chat-messaging.md). Протокол — [networking / WebSocket](../../08-networking-and-api/protocols/04-realtime/01-websocket.md).
 
 **Elasticsearch (read-model логистов).**
 *Зачем:* поиск/мониторинг заказов и маршрутов в Web UI логистов.

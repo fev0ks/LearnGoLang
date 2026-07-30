@@ -10,7 +10,7 @@
 - [Tests](./implementations_test.go)
 
 Как использовать:
-- читать вместе с [Rate Limiting](../protocols/15-rate-limiting.md);
+- читать вместе с [Rate Limiting](../03-rate-limiting.md);
 - смотреть на contract `Decision` и `Limiter`;
 - сравнивать fairness, burst behavior и сложность state management;
 - держать в голове, что это in-memory reference implementations, а не distributed production limiters.
@@ -56,7 +56,7 @@
 
 ## 1. Limiter Interface
 
-Файл: [limiter.go](./limiter.go)
+Файл: [examples/limiter.go](./limiter.go)
 
 Что здесь важно:
 - интерфейс узкий;
@@ -82,7 +82,7 @@ if !decision.Allowed {
 
 ## 2. Fixed Window
 
-Файл: [fixed_window_memory.go](./fixed_window_memory.go)
+Файл: [examples/fixed_window_memory.go](./fixed_window_memory.go)
 
 ### Как работает
 
@@ -155,7 +155,7 @@ TTL ratelimit:user:42:28517920
 
 ## 3. Sliding Window
 
-Файл: [sliding_window_memory.go](./sliding_window_memory.go)
+Файл: [examples/sliding_window_memory.go](./sliding_window_memory.go)
 
 ### Как работает
 
@@ -230,7 +230,7 @@ EXPIRE ratelimit:user:42:events 60
 
 ## 4. Token Bucket
 
-Файл: [token_bucket_memory.go](./token_bucket_memory.go)
+Файл: [examples/token_bucket_memory.go](./token_bucket_memory.go)
 
 ### Как работает
 
@@ -360,7 +360,7 @@ EXPIRE ratelimit:user:42:bucket 120
 
 ## Что смотреть в тестах
 
-Файл: [implementations_test.go](./implementations_test.go)
+Файл: [examples/implementations_test.go](./implementations_test.go)
 
 Проверять стоит не только happy path:
 - блокировку после достижения лимита;

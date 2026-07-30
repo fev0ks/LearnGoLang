@@ -165,7 +165,7 @@ POST /v1/payments
 Idempotency-Key: 9e3b... (UUID v4 от клиента)
 ```
 
-Подробно — в [14-idempotency.md](../protocols/14-idempotency.md).
+Подробно — в [05-integration-patterns/02-idempotency.md](../protocols/05-integration-patterns/02-idempotency.md).
 
 Особенно критично для платежей:
 
@@ -352,7 +352,7 @@ HTTP-сервер часто отрабатывает их сам.
 - Клиент присылает ключ идемпотентности, сервер запоминает результат первой обработки и на повтор отдаёт сохранённый ответ.
 - Ключ генерирует клиент на каждую логическую операцию, а не на каждую попытку отправки, иначе повтор создаст второй ресурс.
 - Хранилище ключей должно поддерживать атомарную вставку и срок жизни: `SET NX` в Redis или уникальный индекс с `ON CONFLICT` в PostgreSQL.
-- Детали и подводные камни конкурентных запросов — в [14-idempotency.md](../protocols/14-idempotency.md).
+- Детали и подводные камни конкурентных запросов — в [05-integration-patterns/02-idempotency.md](../protocols/05-integration-patterns/02-idempotency.md).
 
 ---
 
@@ -362,5 +362,5 @@ HTTP-сервер часто отрабатывает их сам.
 - [02-url-design.md](./02-url-design.md) — что писать в path.
 - [05-payloads-and-types.md](./05-payloads-and-types.md) — `FieldMask` для PATCH.
 - [06-cross-cutting-concerns.md](./06-cross-cutting-concerns.md) — `Idempotency-Key`.
-- [../protocols/14-idempotency.md](../protocols/14-idempotency.md) — реализация
+- [05-integration-patterns/02-idempotency.md](../protocols/05-integration-patterns/02-idempotency.md) — реализация
   идемпотентности на сервере.

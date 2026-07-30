@@ -272,7 +272,7 @@
 - gRPC — RPC поверх HTTP/2 плюс Protobuf: бинарный (компактнее и быстрее), строгая схема с кодогенерацией, стриминг (4 типа вызовов), дедлайны из коробки.
 - Минусы gRPC — не работает из браузера напрямую (нужен gRPC-Web или gateway), не читается глазами.
 - Выбор — внешние и публичные API это REST; внутренняя service-to-service связь с жёсткими контрактами и требованиями к латентности это gRPC.
-- См. [protocols/06-grpc.md](../08-networking-and-api/protocols/06-grpc.md).
+- См. [03-api-styles/02-grpc.md](../08-networking-and-api/protocols/03-api-styles/02-grpc.md).
 
 **Чем отличается HTTP/1.1 от HTTP/2? (~25×)**
 
@@ -320,7 +320,7 @@
 - По семантике HTTP — GET/PUT/DELETE идемпотентны, POST нет.
 - Как обеспечить для POST — клиент шлёт Idempotency-Key, сервер атомарно фиксирует ключ (уникальный индекс в БД) и сохраняет результат.
 - Повтор с тем же ключом — отдать сохранённый ответ, не выполняя эффект второй раз.
-- См. [reliability-patterns/06-idempotency.md](../05-system-design/reliability-patterns/06-idempotency.md) и [protocols/14-idempotency.md](../08-networking-and-api/protocols/14-idempotency.md).
+- См. [reliability-patterns/06-idempotency.md](../05-system-design/reliability-patterns/06-idempotency.md) и [05-integration-patterns/02-idempotency.md](../08-networking-and-api/protocols/05-integration-patterns/02-idempotency.md).
 
 **Чем отличается Kafka от RabbitMQ? Когда что использовать? (~30×)**
 

@@ -237,7 +237,7 @@ message CreatePaymentRequest {
 
 Но лучше — через header + middleware, чтобы поле не загромождало каждый request.
 
-Подробно — в [../protocols/14-idempotency.md](../protocols/14-idempotency.md).
+Подробно — в [05-integration-patterns/02-idempotency.md](../protocols/05-integration-patterns/02-idempotency.md).
 
 ---
 
@@ -350,5 +350,5 @@ func UserIDFromContext(ctx context.Context) string {
   postponed deletion.
 - [10-protobuf-repo-layout.md](./10-protobuf-repo-layout.md) — как это помогает
   объединить external/internal message'и.
-- [../protocols/14-idempotency.md](../protocols/14-idempotency.md) — реализация
+- [05-integration-patterns/02-idempotency.md](../protocols/05-integration-patterns/02-idempotency.md) — реализация
   идемпотентности.

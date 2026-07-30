@@ -2,7 +2,7 @@
 
 gRPC — бинарный RPC-протокол поверх HTTP/2 с кодогенерацией из `.proto` схем.
 
-Граница с соседним разделом: сам протокол и его семантика (HTTP/2, трейлеры, дедлайны, коды ошибок) разобраны в [08-networking-and-api/protocols](../../08-networking-and-api/protocols/README.md), прежде всего в [06-grpc.md](../../08-networking-and-api/protocols/06-grpc.md). Здесь — чем это писать в Go: библиотеки, кодогенерация, инструменты.
+Граница с соседним разделом: сам протокол и его семантика (HTTP/2, трейлеры, дедлайны, коды ошибок) разобраны в [08-networking-and-api/protocols](../../08-networking-and-api/protocols/README.md), прежде всего в [03-api-styles/02-grpc.md](../../08-networking-and-api/protocols/03-api-styles/02-grpc.md). Здесь — чем это писать в Go: библиотеки, кодогенерация, инструменты.
 
 ## Материалы
 

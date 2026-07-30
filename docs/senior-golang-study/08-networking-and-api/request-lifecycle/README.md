@@ -71,7 +71,7 @@ sequenceDiagram
 ## Как читать
 
 1. Пройти по порядку 01 → 07 для полного понимания маршрута.
-2. Файл 03 (`TCP, TLS`) — ключевой: TLS 1.2 vs 1.3 RTT cost, HTTP/1.1 vs HTTP/2 vs HTTP/3; глубокий разбор версий HTTP — [02-http2-and-http3.md](../protocols/02-http2-and-http3.md).
+2. Файл 03 (`TCP, TLS`) — ключевой: TLS 1.2 vs 1.3 RTT cost, HTTP/1.1 vs HTTP/2 vs HTTP/3; глубокий разбор версий HTTP — [02-http/01-http-versions.md](../protocols/02-http/01-http-versions.md).
 3. Файл 05 (`Backend`) — Go-специфика: goroutine model, middleware chain, context propagation, pool exhaustion.
 4. Файл 07 (`End-to-End`) — практика: `curl -w` для измерения фаз, `dig +trace` для DNS, интерпретация Chrome DevTools Timing.
 

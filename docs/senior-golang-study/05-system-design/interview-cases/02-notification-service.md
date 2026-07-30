@@ -139,7 +139,7 @@ flowchart LR
 
 **External providers (FCM / SendGrid / Twilio).**
 *Зачем:* фактическая доставка в каналы; delivery receipts приходят вебхуками.
-*Почему обёртка на воркере:* провайдеры нестабильны и имеют лимиты — изолируем retry/DLQ. Приём подтверждений — [protocols / webhooks](../../08-networking-and-api/protocols/13-webhooks.md).
+*Почему обёртка на воркере:* провайдеры нестабильны и имеют лимиты — изолируем retry/DLQ. Приём подтверждений — [protocols / webhooks](../../08-networking-and-api/protocols/05-integration-patterns/01-webhooks.md).
 
 **Redis (idempotency + preferences cache).**
 *Зачем:* быстрый чек `idempotency_key` на горячем пути и кеш user-preferences (TTL 5 мин).

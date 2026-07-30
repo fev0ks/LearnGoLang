@@ -769,5 +769,5 @@ Counter published / delivered / dropped per topic.
 - [Channels и горутины](../../../01-go-core/concurrency-and-performance/02-goroutines-and-channels.md)
 - [Redis Pub/Sub](../../../07-message-brokers-and-streaming/05-redis-pubsub.md) — distributed alternative
 - [Kafka](../../../07-message-brokers-and-streaming/01-kafka.md) — persistent event streaming
-- [WebSocket](../../../08-networking-and-api/protocols/10-websocket.md) — типичный потребитель in-memory pubsub
-- [SSE](../../../08-networking-and-api/protocols/11-sse-and-realtime.md) — тоже
+- [WebSocket](../../../08-networking-and-api/protocols/04-realtime/01-websocket.md) — типичный потребитель in-memory pubsub
+- [SSE](../../../08-networking-and-api/protocols/04-realtime/02-sse.md) — тоже

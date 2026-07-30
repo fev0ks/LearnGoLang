@@ -503,7 +503,7 @@
 
 **Из каких частей состоит HTTP-запрос?**
 
-- Стартовая строка (метод + URL/path + версия, напр. `GET /v1/items HTTP/1.1`), заголовки (`Host`, `Content-Type`, `Authorization`…), пустая строка-разделитель и опциональное тело (body, для POST/PUT). См. [protocols/03-http-server.md](../08-networking-and-api/protocols/03-http-server.md).
+- Стартовая строка (метод + URL/path + версия, напр. `GET /v1/items HTTP/1.1`), заголовки (`Host`, `Content-Type`, `Authorization`…), пустая строка-разделитель и опциональное тело (body, для POST/PUT). См. [02-http/02-server-in-go.md](../08-networking-and-api/protocols/02-http/02-server-in-go.md).
 
 **В чём отличия HTTP и HTTPS? Для чего нужен HTTPS?**
 
@@ -511,7 +511,7 @@
 
 **Зачем нужны таймауты в HTTP-запросах и как их подобрать?**
 
-- Чтобы не висеть бесконечно на медленном/мёртвом пире, не копить горутины и соединения, давать быстрый отказ и работать с ретраями. Раздельные таймауты: connect, TLS, response-header, общий. Подбирают от p99 латентности зависимости с запасом, увязывают с дедлайном вызывающего (`context`) и ретраями, чтобы суммарный бюджет не превышал SLA. См. [reliability-patterns/01-timeouts-and-deadlines.md](../05-system-design/reliability-patterns/01-timeouts-and-deadlines.md) и [protocols/04-http-client.md](../08-networking-and-api/protocols/04-http-client.md).
+- Чтобы не висеть бесконечно на медленном/мёртвом пире, не копить горутины и соединения, давать быстрый отказ и работать с ретраями. Раздельные таймауты: connect, TLS, response-header, общий. Подбирают от p99 латентности зависимости с запасом, увязывают с дедлайном вызывающего (`context`) и ретраями, чтобы суммарный бюджет не превышал SLA. См. [reliability-patterns/01-timeouts-and-deadlines.md](../05-system-design/reliability-patterns/01-timeouts-and-deadlines.md) и [02-http/03-client-in-go.md](../08-networking-and-api/protocols/02-http/03-client-in-go.md).
 
 **Зачем нужны HTTP-коды и какие бывают?**
 
@@ -527,7 +527,7 @@
 - Как открывается — через HTTP Upgrade (обычный GET с `Upgrade: websocket`); дальше это уже не HTTP, а постоянный двусторонний канал.
 - Где нужен — realtime: чаты, нотификации, лайв-обновления, игры; в отличие от HTTP-поллинга держит одно соединение.
 - Альтернатива — для однонаправленного сервер→клиент проще SSE (поверх HTTP).
-- См. [protocols/10-websocket.md](../08-networking-and-api/protocols/10-websocket.md).
+- См. [04-realtime/01-websocket.md](../08-networking-and-api/protocols/04-realtime/01-websocket.md).
 
 **Какие протоколы работают поверх HTTP?**
 
@@ -539,7 +539,7 @@
 - Как работает — роутер ведёт таблицу трансляций (внутренний IP:порт ↔ внешний порт) и сопоставляет ответы обратно.
 - Плюсы — экономит дефицитные IPv4 и скрывает внутреннюю топологию.
 - Минус — ломает входящие соединения: для p2p/WebRTC нужны port-forwarding, STUN/TURN.
-- См. [linux/03-tcp-sockets.md](../10-devops-and-observability/linux/03-tcp-sockets.md) и [protocols/12-webrtc.md](../08-networking-and-api/protocols/12-webrtc.md).
+- См. [linux/03-tcp-sockets.md](../10-devops-and-observability/linux/03-tcp-sockets.md) и [04-realtime/03-webrtc.md](../08-networking-and-api/protocols/04-realtime/03-webrtc.md).
 
 **Что такое модель OSI?**
 
@@ -640,7 +640,7 @@
 - Плюсы против REST/JSON — меньше payload и латентность, строгий контракт и кодоген, стриминг, удобно service-to-service.
 - Минусы — не читается глазами, слабая поддержка в браузере (нужен gRPC-Web или grpc-gateway для REST-фасада), сложнее дебажить.
 - Versioning — через эволюцию proto: не переиспользовать номера полей, только добавлять.
-- См. [protocols/06-grpc.md](../08-networking-and-api/protocols/06-grpc.md).
+- См. [03-api-styles/02-grpc.md](../08-networking-and-api/protocols/03-api-styles/02-grpc.md).
 
 **Как проверить, открыт ли порт на сервере? Какой процесс его слушает?**
 
@@ -962,7 +962,7 @@
 
 **Что такое идемпотентность запросов?**
 
-- Повторное выполнение запроса даёт тот же результат, что и однократное, без побочных эффектов-дублей. Критично для ретраев и at-least-once доставки. Реализуют через idempotency-key + дедупликацию на сервере; GET/PUT/DELETE идемпотентны по семантике, POST — нет (нужен ключ). См. [reliability-patterns/06-idempotency.md](../05-system-design/reliability-patterns/06-idempotency.md) и [protocols/14-idempotency.md](../08-networking-and-api/protocols/14-idempotency.md).
+- Повторное выполнение запроса даёт тот же результат, что и однократное, без побочных эффектов-дублей. Критично для ретраев и at-least-once доставки. Реализуют через idempotency-key + дедупликацию на сервере; GET/PUT/DELETE идемпотентны по семантике, POST — нет (нужен ключ). См. [reliability-patterns/06-idempotency.md](../05-system-design/reliability-patterns/06-idempotency.md) и [05-integration-patterns/02-idempotency.md](../08-networking-and-api/protocols/05-integration-patterns/02-idempotency.md).
 
 **В чём разница устойчивой и неустойчивой сортировки?**
 

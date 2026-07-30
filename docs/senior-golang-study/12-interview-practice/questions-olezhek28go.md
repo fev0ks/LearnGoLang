@@ -1288,7 +1288,7 @@ func (l *Limiter) Close() { close(l.stop) } // остановить горути
 Поэтому для production обычно берут ленивый пересчёт (как в `golang.org/x/time/rate`), а «канал + тикер» хорош, когда `rps` невелик и важна простота.
 </details>
 
-Глубже: [Rate limiter (coding-task, варианты)](coding-tasks/concurrency/02-rate-limiter.md), [Rate limiting (протоколы)](../08-networking-and-api/protocols/15-rate-limiting.md), [Rate limiting (reliability)](../05-system-design/reliability-patterns/04-rate-limiting.md), [Redis rate limiters](../06-databases/database-systems-catalog/08b-redis-rate-limiters.md).
+Глубже: [Rate limiter (coding-task, варианты)](coding-tasks/concurrency/02-rate-limiter.md), [Rate limiting (протоколы)](../08-networking-and-api/protocols/05-integration-patterns/03-rate-limiting.md), [Rate limiting (reliability)](../05-system-design/reliability-patterns/04-rate-limiting.md), [Redis rate limiters](../06-databases/database-systems-catalog/08b-redis-rate-limiters.md).
 
 ---
 

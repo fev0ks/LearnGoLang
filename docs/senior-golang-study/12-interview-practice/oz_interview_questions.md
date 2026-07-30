@@ -244,7 +244,7 @@
 
 **Что такое HTTP-протокол?**
 
-- Протокол прикладного уровня по модели запрос-ответ: клиент шлёт запрос, сервер возвращает ответ. Stateless — сам по себе не хранит состояние между запросами (состояние добавляют cookies/сессии/токены). Текстовый и человекочитаемый в HTTP/1.1, бинарный в HTTP/2; работает поверх TCP (HTTP/1.1, /2) или QUIC/UDP (HTTP/3). См. [protocols/03-http-server.md](../08-networking-and-api/protocols/03-http-server.md).
+- Протокол прикладного уровня по модели запрос-ответ: клиент шлёт запрос, сервер возвращает ответ. Stateless — сам по себе не хранит состояние между запросами (состояние добавляют cookies/сессии/токены). Текстовый и человекочитаемый в HTTP/1.1, бинарный в HTTP/2; работает поверх TCP (HTTP/1.1, /2) или QUIC/UDP (HTTP/3). См. [02-http/02-server-in-go.md](../08-networking-and-api/protocols/02-http/02-server-in-go.md).
 
 **HTTP работает поверх какого протокола?**
 
@@ -259,7 +259,7 @@
 
 **Из каких частей состоит HTTP-запрос?**
 
-- Стартовая (request) строка: метод + цель/путь + версия (`GET /v1/items HTTP/1.1`); затем заголовки (`Host`, `Content-Type`, `Authorization`, `Cookie`…); пустая строка-разделитель; опциональное тело (body — для `POST`/`PUT`). См. [protocols/03-http-server.md](../08-networking-and-api/protocols/03-http-server.md).
+- Стартовая (request) строка: метод + цель/путь + версия (`GET /v1/items HTTP/1.1`); затем заголовки (`Host`, `Content-Type`, `Authorization`, `Cookie`…); пустая строка-разделитель; опциональное тело (body — для `POST`/`PUT`). См. [02-http/02-server-in-go.md](../08-networking-and-api/protocols/02-http/02-server-in-go.md).
 
 **Чем HTTP-ответ отличается от запроса?**
 

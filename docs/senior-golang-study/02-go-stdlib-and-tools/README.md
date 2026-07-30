@@ -25,8 +25,8 @@
 | `strings` — устройство типа (byte vs rune, header, Builder, unsafe) | [01-go-core/07-strings](../01-go-core/07-strings.md) |
 | `strings`/`unicode/utf8`/`bytes`/`unicode` — справочник функций | [06-strings-package](./06-strings-package.md) |
 | `time` (Timer/Ticker, утечки, `time.After` в select) | [runtime-scheduler/04-timers](../01-go-core/runtime-scheduler/04-timers.md) |
-| `net/http` — сервер | [networking/protocols/03-http-server](../08-networking-and-api/protocols/03-http-server.md), [http-servers/01-stdlib-net-http](../03-go-libraries-and-ecosystem/http-servers/01-stdlib-net-http.md) |
-| `net/http` — клиент, Transport, reuse | [networking/protocols/04-http-client](../08-networking-and-api/protocols/04-http-client.md) |
+| `net/http` — сервер | [02-http/02-server-in-go.md](../08-networking-and-api/protocols/02-http/02-server-in-go.md), [http-servers/01-stdlib-net-http](../03-go-libraries-and-ecosystem/http-servers/01-stdlib-net-http.md) |
+| `net/http` — клиент, Transport, reuse | [02-http/03-client-in-go.md](../08-networking-and-api/protocols/02-http/03-client-in-go.md) |
 | Таймауты и deadlines | [reliability/01-timeouts-and-deadlines](../05-system-design/reliability-patterns/01-timeouts-and-deadlines.md) |
 | Graceful shutdown | [patterns/08-graceful-shutdown](../04-architecture-and-patterns/patterns/08-graceful-shutdown.md) |
 | `database/sql`, пул соединений | [go-database-libraries/02-standard-library-database-sql](../06-databases/go-database-libraries/02-standard-library-database-sql.md), [postgresql/09-connection-pooling](../06-databases/database-systems-catalog/postgresql/09-connection-pooling.md) |

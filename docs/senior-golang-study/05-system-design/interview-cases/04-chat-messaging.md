@@ -128,7 +128,7 @@ flowchart TB
 
 **Chat Server (WebSocket-ноды).**
 *Зачем:* терминируют persistent WebSocket-соединения (~50K на ноду), валидируют, принимают/доставляют сообщения.
-*Почему отдельно / stateless:* 10M соединений физически не помещаются на одну ноду; маршрутизация `user→node` вынесена в Redis, поэтому ноды взаимозаменяемы. Протокол — [networking / WebSocket](../../08-networking-and-api/protocols/10-websocket.md).
+*Почему отдельно / stateless:* 10M соединений физически не помещаются на одну ноду; маршрутизация `user→node` вынесена в Redis, поэтому ноды взаимозаменяемы. Протокол — [networking / WebSocket](../../08-networking-and-api/protocols/04-realtime/01-websocket.md).
 
 **Kafka (message bus).**
 *Зачем:* развязывает приём сообщения и его fan-out/персист; `key=chat_id` сохраняет порядок в рамках чата.

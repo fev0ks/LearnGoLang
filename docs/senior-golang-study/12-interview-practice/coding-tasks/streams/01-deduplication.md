@@ -333,7 +333,7 @@ func (c *KafkaConsumer) Consume(ctx context.Context) error {
 1. **In-memory dedup** — fast filter ~99% дублей
 2. **BD UNIQUE constraint** — last line, гарантирует exactly-once на уровне DB
 
-См. также [idempotency-handler.md](../system-primitives/05-idempotency-handler.md) и [saga-and-outbox.md](../../../04-architecture-and-patterns/patterns/09-saga-and-outbox.md).
+См. также [05-idempotency-handler.md](../system-primitives/05-idempotency-handler.md) и [09-saga-and-outbox.md](../../../04-architecture-and-patterns/patterns/09-saga-and-outbox.md).
 
 ---
 

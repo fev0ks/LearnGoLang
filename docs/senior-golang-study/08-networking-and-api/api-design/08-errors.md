@@ -19,7 +19,7 @@
 Файл про формат ошибки и работу с ней: как выглядит тело, откуда берутся
 стабильные машинные коды, что класть в `details`, как это ложится на gRPC.
 Выбор самого кода ответа — тема соседнего материала
-[REST и семантика HTTP](../protocols/05-rest-and-http-semantics.md).
+[REST и семантика HTTP](../protocols/03-api-styles/01-rest-and-http-semantics.md).
 
 ---
 
@@ -96,7 +96,7 @@ grpc-gateway автоматически мапит gRPC `codes.InvalidArgument` 
 
 ## Какой HTTP-код возвращать
 
-Полная карта кодов по классам, тонкости выбора (400 против 422, 401 против 403, 404 против 403, 409 против 412) и семантика заголовков вроде `WWW-Authenticate`, `Allow` и `Retry-After` вынесены в [REST и семантика HTTP](../protocols/05-rest-and-http-semantics.md) — это общая тема, не привязанная к дизайну конкретного API.
+Полная карта кодов по классам, тонкости выбора (400 против 422, 401 против 403, 404 против 403, 409 против 412) и семантика заголовков вроде `WWW-Authenticate`, `Allow` и `Retry-After` вынесены в [REST и семантика HTTP](../protocols/03-api-styles/01-rest-and-http-semantics.md) — это общая тема, не привязанная к дизайну конкретного API.
 
 Здесь остаётся то, что относится к телу ответа, и одно правило, которое связывает две части: код и тело не должны противоречить друг другу. Ответ `200 OK` с телом `{"error": ...}` ломает кэширование, автоматические повторы и мониторинг, а `500` с подробным описанием ошибки валидации вводит в заблуждение и клиента, и дежурного.
 
@@ -322,13 +322,13 @@ func customErrorHandler(ctx context.Context, mux *runtime.ServeMux,
 | Form validation | `Error.details.fieldViolations`. |
 | 5xx | Generic message + requestId, без stacktrace. |
 | gRPC ↔ HTTP | Через стандартный grpc-gateway маппинг. |
-| Выбор кода | Карта кодов и разбор спорных пар — в [REST и семантика HTTP](../protocols/05-rest-and-http-semantics.md). |
+| Выбор кода | Карта кодов и разбор спорных пар — в [REST и семантика HTTP](../protocols/03-api-styles/01-rest-and-http-semantics.md). |
 
 ---
 
 ## Связанные документы
 
-- [REST и семантика HTTP](../protocols/05-rest-and-http-semantics.md) — какой код возвращать, спорные пары кодов, условные запросы.
+- [REST и семантика HTTP](../protocols/03-api-styles/01-rest-and-http-semantics.md) — какой код возвращать, спорные пары кодов, условные запросы.
 - [01-principles.md](./01-principles.md)
 - [03-http-methods.md](./03-http-methods.md) — идемпотентность ретраев.
 - [06-cross-cutting-concerns.md](./06-cross-cutting-concerns.md) — `Idempotency-Key`.

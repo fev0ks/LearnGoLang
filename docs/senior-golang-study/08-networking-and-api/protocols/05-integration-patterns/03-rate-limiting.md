@@ -60,11 +60,11 @@ type Limiter interface {
 - алгоритмы можно менять без переписывания HTTP слоя.
 
 Локальные примеры лежат рядом с этой заметкой:
-- [Limiter Interface](../rate-limiting-examples/limiter.go)
-- [Fixed Window](../rate-limiting-examples/fixed_window_memory.go)
-- [Sliding Window](../rate-limiting-examples/sliding_window_memory.go)
-- [Token Bucket](../rate-limiting-examples/token_bucket_memory.go)
-- [Tests](../rate-limiting-examples/implementations_test.go)
+- [Limiter Interface](./examples/limiter.go)
+- [Fixed Window](./examples/fixed_window_memory.go)
+- [Sliding Window](./examples/sliding_window_memory.go)
+- [Token Bucket](./examples/token_bucket_memory.go)
+- [Tests](./examples/implementations_test.go)
 
 ---
 
@@ -420,5 +420,5 @@ if st.tokens >= 1 {
 
 ## Связанные темы
 
-- [Networking And API README](../README.md)
+- [Networking And API README](../../README.md)
 - [Redis Docs](https://redis.io/docs/latest/)
