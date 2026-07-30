@@ -156,7 +156,7 @@ Apply complete! Resources: 1 added, 1 changed, 0 destroyed.
 | **CloudFormation** | Декларативный IaC | Только AWS ресурсы | Если только AWS и нет Terraform |
 | **CDK** | Код → CloudFormation | AWS через TypeScript/Python | AWS с типизированными конструктами |
 
-**Terraform vs Ansible** — самый частый вопрос. Разные задачи:
+**Terraform vs Ansible.** Их постоянно сравнивают, хотя задачи у них разные:
 
 ```
 Terraform: "создай базу данных PostgreSQL 15 в GCP с 2 CPU и 4GB RAM"

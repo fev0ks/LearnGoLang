@@ -1,6 +1,6 @@
 # Data Structures Tasks
 
-Задачи на реализацию структур данных, которые часто спрашивают на собеседованиях. Это не leetcode (вопросы алгоритмов вынесены в [16-algorithms-and-data-structures/](../../../16-algorithms-and-data-structures/)), а **инженерные** реализации — с thread safety, метриками, edge cases.
+Задачи на реализацию структур данных, которые дают на собеседованиях. Это не leetcode (вопросы алгоритмов вынесены в [16-algorithms-and-data-structures/](../../../16-algorithms-and-data-structures/)), а **инженерные** реализации — с thread safety, метриками, edge cases.
 
 ## Задачи
 
