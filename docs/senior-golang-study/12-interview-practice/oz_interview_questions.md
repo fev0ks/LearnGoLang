@@ -244,7 +244,7 @@
 
 **Что такое HTTP-протокол?**
 
-- Протокол прикладного уровня по модели запрос-ответ: клиент шлёт запрос, сервер возвращает ответ. Stateless — сам по себе не хранит состояние между запросами (состояние добавляют cookies/сессии/токены). Текстовый и человекочитаемый в HTTP/1.1, бинарный в HTTP/2; работает поверх TCP (HTTP/1.1, /2) или QUIC/UDP (HTTP/3). См. [protocols/02-http-server.md](../08-networking-and-api/protocols/03-http-server.md).
+- Протокол прикладного уровня по модели запрос-ответ: клиент шлёт запрос, сервер возвращает ответ. Stateless — сам по себе не хранит состояние между запросами (состояние добавляют cookies/сессии/токены). Текстовый и человекочитаемый в HTTP/1.1, бинарный в HTTP/2; работает поверх TCP (HTTP/1.1, /2) или QUIC/UDP (HTTP/3). См. [protocols/03-http-server.md](../08-networking-and-api/protocols/03-http-server.md).
 
 **HTTP работает поверх какого протокола?**
 
@@ -255,11 +255,11 @@
 - HTTP/1.0 — по одному запросу на TCP-соединение, соединение закрывается после ответа (keep-alive не по умолчанию) → накладные расходы на каждый запрос.
 - HTTP/1.1 — постоянные соединения (`keep-alive`) по умолчанию, конвейеризация (pipelining), обязательный заголовок `Host` (виртуальный хостинг), chunked-кодирование. Главная боль — head-of-line blocking: ответы по соединению идут строго по очереди.
 - HTTP/2 — бинарный фрейминг вместо текста, мультиплексирование многих запросов-стримов в одном TCP-соединении (нет HoL-блокировки на уровне HTTP), сжатие заголовков HPACK, приоритеты, server push. Остаётся HoL на уровне TCP (его решает уже HTTP/3 поверх QUIC).
-- См. [protocols/11-protocol-comparison.md](../08-networking-and-api/protocols/00-protocol-comparison.md).
+- См. [protocols/00-protocol-comparison.md](../08-networking-and-api/protocols/00-protocol-comparison.md).
 
 **Из каких частей состоит HTTP-запрос?**
 
-- Стартовая (request) строка: метод + цель/путь + версия (`GET /v1/items HTTP/1.1`); затем заголовки (`Host`, `Content-Type`, `Authorization`, `Cookie`…); пустая строка-разделитель; опциональное тело (body — для `POST`/`PUT`). См. [protocols/02-http-server.md](../08-networking-and-api/protocols/03-http-server.md).
+- Стартовая (request) строка: метод + цель/путь + версия (`GET /v1/items HTTP/1.1`); затем заголовки (`Host`, `Content-Type`, `Authorization`, `Cookie`…); пустая строка-разделитель; опциональное тело (body — для `POST`/`PUT`). См. [protocols/03-http-server.md](../08-networking-and-api/protocols/03-http-server.md).
 
 **Чем HTTP-ответ отличается от запроса?**
 

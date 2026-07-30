@@ -230,7 +230,7 @@
 
 | Файл | Что внутри | Приоритет |
 |------|-----------|-----------|
-| [protocols/04-rate-limiting.md](../08-networking-and-api/protocols/15-rate-limiting.md) | token bucket, leaky bucket, sliding window, fixed window | ★★★ |
+| [protocols/15-rate-limiting.md](../08-networking-and-api/protocols/15-rate-limiting.md) | token bucket, leaky bucket, sliding window, fixed window | ★★★ |
 
 ---
 

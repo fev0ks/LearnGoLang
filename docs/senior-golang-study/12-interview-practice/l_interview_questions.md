@@ -28,7 +28,7 @@
   - OData — соглашение о синтаксисе запросов и метаданных поверх REST (`$filter`, `$expand`).
 - Пограничный случай — SSE: не отдельный протокол, а формат тела ответа `text/event-stream`. Соединение остаётся обычным HTTP-ответом, который сервер просто не закрывает и дописывает события.
 - Сам HTTP идёт поверх — TCP для HTTP/1.1 и HTTP/2, плюс TLS для https; HTTP/3 — поверх QUIC, то есть уже UDP.
-- См. [protocols/11-protocol-comparison.md](../08-networking-and-api/protocols/00-protocol-comparison.md).
+- См. [protocols/00-protocol-comparison.md](../08-networking-and-api/protocols/00-protocol-comparison.md).
 
 **Какие виды хранилищ знаешь?**
 
@@ -267,7 +267,7 @@
 
 **Как решается проблема дубликатов входящих запросов?**
 
-- Идемпотентность: клиент шлёт `Idempotency-Key`, сервер хранит ключ+результат и при повторе возвращает сохранённый ответ, не выполняя эффект дважды. Плюс дедупликация на уровне БД (уникальные ключи). См. [protocols/07-idempotency.md](../08-networking-and-api/protocols/14-idempotency.md).
+- Идемпотентность: клиент шлёт `Idempotency-Key`, сервер хранит ключ+результат и при повторе возвращает сохранённый ответ, не выполняя эффект дважды. Плюс дедупликация на уровне БД (уникальные ключи). См. [protocols/14-idempotency.md](../08-networking-and-api/protocols/14-idempotency.md).
 
 ### Планировщик, горутины, netpoller
 

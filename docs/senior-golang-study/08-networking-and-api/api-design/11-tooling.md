@@ -399,6 +399,6 @@ func orderToProto(o *domain.Order) *commonv1.Order {
 - [05-payloads-and-types.md](./05-payloads-and-types.md) — `field_behavior` для
   OpenAPI.
 - [13-references.md](./13-references.md) — buf docs, openapi-generator.
-- [../protocols/01-grpc.md](../protocols/06-grpc.md) — gRPC основы.
-- [../protocols/13-openapi-and-swagger.md](../protocols/08-openapi-and-swagger.md) —
+- [../protocols/06-grpc.md](../protocols/06-grpc.md) — gRPC основы.
+- [../protocols/08-openapi-and-swagger.md](../protocols/08-openapi-and-swagger.md) —
   OpenAPI глубже.

@@ -362,5 +362,5 @@ HTTP-сервер часто отрабатывает их сам.
 - [02-url-design.md](./02-url-design.md) — что писать в path.
 - [05-payloads-and-types.md](./05-payloads-and-types.md) — `FieldMask` для PATCH.
 - [06-cross-cutting-concerns.md](./06-cross-cutting-concerns.md) — `Idempotency-Key`.
-- [../protocols/07-idempotency.md](../protocols/14-idempotency.md) — реализация
+- [../protocols/14-idempotency.md](../protocols/14-idempotency.md) — реализация
   идемпотентности на сервере.
