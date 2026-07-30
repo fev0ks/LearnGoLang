@@ -183,7 +183,7 @@
 - Как кладут — ключ прогоняется через хэш-функцию, получается число, из него номер бакета; в бакет кладётся пара ключ-значение.
 - Сложность — доступ по ключу амортизированно O(1).
 - В старой Go-map (`hmap`) — массив бакетов `bmap`, где каждый бакет хранит до 8 пар + массив `tophash` (старшие байты хэшей для быстрого сравнения) + указатель на overflow-бакет.
-- См. [map-internals/01-hmap-before-1.24.md](../01-go-core/map-internals/01-hmap-before-1.24.md).
+- См. [map-internals/02-hmap-before-1.24.md](../01-go-core/map-internals/02-hmap-before-1.24.md).
 
 **Хэш-функция вернула огромное число, а массив фиксированного размера (например, 100 ячеек). Как из большого значения получить индекс?**
 
@@ -216,7 +216,7 @@
 - Условие 1 — средняя загрузка превышает порог (для старой map это load factor ≈ 6.5 элементов на бакет), тогда размер удваивается.
 - Условие 2 — развелось слишком много overflow-бакетов даже без превышения load factor; тогда идёт same-size grow, то есть переупаковка для очистки разреженных бакетов.
 - Как проходит эвакуация — инкрементально: элементы переносятся из старых бакетов в новые порциями при последующих записях и удалениях, а не одним стоп-вызовом.
-- См. [map-internals/01-hmap-before-1.24.md](../01-go-core/map-internals/01-hmap-before-1.24.md).
+- См. [map-internals/02-hmap-before-1.24.md](../01-go-core/map-internals/02-hmap-before-1.24.md).
 
 **Чему равна временная сложность операций старой map в худшем случае?**
 
@@ -244,7 +244,7 @@
 
 **Что такое HTTP-протокол?**
 
-- Протокол прикладного уровня по модели запрос-ответ: клиент шлёт запрос, сервер возвращает ответ. Stateless — сам по себе не хранит состояние между запросами (состояние добавляют cookies/сессии/токены). Текстовый и человекочитаемый в HTTP/1.1, бинарный в HTTP/2; работает поверх TCP (HTTP/1.1, /2) или QUIC/UDP (HTTP/3). См. [protocols/02-http-server.md](../08-networking-and-api/protocols/02-http-server.md).
+- Протокол прикладного уровня по модели запрос-ответ: клиент шлёт запрос, сервер возвращает ответ. Stateless — сам по себе не хранит состояние между запросами (состояние добавляют cookies/сессии/токены). Текстовый и человекочитаемый в HTTP/1.1, бинарный в HTTP/2; работает поверх TCP (HTTP/1.1, /2) или QUIC/UDP (HTTP/3). См. [protocols/02-http-server.md](../08-networking-and-api/protocols/03-http-server.md).
 
 **HTTP работает поверх какого протокола?**
 
@@ -255,11 +255,11 @@
 - HTTP/1.0 — по одному запросу на TCP-соединение, соединение закрывается после ответа (keep-alive не по умолчанию) → накладные расходы на каждый запрос.
 - HTTP/1.1 — постоянные соединения (`keep-alive`) по умолчанию, конвейеризация (pipelining), обязательный заголовок `Host` (виртуальный хостинг), chunked-кодирование. Главная боль — head-of-line blocking: ответы по соединению идут строго по очереди.
 - HTTP/2 — бинарный фрейминг вместо текста, мультиплексирование многих запросов-стримов в одном TCP-соединении (нет HoL-блокировки на уровне HTTP), сжатие заголовков HPACK, приоритеты, server push. Остаётся HoL на уровне TCP (его решает уже HTTP/3 поверх QUIC).
-- См. [protocols/11-protocol-comparison.md](../08-networking-and-api/protocols/11-protocol-comparison.md).
+- См. [protocols/11-protocol-comparison.md](../08-networking-and-api/protocols/00-protocol-comparison.md).
 
 **Из каких частей состоит HTTP-запрос?**
 
-- Стартовая (request) строка: метод + цель/путь + версия (`GET /v1/items HTTP/1.1`); затем заголовки (`Host`, `Content-Type`, `Authorization`, `Cookie`…); пустая строка-разделитель; опциональное тело (body — для `POST`/`PUT`). См. [protocols/02-http-server.md](../08-networking-and-api/protocols/02-http-server.md).
+- Стартовая (request) строка: метод + цель/путь + версия (`GET /v1/items HTTP/1.1`); затем заголовки (`Host`, `Content-Type`, `Authorization`, `Cookie`…); пустая строка-разделитель; опциональное тело (body — для `POST`/`PUT`). См. [protocols/02-http-server.md](../08-networking-and-api/protocols/03-http-server.md).
 
 **Чем HTTP-ответ отличается от запроса?**
 
@@ -370,4 +370,4 @@
 - Контекст и отмена. Если загрузка значения ходит в БД/сеть — пробрасывается ли `context` (таймаут/отмена), а не висит бесконечно под блокировкой.
 - Не держать блокировку на время тяжёлой операции. Под `Lock` нельзя делать сетевой/IO-вызов — это сериализует весь кэш. Загрузку выносят за пределы критической секции.
 - Наблюдаемость и тесты. Метрики hit/miss/evictions, юнит-тесты на конкурентность (`-race`), бенчмарки (`-benchmem`).
-- См. [concurrency-and-performance/03-sync-primitives.md](../01-go-core/concurrency-and-performance/03-sync-primitives.md) и [map-internals/04-sync-map.md](../01-go-core/map-internals/04-sync-map.md).
+- См. [concurrency-and-performance/03-sync-primitives.md](../01-go-core/concurrency-and-performance/03-sync-primitives.md) и [map-internals/sync-map](../01-go-core/map-internals/sync-map/README.md).

@@ -111,7 +111,7 @@
 
 **Почему map не потокобезопасна? Как организовать конкурентный доступ? (~45×)**
 
-- Запись меняет общую структуру (бакеты, рост, эвакуация), и рантайм не синхронизирует это намеренно (скорость по умолчанию); конкурентные чтение+запись — гонка и фатал `concurrent map read and map write`, даже по разным ключам. Решения: `map` + `RWMutex` (общий случай), шардирование по ключу (меньше contention), `sync.Map` (узкие read-heavy сценарии). См. [map-internals/04-sync-map.md](../01-go-core/map-internals/04-sync-map.md).
+- Запись меняет общую структуру (бакеты, рост, эвакуация), и рантайм не синхронизирует это намеренно (скорость по умолчанию); конкурентные чтение+запись — гонка и фатал `concurrent map read and map write`, даже по разным ключам. Решения: `map` + `RWMutex` (общий случай), шардирование по ключу (меньше contention), `sync.Map` (узкие read-heavy сценарии). См. [map-internals/sync-map](../01-go-core/map-internals/sync-map/README.md).
 
 **Что будет при чтении/записи в nil-канал? (~40×)**
 
@@ -272,7 +272,7 @@
 - gRPC — RPC поверх HTTP/2 плюс Protobuf: бинарный (компактнее и быстрее), строгая схема с кодогенерацией, стриминг (4 типа вызовов), дедлайны из коробки.
 - Минусы gRPC — не работает из браузера напрямую (нужен gRPC-Web или gateway), не читается глазами.
 - Выбор — внешние и публичные API это REST; внутренняя service-to-service связь с жёсткими контрактами и требованиями к латентности это gRPC.
-- См. [protocols/01-grpc.md](../08-networking-and-api/protocols/01-grpc.md).
+- См. [protocols/01-grpc.md](../08-networking-and-api/protocols/06-grpc.md).
 
 **Чем отличается HTTP/1.1 от HTTP/2? (~25×)**
 
@@ -280,7 +280,7 @@
 - HTTP/2 — бинарный фрейминг, мультиплексирование многих стримов в одном TCP-соединении, сжатие заголовков HPACK.
 - Что из HTTP/2 не взлетело — server push и схема приоритетов на практике deprecated: браузеры push отключили.
 - Что осталось — HoL на уровне TCP; его решает уже HTTP/3 поверх QUIC.
-- См. [protocols/11-protocol-comparison.md](../08-networking-and-api/protocols/11-protocol-comparison.md).
+- См. [protocols/11-protocol-comparison.md](../08-networking-and-api/protocols/00-protocol-comparison.md).
 
 ---
 
@@ -320,14 +320,14 @@
 - По семантике HTTP — GET/PUT/DELETE идемпотентны, POST нет.
 - Как обеспечить для POST — клиент шлёт Idempotency-Key, сервер атомарно фиксирует ключ (уникальный индекс в БД) и сохраняет результат.
 - Повтор с тем же ключом — отдать сохранённый ответ, не выполняя эффект второй раз.
-- См. [reliability-patterns/06-idempotency.md](../05-system-design/reliability-patterns/06-idempotency.md) и [protocols/07-idempotency.md](../08-networking-and-api/protocols/07-idempotency.md).
+- См. [reliability-patterns/06-idempotency.md](../05-system-design/reliability-patterns/06-idempotency.md) и [protocols/07-idempotency.md](../08-networking-and-api/protocols/14-idempotency.md).
 
 **Чем отличается Kafka от RabbitMQ? Когда что использовать? (~30×)**
 
 - Kafka — durable-лог: партиции на диске, чтение по offset без удаления (retention, реплей), pull-модель, высокий throughput, много независимых consumer-групп.
 - RabbitMQ — брокер очередей (AMQP): умная маршрутизация через exchange и routing key, push-модель, сообщение удаляется после ack, приоритеты и TTL.
 - Когда что — Kafka для событийных стримов, больших потоков и реплея; RabbitMQ для task-очередей, RPC и сложной маршрутизации.
-- См. [07-message-brokers-and-streaming/07-comparison.md](../07-message-brokers-and-streaming/00-comparison.md).
+- См. [07-message-brokers-and-streaming/00-comparison.md](../07-message-brokers-and-streaming/00-comparison.md).
 
 **Что такое graceful shutdown? Как реализовать? (~30×)**
 

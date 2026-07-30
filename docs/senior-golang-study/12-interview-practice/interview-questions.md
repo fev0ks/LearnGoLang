@@ -77,7 +77,7 @@
 
 **Как работают новые map? Чем отличаются от старой реализации?**
 
-- С Go 1.24 встроенный `map` перешёл на Swiss Tables: вместо старой схемы «бакет на 8 пар + цепочка overflow-бакетов» используется открытая адресация группами по 8 слотов с control-байтами (по байту метаданных на слот), что даёт SIMD-сканирование группы, меньше промахов кэша и быстрее lookup/insert при высокой заполненности. Семантика (случайный порядок итерации, запрет конкурентной записи) не изменилась. См. [map-internals/02-swiss-tables-since-1.24.md](../01-go-core/map-internals/02-swiss-tables-since-1.24.md).
+- С Go 1.24 встроенный `map` перешёл на Swiss Tables: вместо старой схемы «бакет на 8 пар + цепочка overflow-бакетов» используется открытая адресация группами по 8 слотов с control-байтами (по байту метаданных на слот), что даёт SIMD-сканирование группы, меньше промахов кэша и быстрее lookup/insert при высокой заполненности. Семантика (случайный порядок итерации, запрет конкурентной записи) не изменилась. См. [map-internals/01-swiss-tables-since-1.24.md](../01-go-core/map-internals/01-swiss-tables-since-1.24.md).
 
 **Что произойдёт при чтении из закрытого канала? А при записи?**
 
@@ -503,7 +503,7 @@
 
 **Из каких частей состоит HTTP-запрос?**
 
-- Стартовая строка (метод + URL/path + версия, напр. `GET /v1/items HTTP/1.1`), заголовки (`Host`, `Content-Type`, `Authorization`…), пустая строка-разделитель и опциональное тело (body, для POST/PUT). См. [protocols/02-http-server.md](../08-networking-and-api/protocols/02-http-server.md).
+- Стартовая строка (метод + URL/path + версия, напр. `GET /v1/items HTTP/1.1`), заголовки (`Host`, `Content-Type`, `Authorization`…), пустая строка-разделитель и опциональное тело (body, для POST/PUT). См. [protocols/02-http-server.md](../08-networking-and-api/protocols/03-http-server.md).
 
 **В чём отличия HTTP и HTTPS? Для чего нужен HTTPS?**
 
@@ -511,7 +511,7 @@
 
 **Зачем нужны таймауты в HTTP-запросах и как их подобрать?**
 
-- Чтобы не висеть бесконечно на медленном/мёртвом пире, не копить горутины и соединения, давать быстрый отказ и работать с ретраями. Раздельные таймауты: connect, TLS, response-header, общий. Подбирают от p99 латентности зависимости с запасом, увязывают с дедлайном вызывающего (`context`) и ретраями, чтобы суммарный бюджет не превышал SLA. См. [reliability-patterns/01-timeouts-and-deadlines.md](../05-system-design/reliability-patterns/01-timeouts-and-deadlines.md) и [protocols/03-http-client.md](../08-networking-and-api/protocols/03-http-client.md).
+- Чтобы не висеть бесконечно на медленном/мёртвом пире, не копить горутины и соединения, давать быстрый отказ и работать с ретраями. Раздельные таймауты: connect, TLS, response-header, общий. Подбирают от p99 латентности зависимости с запасом, увязывают с дедлайном вызывающего (`context`) и ретраями, чтобы суммарный бюджет не превышал SLA. См. [reliability-patterns/01-timeouts-and-deadlines.md](../05-system-design/reliability-patterns/01-timeouts-and-deadlines.md) и [protocols/03-http-client.md](../08-networking-and-api/protocols/04-http-client.md).
 
 **Зачем нужны HTTP-коды и какие бывают?**
 
@@ -527,11 +527,11 @@
 - Как открывается — через HTTP Upgrade (обычный GET с `Upgrade: websocket`); дальше это уже не HTTP, а постоянный двусторонний канал.
 - Где нужен — realtime: чаты, нотификации, лайв-обновления, игры; в отличие от HTTP-поллинга держит одно соединение.
 - Альтернатива — для однонаправленного сервер→клиент проще SSE (поверх HTTP).
-- См. [protocols/05-websocket.md](../08-networking-and-api/protocols/05-websocket.md).
+- См. [protocols/05-websocket.md](../08-networking-and-api/protocols/10-websocket.md).
 
 **Какие протоколы работают поверх HTTP?**
 
-- REST (архитектурный стиль поверх HTTP), gRPC (поверх HTTP/2), GraphQL (обычно POST на один endpoint), SOAP (XML поверх HTTP), WebSocket (апгрейд с HTTP), SSE (server-sent events), WebDAV. То есть HTTP служит транспортом/фундаментом для более специализированных прикладных протоколов. (Не путать с «протоколы поверх TCP/UDP» — там уровнем ниже.) См. [protocols/11-protocol-comparison.md](../08-networking-and-api/protocols/11-protocol-comparison.md).
+- REST (архитектурный стиль поверх HTTP), gRPC (поверх HTTP/2), GraphQL (обычно POST на один endpoint), SOAP (XML поверх HTTP), WebSocket (апгрейд с HTTP), SSE (server-sent events), WebDAV. То есть HTTP служит транспортом/фундаментом для более специализированных прикладных протоколов. (Не путать с «протоколы поверх TCP/UDP» — там уровнем ниже.) См. [protocols/11-protocol-comparison.md](../08-networking-and-api/protocols/00-protocol-comparison.md).
 
 **Что такое NAT?**
 
@@ -539,7 +539,7 @@
 - Как работает — роутер ведёт таблицу трансляций (внутренний IP:порт ↔ внешний порт) и сопоставляет ответы обратно.
 - Плюсы — экономит дефицитные IPv4 и скрывает внутреннюю топологию.
 - Минус — ломает входящие соединения: для p2p/WebRTC нужны port-forwarding, STUN/TURN.
-- См. [linux/03-tcp-sockets.md](../10-devops-and-observability/linux/03-tcp-sockets.md) и [protocols/09-webrtc.md](../08-networking-and-api/protocols/09-webrtc.md).
+- См. [linux/03-tcp-sockets.md](../10-devops-and-observability/linux/03-tcp-sockets.md) и [protocols/09-webrtc.md](../08-networking-and-api/protocols/12-webrtc.md).
 
 **Что такое модель OSI?**
 
@@ -597,7 +597,7 @@
 - Мультиплексирование стримов без head-of-line blocking — потеря в одном стриме не тормозит другие, в отличие от TCP.
 - Connection migration — переключение Wi-Fi↔LTE без разрыва соединения, по connection id.
 - Где живёт логика — надёжность и контроль перегрузки реализованы в самом QUIC (в user space), а не в ядре.
-- См. [protocols/11-protocol-comparison.md](../08-networking-and-api/protocols/11-protocol-comparison.md).
+- См. [protocols/11-protocol-comparison.md](../08-networking-and-api/protocols/00-protocol-comparison.md).
 
 **Какие есть HTTP-методы и что про идемпотентность?**
 
@@ -613,7 +613,7 @@
 - HTTP/1.1 — текстовый, постоянные соединения (keep-alive), но head-of-line blocking: ответы по соединению идут строго по очереди.
 - HTTP/2 — бинарный фрейминг, мультиплексирование множества запросов в одном TCP-соединении, сжатие заголовков HPACK, server push (по факту deprecated — браузеры его отключили). HoL убран на уровне HTTP, но остаётся на уровне TCP: потеря сегмента тормозит все стримы.
 - HTTP/3 — поверх QUIC (UDP): убирает и TCP-HoL (стримы независимы), встроенный TLS 1.3, быстрее установка, connection migration.
-- См. [protocols/11-protocol-comparison.md](../08-networking-and-api/protocols/11-protocol-comparison.md).
+- См. [protocols/11-protocol-comparison.md](../08-networking-and-api/protocols/00-protocol-comparison.md).
 
 **Как устроен TLS-handshake и проверка сертификата? Чем подлинный сертификат отличается от самоподписанного?**
 
@@ -640,7 +640,7 @@
 - Плюсы против REST/JSON — меньше payload и латентность, строгий контракт и кодоген, стриминг, удобно service-to-service.
 - Минусы — не читается глазами, слабая поддержка в браузере (нужен gRPC-Web или grpc-gateway для REST-фасада), сложнее дебажить.
 - Versioning — через эволюцию proto: не переиспользовать номера полей, только добавлять.
-- См. [protocols/01-grpc.md](../08-networking-and-api/protocols/01-grpc.md).
+- См. [protocols/01-grpc.md](../08-networking-and-api/protocols/06-grpc.md).
 
 **Как проверить, открыт ли порт на сервере? Какой процесс его слушает?**
 
@@ -962,7 +962,7 @@
 
 **Что такое идемпотентность запросов?**
 
-- Повторное выполнение запроса даёт тот же результат, что и однократное, без побочных эффектов-дублей. Критично для ретраев и at-least-once доставки. Реализуют через idempotency-key + дедупликацию на сервере; GET/PUT/DELETE идемпотентны по семантике, POST — нет (нужен ключ). См. [reliability-patterns/06-idempotency.md](../05-system-design/reliability-patterns/06-idempotency.md) и [protocols/07-idempotency.md](../08-networking-and-api/protocols/07-idempotency.md).
+- Повторное выполнение запроса даёт тот же результат, что и однократное, без побочных эффектов-дублей. Критично для ретраев и at-least-once доставки. Реализуют через idempotency-key + дедупликацию на сервере; GET/PUT/DELETE идемпотентны по семантике, POST — нет (нужен ключ). См. [reliability-patterns/06-idempotency.md](../05-system-design/reliability-patterns/06-idempotency.md) и [protocols/07-idempotency.md](../08-networking-and-api/protocols/14-idempotency.md).
 
 **В чём разница устойчивой и неустойчивой сортировки?**
 

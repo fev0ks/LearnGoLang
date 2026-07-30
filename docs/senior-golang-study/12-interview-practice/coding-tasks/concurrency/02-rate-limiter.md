@@ -625,5 +625,5 @@ X-RateLimit-Reset: 1620000000
 
 - [DDoS protection](../../../11-security/perimeter-and-traffic-protection/01-ddos-protection.md) — production rate limiter в Go
 - [Rate limiting в reliability patterns](../../../05-system-design/reliability-patterns/04-rate-limiting.md) — system design
-- [HTTP rate limit middleware](../../../08-networking-and-api/protocols/04-rate-limiting.md) — детальный разбор
+- [HTTP rate limit middleware](../../../08-networking-and-api/protocols/15-rate-limiting.md) — детальный разбор
 - [Rate limiter interview case](../../../05-system-design/interview-cases/03-rate-limiter.md) — system design версия задачи

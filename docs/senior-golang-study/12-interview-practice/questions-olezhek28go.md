@@ -200,7 +200,7 @@ func (s *Search) SearchAll(ctx context.Context, query string, servers []string) 
 - `GOMEMLIMIT` (soft limit) заставляет GC работать агрессивнее у границы — способ оттянуть OOM, но не лечит саму утечку.
 - На голом сервере без cgroup нет «мягкого» лимита на процесс — упирается весь хост; в Kubernetes сначала сработал бы cgroup-лимит пода (OOM внутри cgroup).
 
-Глубже: [Virtual memory и paging](../10-devops-and-observability/hardware-and-os/05-virtual-memory-and-paging.md), [Linux virtual memory](../10-devops-and-observability/linux/01-virtual-memory.md), [Garbage collector (GOMEMLIMIT, возврат памяти ОС)](../01-go-core/memory-internals/04-garbage-collector.md), [Поиск утечек и contention](../10-devops-and-observability/incident-investigation-and-profiling/03-finding-leaks-contention-and-memory-problems.md).
+Глубже: [Virtual memory и paging](../10-devops-and-observability/hardware-and-os/05-virtual-memory-and-paging.md), [Linux virtual memory](../10-devops-and-observability/linux/01-virtual-memory.md), [Garbage collector (GOMEMLIMIT, возврат памяти ОС)](../01-go-core/memory-internals/04-garbage-collector.md), [Memory profiling](../01-go-core/profiling/03-memory-profiling.md), [Symptom-driven troubleshooting](../10-devops-and-observability/incident-response-and-investigation/02-symptom-driven-troubleshooting.md).
 
 ---
 
@@ -848,7 +848,7 @@ func (c *ShardedCache) GetOrCreate(key, value string) string {
 - **Готовая альтернатива** — не изобретать: `sync.Map` (read-mostly) или библиотеки вроде `dgraph-io/ristretto`/`puzpuzpuz/xsync`, где шардирование уже внутри.
 </details>
 
-Глубже: [Sync-примитивы (Mutex/RWMutex/singleflight)](../01-go-core/concurrency-and-performance/03-sync-primitives.md), [sync.Map](../01-go-core/map-internals/04-sync-map.md), [Fetcher with cache (code-review)](coding-tasks/code-review/01-fetcher-with-cache.md).
+Глубже: [Sync-примитивы (Mutex/RWMutex/singleflight)](../01-go-core/concurrency-and-performance/03-sync-primitives.md), [sync.Map](../01-go-core/map-internals/sync-map/README.md), [Fetcher with cache (code-review)](coding-tasks/code-review/01-fetcher-with-cache.md).
 
 ---
 
@@ -1138,7 +1138,7 @@ func process(ctx context.Context, jobs []Job) ([]Result, error) {
 Инвариант «**ровно один send на горутину**»: при нормальном завершении send делает `doWork`, а `recover()` возвращает `nil` (второго send нет); при панике основной send не выполняется — отправляет `defer`. В любом случае цикл получает ровно `len(jobs)` значений и не виснет. Буфер `len(jobs)` гарантирует, что и «аварийный» send не заблокируется. Без `recover` паника обрушила бы весь процесс.
 </details>
 
-Глубже: [Worker pool debug (классы goroutine leak)](coding-tasks/concurrency/07-worker-pool-debug.md), [Поиск утечек горутин](../10-devops-and-observability/incident-investigation-and-profiling/03-finding-leaks-contention-and-memory-problems.md), [Goroutine/concurrency profiling](../01-go-core/profiling/04-goroutine-concurrency-profiling.md).
+Глубже: [Worker pool debug (классы goroutine leak)](coding-tasks/concurrency/07-worker-pool-debug.md), [Symptom-driven troubleshooting](../10-devops-and-observability/incident-response-and-investigation/02-symptom-driven-troubleshooting.md), [Goroutine/concurrency profiling](../01-go-core/profiling/04-goroutine-concurrency-profiling.md).
 
 ---
 
@@ -1288,7 +1288,7 @@ func (l *Limiter) Close() { close(l.stop) } // остановить горути
 Поэтому для production обычно берут ленивый пересчёт (как в `golang.org/x/time/rate`), а «канал + тикер» хорош, когда `rps` невелик и важна простота.
 </details>
 
-Глубже: [Rate limiter (coding-task, варианты)](coding-tasks/concurrency/02-rate-limiter.md), [Rate limiting (протоколы)](../08-networking-and-api/protocols/04-rate-limiting.md), [Rate limiting (reliability)](../05-system-design/reliability-patterns/04-rate-limiting.md), [Redis rate limiters](../06-databases/database-systems-catalog/08b-redis-rate-limiters.md).
+Глубже: [Rate limiter (coding-task, варианты)](coding-tasks/concurrency/02-rate-limiter.md), [Rate limiting (протоколы)](../08-networking-and-api/protocols/15-rate-limiting.md), [Rate limiting (reliability)](../05-system-design/reliability-patterns/04-rate-limiting.md), [Redis rate limiters](../06-databases/database-systems-catalog/08b-redis-rate-limiters.md).
 
 ---
 
