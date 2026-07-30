@@ -72,8 +72,8 @@
 
 | Файл | Что внутри | Приоритет |
 |------|-----------|-----------|
-| [01. hmap + bmap (до 1.24)](../01-go-core/map-internals/01-hmap-before-1.24.md) | bucket layout, tophash, overflow chains, incremental evacuation | ★★ |
-| [02. Swiss Tables (1.24+)](../01-go-core/map-internals/02-swiss-tables-since-1.24.md) | open addressing, ctrl bytes, matchH2 bitset, directory | ★★ |
+| [01. Swiss Tables (1.24+)](../01-go-core/map-internals/01-swiss-tables-since-1.24.md) | open addressing, ctrl bytes, matchH2 bitset, directory | ★★ |
+| [02. hmap + bmap (до 1.24)](../01-go-core/map-internals/02-hmap-before-1.24.md) | bucket layout, tophash, overflow chains, incremental evacuation | ★★ |
 
 #### 01 Go Core — Concurrency & Performance (подраздел)
 
@@ -230,7 +230,7 @@
 
 | Файл | Что внутри | Приоритет |
 |------|-----------|-----------|
-| [protocols/04-rate-limiting.md](../08-networking-and-api/protocols/04-rate-limiting.md) | token bucket, leaky bucket, sliding window, fixed window | ★★★ |
+| [protocols/04-rate-limiting.md](../08-networking-and-api/protocols/15-rate-limiting.md) | token bucket, leaky bucket, sliding window, fixed window | ★★★ |
 
 ---
 
@@ -266,11 +266,16 @@
 
 | Файл | Что внутри | Приоритет |
 |------|-----------|-----------|
-| [01-kubernetes-basics-for-backend.md](../10-devops-and-observability/kubernetes/01-kubernetes-basics-for-backend.md) | Pod, Deployment, Service, ConfigMap, основы для backend | ★★★ |
-| [06-probes-and-graceful-shutdown.md](../10-devops-and-observability/kubernetes/06-probes-and-graceful-shutdown.md) | liveness, readiness, startup, SIGTERM grace period | ★★★ |
-| [02-core-objects-and-deployment-flow.md](../10-devops-and-observability/kubernetes/02-core-objects-and-deployment-flow.md) | ReplicaSet, Deployment rollout, revision history | ★★★ |
-| [07-node-failure-rollout-and-config-delivery.md](../10-devops-and-observability/kubernetes/07-node-failure-rollout-and-config-delivery.md) | rollout strategy, node failure, ConfigMap/Secret delivery | ★★ |
-| [03-pod-vs-container.md](../10-devops-and-observability/kubernetes/03-pod-vs-container.md) | sidecar, init container, shared network namespace | ★★ |
+| [01-kubernetes-architecture.md](../10-devops-and-observability/kubernetes/01-kubernetes-architecture.md) | компоненты Kubernetes, их роли и взаимодействие | ★★★ |
+| [02-kubernetes-cluster-and-ha.md](../10-devops-and-observability/kubernetes/02-kubernetes-cluster-and-ha.md) | границы кластера, топология control plane, кворум etcd | ★★★ |
+| [07-probes-and-graceful-shutdown.md](../10-devops-and-observability/kubernetes/07-probes-and-graceful-shutdown.md) | liveness, readiness, startup, SIGTERM grace period | ★★★ |
+| [03-core-objects-and-deployment-flow.md](../10-devops-and-observability/kubernetes/03-core-objects-and-deployment-flow.md) | Deployment, ReplicaSet, StatefulSet, Service и связи между объектами | ★★★ |
+| [11-persistent-storage-pv-pvc-and-storageclass.md](../10-devops-and-observability/kubernetes/11-persistent-storage-pv-pvc-and-storageclass.md) | PV, PVC, StorageClass, CSI, режимы доступа и жизненный цикл данных | ★★★ |
+| [08-node-failure-and-disruptions.md](../10-devops-and-observability/kubernetes/08-node-failure-and-disruptions.md) | отказ узла, drain, выселение, PodDisruptionBudget | ★★ |
+| [09-update-strategies.md](../10-devops-and-observability/kubernetes/09-update-strategies.md) | RollingUpdate, Recreate, OnDelete, canary и blue-green | ★★ |
+| [10-config-and-secret-delivery.md](../10-devops-and-observability/kubernetes/10-config-and-secret-delivery.md) | ConfigMap, Secret, доставка значений в процесс | ★★ |
+| [04-pod-vs-container.md](../10-devops-and-observability/kubernetes/04-pod-vs-container.md) | sidecar, init container, shared network namespace | ★★ |
+| [13-practical-manifest-review.md](../10-devops-and-observability/kubernetes/13-practical-manifest-review.md) | сквозной разбор Ingress, Service, Deployment, StatefulSet, PVC и конфигурации | ★★ |
 
 #### 10 Metrics: Prometheus
 
@@ -313,13 +318,13 @@
 | [06-kibana-and-elasticsearch-cheatsheet.md](../10-devops-and-observability/logging-and-log-shipping/06-kibana-and-elasticsearch-cheatsheet.md) | KQL cheatsheet | ★ |
 | [11-cloud-log-delivery-aws-and-google-cloud.md](../10-devops-and-observability/logging-and-log-shipping/11-cloud-log-delivery-aws-and-google-cloud.md) | CloudWatch, Google Cloud Logging | ★ |
 
-#### 10 Incident Investigation And Profiling
+#### 10 Incident Response And Investigation
 
 | Файл | Что внутри | Приоритет |
 |------|-----------|-----------|
-| [01-how-to-investigate-production-issues.md](../10-devops-and-observability/incident-investigation-and-profiling/01-how-to-investigate-production-issues.md) | методология расследования: logs → metrics → traces → pprof | ★★★ |
-| [02-go-profiling-tracing-and-performance-debugging.md](../10-devops-and-observability/incident-investigation-and-profiling/02-go-profiling-tracing-and-performance-debugging.md) | pprof, runtime/trace, GODEBUG | ★★★ |
-| [03-finding-leaks-contention-and-memory-problems.md](../10-devops-and-observability/incident-investigation-and-profiling/03-finding-leaks-contention-and-memory-problems.md) | goroutine leak, lock contention, memory leak — как найти | ★★★ |
+| [01-incident-response-workflow.md](../10-devops-and-observability/incident-response-and-investigation/01-incident-response-workflow.md) | impact, severity, роли, mitigation, локализация и проверка восстановления | ★★★ |
+| [02-symptom-driven-troubleshooting.md](../10-devops-and-observability/incident-response-and-investigation/02-symptom-driven-troubleshooting.md) | symptom → signal → tool: latency, CPU, memory, backlog, pools и сеть | ★★★ |
+| [03-cross-layer-incident-cases.md](../10-devops-and-observability/incident-response-and-investigation/03-cross-layer-incident-cases.md) | сквозные кейсы приложения, БД, очередей, контейнеров и cache | ★★★ |
 
 #### 09 Testing And Quality
 

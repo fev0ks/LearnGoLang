@@ -1,5 +1,13 @@
 # WebRTC
 
+## Содержание
+
+- [Peer-to-peer: signaling, ICE, STUN/TURN](#peer-to-peer-signaling-ice-stunturn)
+- [WebRTC в Go: Pion](#webrtc-в-go-pion)
+- [WebRTC vs WebSocket](#webrtc-vs-websocket)
+- [Масштабирование WebRTC](#масштабирование-webrtc)
+- [Interview-ready answer](#interview-ready-answer)
+
 WebRTC (Web Real-Time Communication) — браузерный стандарт P2P медиа и данных без сервера-посредника. Видеозвонки, аудиоконференции, peer-to-peer файлообмен.
 
 ---
@@ -8,7 +16,7 @@ WebRTC (Web Real-Time Communication) — браузерный стандарт P
 
 ### Парадокс P2P: как найти друг друга без сервера
 
-P2P соединение без посредника — но чтобы установить прямое соединение, нужно обменяться адресами. Для этого нужен **signaling сервер** (обычно WebSocket).
+P2P соединение без посредника — но чтобы установить прямое соединение, нужно обменяться адресами. Для этого нужен signaling сервер (обычно WebSocket).
 
 ```
 Alice                Signaling Server            Bob
@@ -61,7 +69,7 @@ ICE candidate types:
 
 ### STUN — Session Traversal Utilities for NAT
 
-STUN сервер рассказывает клиенту его **публичный IP** (за NAT):
+STUN сервер рассказывает клиенту его публичный IP (за NAT):
 
 ```
 Client (192.168.1.1) ──STUN request──► STUN Server
@@ -84,6 +92,9 @@ Alice ──────► TURN Server ──────► Bob
 ## WebRTC в Go: Pion
 
 [Pion](https://github.com/pion/webrtc) — реализация WebRTC на Go.
+
+<details>
+<summary>Установка соединения на Pion: конфигурация, ICE, data channel</summary>
 
 ```go
 import "github.com/pion/webrtc/v4"
@@ -147,6 +158,8 @@ pc.SetRemoteDescription(answer)
 candidate := signalingServer.ReceiveICECandidate()
 pc.AddICECandidate(candidate)
 ```
+
+</details>
 
 ---
 

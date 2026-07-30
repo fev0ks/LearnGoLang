@@ -325,7 +325,7 @@ flowchart TB
 
 **Webhook Dispatcher (+ per-vendor circuit breaker).**
 *Зачем:* подписывает payload HMAC, шлёт POST, при сбое — в retry-очередь, после max attempts — в DLQ.
-*Почему per-vendor CB:* лежащий эндпоинт одного vendor'а не должен исчерпывать воркеры и тормозить остальных. Паттерн — [reliability / circuit breaker](../reliability-patterns/03-circuit-breaker.md); приём доставки и подпись — [protocols / webhooks](../../08-networking-and-api/protocols/06-webhooks.md).
+*Почему per-vendor CB:* лежащий эндпоинт одного vendor'а не должен исчерпывать воркеры и тормозить остальных. Паттерн — [reliability / circuit breaker](../reliability-patterns/03-circuit-breaker.md); приём доставки и подпись — [protocols / webhooks](../../08-networking-and-api/protocols/13-webhooks.md).
 
 **Retry Queue (Redis Sorted Set) + DLQ (S3).**
 *Зачем:* отложенные повторы с exponential backoff; необработанное после ~24 ч → dead letter + alert.
@@ -1167,7 +1167,7 @@ Industry standard: **sync с aggressive timeout** (5-10s) + retry.
 ## Связки
 
 - [Outbox pattern](../../04-architecture-and-patterns/patterns/09-saga-and-outbox.md) — основа надёжной доставки events
-- [Webhooks protocol](../../08-networking-and-api/protocols/06-webhooks.md) — design webhook contracts
+- [Webhooks protocol](../../08-networking-and-api/protocols/13-webhooks.md) — design webhook contracts
 - [Idempotency](../reliability-patterns/06-idempotency.md) — at-least-once → idempotent processing
 - [Circuit Breaker](../reliability-patterns/03-circuit-breaker.md) — per-vendor isolation
 - [Retry с Backoff](../reliability-patterns/02-retries-and-backoff.md)

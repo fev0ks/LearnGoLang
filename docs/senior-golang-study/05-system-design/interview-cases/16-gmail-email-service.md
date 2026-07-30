@@ -246,7 +246,7 @@ flowchart TB
 
 **Push Gateway** — real-time-доставка в клиент.
 - *Зачем:* мгновенное «новое письмо» в открытые web/mobile-клиенты (WebSocket/SSE; закрытым — mobile push).
-- *Почему stateless + routing в Redis:* тот же connection-слой, что в [04. Chat](./04-chat-messaging.md); протоколы — [WebSocket](../../08-networking-and-api/protocols/05-websocket.md), [SSE](../../08-networking-and-api/protocols/12-sse-and-realtime.md).
+- *Почему stateless + routing в Redis:* тот же connection-слой, что в [04. Chat](./04-chat-messaging.md); протоколы — [WebSocket](../../08-networking-and-api/protocols/10-websocket.md), [SSE](../../08-networking-and-api/protocols/11-sse-and-realtime.md).
 
 **Mailbox API** — чтение ящика для клиентов.
 - *Зачем:* list/thread/labels/search/flags для клиентов.

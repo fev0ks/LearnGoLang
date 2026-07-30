@@ -1,5 +1,14 @@
 # GraphQL
 
+## Содержание
+
+- [Основные концепции](#основные-концепции)
+- [N+1 проблема и DataLoader](#n1-проблема-и-dataloader)
+- [Go: gqlgen](#go-gqlgen)
+- [Introspection и persisted queries](#introspection-и-persisted-queries)
+- [Когда GraphQL, когда REST](#когда-graphql-когда-rest)
+- [Interview-ready answer](#interview-ready-answer)
+
 GraphQL — язык запросов к API от Facebook (2015). Клиент сам определяет форму ответа. Решает проблему over-fetching и under-fetching REST, но создаёт новые сложности.
 
 ---
@@ -61,7 +70,7 @@ query GetUserWithOrders {
             status
             total
         }
-        # profile НЕ запрашиваем — не вернётся
+        # profile не запрашиваем — в ответе его не будет
     }
 }
 
@@ -272,7 +281,7 @@ query {
 }
 ```
 
-В production часто **отключают** introspection (security — утечка schema):
+В production часто отключают introspection (security — утечка schema):
 
 ```go
 srv := handler.NewDefaultServer(schema)

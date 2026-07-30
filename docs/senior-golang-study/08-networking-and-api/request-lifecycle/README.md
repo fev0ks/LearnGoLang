@@ -1,4 +1,4 @@
-# What Happens When You Open google.com
+# Что происходит при открытии google.com
 
 Этот подпакет разбирает путь запроса от пользовательского ввода в браузере до получения ответа и рендера страницы.
 
@@ -54,20 +54,24 @@ sequenceDiagram
     B->>B: Parse HTML, load assets, render
 ```
 
+---
+
 ## Материалы
 
-- [01 Browser Input And Navigation Start](./01-browser-input-and-navigation-start.md)
-- [02 DNS Resolution And Getting IP](./02-dns-resolution-and-getting-ip.md)
-- [03 TCP, TLS And HTTP Request](./03-tcp-tls-and-http-request.md)
-- [04 CDN, Load Balancer, Reverse Proxy](./04-cdn-load-balancer-reverse-proxy.md)
-- [05 Backend Application And Data Access](./05-backend-application-and-data-access.md)
-- [06 Response, Caching And Browser Rendering](./06-response-return-caching-and-browser-rendering.md)
-- [07 End-to-End Timeline And Where It Breaks](./07-end-to-end-timeline-and-where-it-breaks.md)
+- [01. Ввод в браузере и старт навигации](./01-browser-input-and-navigation-start.md) — omnibox, HSTS, Service Worker, кэш браузера, resource hints, Navigation Timing
+- [02. Разрешение имени и получение адреса](./02-dns-resolution-and-getting-ip.md) — иерархия кэшей и TTL, рекурсивный обход, типы записей, отрицательное кэширование, Happy Eyeballs, DNS в Kubernetes
+- [03. TCP, TLS и HTTP-запрос](./03-tcp-tls-and-http-request.md) — рукопожатия и их цена в круговых задержках, TLS 1.2 против 1.3, 0-RTT и повтор запросов, проверка сертификата, SNI и ALPN
+- [04. CDN, балансировщик, обратный прокси](./04-cdn-load-balancer-reverse-proxy.md) — топология края сети, кэширование на CDN, L4 против L7, алгоритмы балансировки, проверки здоровья, заголовки края
+- [05. Приложение и доступ к данным](./05-backend-application-and-data-access.md) — модель горутин в `net/http`, проброс контекста, пул соединений, параллельные вызовы, порядок middleware
+- [06. Ответ, кэширование и отрисовка](./06-response-return-caching-and-browser-rendering.md) — директивы `Cache-Control`, ETag и условные запросы, `Vary`, инвалидация, критический путь отрисовки и Core Web Vitals
+- [07. Сквозная временная шкала и точки отказа](./07-end-to-end-timeline-and-where-it-breaks.md) — сводная раскладка по фазам с числами, диагностика снаружи внутрь, типовые точки отказа
+
+---
 
 ## Как читать
 
 1. Пройти по порядку 01 → 07 для полного понимания маршрута.
-2. Файл 03 (`TCP, TLS`) — ключевой: TLS 1.2 vs 1.3 RTT cost, HTTP/1.1 vs HTTP/2 vs HTTP/3; глубокий разбор версий HTTP — [14-http2-and-http3.md](../protocols/14-http2-and-http3.md).
+2. Файл 03 (`TCP, TLS`) — ключевой: TLS 1.2 vs 1.3 RTT cost, HTTP/1.1 vs HTTP/2 vs HTTP/3; глубокий разбор версий HTTP — [02-http2-and-http3.md](../protocols/02-http2-and-http3.md).
 3. Файл 05 (`Backend`) — Go-специфика: goroutine model, middleware chain, context propagation, pool exhaustion.
 4. Файл 07 (`End-to-End`) — практика: `curl -w` для измерения фаз, `dig +trace` для DNS, интерпретация Chrome DevTools Timing.
 

@@ -1,13 +1,29 @@
 # 02. URL-дизайн
 
-Базовое правило REST: URL — это **имена ресурсов**, действие — это HTTP-метод.
+## Содержание
+
+- [Правила в одном списке](#правила-в-одном-списке)
+- [Множественное число для коллекций](#множественное-число-для-коллекций)
+- [kebab-case в path](#kebab-case-в-path)
+- [ID в path, фильтры в query](#id-в-path-фильтры-в-query)
+- [Никаких глаголов в URL](#никаких-глаголов-в-url)
+- [Custom actions через `:verb` (AIP-136)](#custom-actions-через-verb-aip-136)
+- [Глубина вложенности](#глубина-вложенности)
+- [Один путь — одна семантика](#один-путь--одна-семантика)
+- [Подресурсы и плоские ресурсы](#подресурсы-и-плоские-ресурсы)
+- [Версия — всегда в URL](#версия--всегда-в-url)
+- [Итоговая шпаргалка](#итоговая-шпаргалка)
+
+Базовое правило REST: URL — это имена ресурсов, действие — это HTTP-метод.
 Глаголы в URL допустимы только как кастомные операции (Google AIP-136), и для
 них есть особая нотация `:verb`. Этот файл — про конкретные правила
 именования.
 
+---
+
 ## Правила в одном списке
 
-1. Коллекции — во **множественном числе**: `/orders`, `/bundles`, `/quizzes`,
+1. Коллекции — во множественном числе: `/orders`, `/bundles`, `/quizzes`,
    `/promo-codes`, `/users`.
 2. Элемент коллекции — `/<collection>/{id}`: `/orders/{orderId}`.
 3. **kebab-case** в path-segment: `/promo-codes`, `/search-criteria`,
@@ -23,6 +39,8 @@
     разными методами без необходимости.
 
 Дальше — обоснование каждого правила и анти-примеры.
+
+---
 
 ## Множественное число для коллекций
 
@@ -55,6 +73,8 @@ GET    /v1/admin/quizzes             # был /v1/admin/quiz/list + /find
 GET    /v1/admin/promo-codes         # был /v1/admin/promo_code/list
 ```
 
+---
+
 ## kebab-case в path
 
 В одном легаси-API одновременно встречается:
@@ -85,6 +105,8 @@ GET    /v1/admin/promo-codes         # был /v1/admin/promo_code/list
 
 Все крупные стайлгайды (Google AIP-122, Microsoft REST Guidelines, Zalando
 RESTful API Guidelines, GitHub API) сходятся на kebab-case в path.
+
+---
 
 ## ID в path, фильтры в query
 
@@ -128,6 +150,8 @@ GET /v1/orders?status=paid&from=2026-01-01&pageSize=50
 GET /v1/admin/quizzes?isActive=true&category=ski
 ```
 
+---
+
 ## Никаких глаголов в URL
 
 Самая частая ошибка. Список глаголов, которые не должны быть отдельными
@@ -158,6 +182,8 @@ GET /v1/admin/quizzes?isActive=true&category=ski
 | `POST /quiz-sessions/start` | `POST /quiz-sessions` (создание) |
 | `POST /quiz-sessions/{id}/complete` | `POST /quiz-sessions/{id}:complete` |
 
+---
+
 ## Custom actions через `:verb` (AIP-136)
 
 Когда операция не ложится в CRUD — есть конкретная нотация:
@@ -184,10 +210,12 @@ POST /v1/orders:batchCancel         # bulk
 - Bulk-операции (`:batchGet`, `:batchUpdate`, `:batchDelete`).
 - Бинарные toggle (`:activate`/`:deactivate`).
 
-Когда **не** уместен:
+Когда не уместен:
 
 - Стандартный CRUD (Create/Read/Update/Delete) — для них есть HTTP-методы.
 - «Просто потому что не определился, какой метод выбрать».
+
+---
 
 ## Глубина вложенности
 
@@ -216,6 +244,8 @@ POST /v1/payment-intents
 `payment-intent` — самостоятельная сущность со своим жизненным циклом, не
 просто sub-resource installment'а. Stripe именно так и делает.
 
+---
+
 ## Один путь — одна семантика
 
 Антипример:
@@ -237,6 +267,8 @@ POST /v1/bundles:search                 # поиск по большому фи�
 POST /v1/search-criteria                # создание сохранённого фильтра
 ```
 
+---
+
 ## Подресурсы и плоские ресурсы
 
 Иногда лучше плоский ресурс верхнего уровня, чем глубокая вложенность:
@@ -256,6 +288,8 @@ GET    /v1/orders/{orderId}/payments    # если нужна вложенная
 
 Если id уникален только в контексте родителя (например, `quiz/{id}/block/{n}`,
 где `n` — порядковый номер блока) — sub-resource.
+
+---
 
 ## Версия — всегда в URL
 
@@ -284,6 +318,8 @@ rpc SearchResortsV2(SearchResortsRequestV2) returns(SearchResortsResponseV2) {
    с понятной семантикой, без суффикса `V2`.
 
 Подробнее — [09-versioning-and-evolution.md](./09-versioning-and-evolution.md).
+
+---
 
 ## Итоговая шпаргалка
 

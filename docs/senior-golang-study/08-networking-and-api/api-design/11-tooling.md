@@ -1,8 +1,22 @@
 # 11. Tooling
 
+## Содержание
+
+- [buf — швейцарский нож для proto](#buf--швейцарский-нож-для-proto)
+- [protoc-gen-openapiv2](#protoc-gen-openapiv2)
+- [protoc-gen-validate (или buf validate)](#protoc-gen-validate-или-buf-validate)
+- [CI-правила](#ci-правила)
+- [Локальный workflow](#локальный-workflow)
+- [Грамотная организация Go-кода вокруг proto](#грамотная-организация-go-кода-вокруг-proto)
+- [Документация для клиентов](#документация-для-клиентов)
+- [Чек-лист по tooling](#чек-лист-по-tooling)
+- [Связанные документы](#связанные-документы)
+
 Хороший дизайн не выживает без инструментов, которые поддерживают дисциплину
 автоматически. Здесь — конкретный стек для proto-monorepo + grpc-gateway +
 OpenAPI.
+
+---
 
 ## buf — швейцарский нож для proto
 
@@ -124,6 +138,8 @@ buf generate
 
 Это серьёзная инвестиция, но окупается на больших командах.
 
+---
+
 ## protoc-gen-openapiv2
 
 Генерация OpenAPI v2 (Swagger) из proto + grpc-gateway аннотаций.
@@ -183,6 +199,8 @@ service OrderService {
 }
 ```
 
+---
+
 ## protoc-gen-validate (или buf validate)
 
 Валидация полей в proto через аннотации, без написания кода:
@@ -225,6 +243,8 @@ message CreateOrderRequest {
   string contactEmail = 1 [(buf.validate.field).string.email = true];
 }
 ```
+
+---
 
 ## CI-правила
 
@@ -273,6 +293,8 @@ jobs:
 - **No personal info in examples:** grep на email-pattern, phone-pattern в
   комментариях.
 
+---
+
 ## Локальный workflow
 
 Для разработчика — pre-commit hook:
@@ -290,6 +312,8 @@ git add gen/
 ```
 
 Это ловит большинство проблем до push'а.
+
+---
 
 ## Грамотная организация Go-кода вокруг proto
 
@@ -310,7 +334,7 @@ github.com/example/myservice/
     server/main.go
 ```
 
-Бизнес-логика (`internal/service/`) **не зависит** от proto. Handlers принимают
+Бизнес-логика (`internal/service/`) не зависит от proto. Handlers принимают
 proto-запрос, конвертируют в domain-объект, вызывают service, конвертируют
 ответ в proto. Это позволяет:
 
@@ -334,7 +358,9 @@ func orderToProto(o *domain.Order) *commonv1.Order {
 }
 ```
 
-Если этих функций много — используй codegen (см. [10-protobuf-repo-layout.md](./10-protobuf-repo-layout.md)).
+Если этих функций много, применяют кодогенерацию (см. [10-protobuf-repo-layout.md](./10-protobuf-repo-layout.md)).
+
+---
 
 ## Документация для клиентов
 
@@ -352,6 +378,8 @@ func orderToProto(o *domain.Order) *commonv1.Order {
 - **Postman:** auto-generated docs из collection.
 - **Свой Swagger UI:** простой `docker run swaggerapi/swagger-ui`.
 
+---
+
 ## Чек-лист по tooling
 
 - [ ] `buf.yaml` с lint-правилами в корне.
@@ -363,12 +391,14 @@ func orderToProto(o *domain.Order) *commonv1.Order {
 - [ ] Custom lint-правило: запрет на `userId`/`tenantId` в request'ах.
 - [ ] CI проверяет, что generated code актуален.
 
+---
+
 ## Связанные документы
 
 - [10-protobuf-repo-layout.md](./10-protobuf-repo-layout.md) — структура репо.
 - [05-payloads-and-types.md](./05-payloads-and-types.md) — `field_behavior` для
   OpenAPI.
 - [13-references.md](./13-references.md) — buf docs, openapi-generator.
-- [../protocols/01-grpc.md](../protocols/01-grpc.md) — gRPC основы.
-- [../protocols/13-openapi-and-swagger.md](../protocols/13-openapi-and-swagger.md) —
+- [../protocols/01-grpc.md](../protocols/06-grpc.md) — gRPC основы.
+- [../protocols/13-openapi-and-swagger.md](../protocols/08-openapi-and-swagger.md) —
   OpenAPI глубже.

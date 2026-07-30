@@ -132,7 +132,7 @@ flowchart TB
 
 **Sync Service.**
 *Зачем:* принимает push от клиента, сравнивает версии, уведомляет другие устройства.
-*Почему отдельно:* sync ≤ 30 сек требует адресной доставки событий онлайн-устройствам через WebSocket/long-polling. Протокол — [networking / WebSocket](../../08-networking-and-api/protocols/05-websocket.md).
+*Почему отдельно:* sync ≤ 30 сек требует адресной доставки событий онлайн-устройствам через WebSocket/long-polling. Протокол — [networking / WebSocket](../../08-networking-and-api/protocols/10-websocket.md).
 
 **S3 (block storage, content-addressed).**
 *Зачем:* durable-хранилище чанков по ключу-хешу, 11 nines из коробки.

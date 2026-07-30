@@ -1,5 +1,13 @@
 # SOAP
 
+## Содержание
+
+- [WSDL, конверт, заголовки, fault](#wsdl-конверт-заголовки-fault)
+- [Когда ещё встречается в 2025](#когда-ещё-встречается-в-2025)
+- [Как вызывать SOAP из Go](#как-вызывать-soap-из-go)
+- [Сравнение с REST/gRPC: почему SOAP проиграл](#сравнение-с-restgrpc-почему-soap-проиграл)
+- [Interview-ready answer](#interview-ready-answer)
+
 SOAP (Simple Object Access Protocol) — XML-based протокол для веб-сервисов, стандарт 1999 года. Сейчас встречается в legacy системах: банки, SAP, государственные сервисы, телеком.
 
 ---
@@ -12,6 +20,9 @@ WSDL (Web Services Description Language) — XML-файл, который опи
 - какие операции доступны
 - типы данных запросов и ответов
 - endpoint URL
+
+<details>
+<summary>Фрагмент WSDL: типы, сообщения, портType, binding</summary>
 
 ```xml
 <!-- Фрагмент WSDL -->
@@ -58,6 +69,8 @@ WSDL (Web Services Description Language) — XML-файл, который опи
   </service>
 </definitions>
 ```
+
+</details>
 
 ### SOAP конверт (Envelope)
 
@@ -118,6 +131,9 @@ WSDL (Web Services Description Language) — XML-файл, который опи
 
 ### Ручной подход (без генерации)
 
+<details>
+<summary>SOAP-вызов вручную: конверт, отправка, разбор ответа</summary>
+
 ```go
 const soapRequest = `<?xml version="1.0" encoding="UTF-8"?>
 <soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
@@ -173,6 +189,8 @@ func getUser(ctx context.Context, userID string) error {
     return nil
 }
 ```
+
+</details>
 
 ### Генерация из WSDL: gowsdl
 

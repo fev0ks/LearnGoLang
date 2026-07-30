@@ -4,22 +4,40 @@
 
 ## Материалы
 
-### [Протоколы и паттерны](./protocols/)
+### [Протоколы и паттерны](./protocols/README.md)
 
-- [01. gRPC](./protocols/01-grpc.md) — Protobuf, 4 типа RPC, кодогенерация, interceptors, health check, reflection, gRPC vs REST
-- [02. HTTP Server in Go](./protocols/02-http-server.md) — `net/http` server, middleware chain, timeouts, graceful shutdown
-- [03. HTTP Client in Go](./protocols/03-http-client.md) — Transport, connection pooling, таймауты, retry с backoff, circuit breaker
-- [04. Rate Limiting](./protocols/04-rate-limiting.md) — алгоритмы, token bucket, sliding window
-- [05. WebSocket](./protocols/05-websocket.md) — Upgrade handshake, framing, opcodes, read/write goroutine паттерн, Hub, pub/sub backplane
-- [06. Webhooks](./protocols/06-webhooks.md) — механика, at-least-once, HMAC-SHA256 signature, idempotency key, outbox паттерн
-- [07. Idempotency](./protocols/07-idempotency.md) — Idempotency-Key header, генерация (UUID/hash), Redis SETNX, PostgreSQL ON CONFLICT, concurrent safety, consumer dedup
-- [08. GraphQL](./protocols/08-graphql.md) — schema/query/mutation/subscription, N+1 + DataLoader, gqlgen, introspection, GraphQL vs REST
-- [09. WebRTC](./protocols/09-webrtc.md) — signaling, ICE/STUN/TURN, SDP offer/answer, Pion в Go, P2P vs SFU
-- [10. SOAP](./protocols/10-soap.md) — WSDL, конверт, заголовки, Fault, SOAP из Go (ручной + gowsdl), почему проиграл
-- [11. Protocol Comparison](./protocols/11-protocol-comparison.md) — большая таблица REST/gRPC/GraphQL/WebSocket/SSE/Webhooks/WebRTC/SOAP, Mermaid decision tree, смешанные архитектуры (Gateway/BFF)
-- [12. SSE и Realtime](./protocols/12-sse-and-realtime.md) — server-sent events, сравнение с WebSocket/polling
-- [13. OpenAPI и Swagger](./protocols/13-openapi-and-swagger.md) — спецификация, кодогенерация, документирование REST API
-- [14. HTTP/1.1, HTTP/2 и HTTP/3](./protocols/14-http2-and-http3.md) — head-of-line blocking на разных уровнях, streams/frames/HPACK, h2c и ALPN, QUIC, как gRPC ложится на HTTP/2, HTTP/2 в Go
+Что здесь протокол, что стиль, что формат описания контракта, а что прикладной паттерн — разобрано в [README каталога](./protocols/README.md).
+
+**Точка входа**
+
+- [00. Сравнение протоколов](./protocols/00-protocol-comparison.md) — большая таблица REST/gRPC/GraphQL/WebSocket/SSE/Webhooks/WebRTC/SOAP, decision tree, смешанные архитектуры (Gateway/BFF)
+
+**Транспорт и HTTP**
+
+- [01. TCP: надёжность, окна и перегрузка](./protocols/01-tcp-mechanics.md) — подтверждения и повторные передачи, окно получателя против окна перегрузки, произведение полосы на задержку, MSS и MTU
+- [02. HTTP/1.1, HTTP/2 и HTTP/3](./protocols/02-http2-and-http3.md) — head-of-line blocking на разных уровнях, streams/frames/HPACK, h2c и ALPN, QUIC, как gRPC ложится на HTTP/2
+- [03. HTTP-сервер в Go](./protocols/03-http-server.md) — `net/http` server, middleware chain, таймауты, graceful shutdown
+- [04. HTTP-клиент в Go](./protocols/04-http-client.md) — Transport, пул соединений, таймауты, повторные попытки с backoff, circuit breaker
+
+**Стили API и контракты**
+
+- [05. REST и семантика HTTP](./protocols/05-rest-and-http-semantics.md) — ограничения Филдинга, уровни зрелости Ричардсона, HATEOAS, полная карта кодов ответов с тонкостями, согласование представлений, условные запросы и оптимистичная блокировка, редиректы, Range, CORS
+- [06. gRPC](./protocols/06-grpc.md) — Protobuf, четыре типа вызовов, кодогенерация, interceptors, health check, reflection, gRPC против REST
+- [07. GraphQL](./protocols/07-graphql.md) — schema/query/mutation/subscription, проблема N+1 и DataLoader, gqlgen, интроспекция, GraphQL против REST
+- [08. OpenAPI и Swagger](./protocols/08-openapi-and-swagger.md) — спецификация, кодогенерация, spec-first против code-first, проверка совместимости, contract testing
+- [09. SOAP](./protocols/09-soap.md) — WSDL, конверт, заголовки, Fault, SOAP из Go, почему проиграл
+
+**Реалтайм**
+
+- [10. WebSocket](./protocols/10-websocket.md) — Upgrade-рукопожатие, кадры и opcodes, паттерн read/write-горутин, Hub, backplane через pub/sub
+- [11. SSE и реалтайм-протоколы](./protocols/11-sse-and-realtime.md) — server-sent events, Last-Event-ID, прокси и балансировщики, сравнение с WebSocket и long polling
+- [12. WebRTC](./protocols/12-webrtc.md) — сигнализация, ICE/STUN/TURN, SDP offer/answer, Pion в Go, P2P против SFU
+
+**Интеграционные паттерны**
+
+- [13. Webhooks](./protocols/13-webhooks.md) — механика, at-least-once, подпись HMAC-SHA256, ключ идемпотентности, outbox
+- [14. Идемпотентность запросов](./protocols/14-idempotency.md) — заголовок Idempotency-Key, Redis SETNX, PostgreSQL ON CONFLICT, конкурентная безопасность, дедупликация на потребителе
+- [15. Ограничение частоты запросов](./protocols/15-rate-limiting.md) — fixed window, sliding window, token bucket, реализация в Redis без гонок, fail-open против fail-closed
 
 ### [API Design](./api-design/)
 

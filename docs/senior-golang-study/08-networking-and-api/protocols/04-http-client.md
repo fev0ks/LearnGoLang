@@ -1,4 +1,16 @@
-# HTTP Client in Go
+# HTTP-клиент в Go
+
+## Содержание
+
+- [`http.DefaultClient` — почему опасен](#httpdefaultclient--почему-опасен)
+- [Правильный `http.Client`](#правильный-httpclient)
+- [Connection pooling — как работает Transport](#connection-pooling--как-работает-transport)
+- [Retry стратегия](#retry-стратегия)
+- [Читать response правильно](#читать-response-правильно)
+- [HTTP/2](#http2)
+- [Типичные паттерны](#типичные-паттерны)
+- [Диагностика](#диагностика)
+- [Interview-ready answer](#interview-ready-answer)
 
 `http.DefaultClient` — ловушка для production кода. Правильный HTTP client в Go требует явной настройки Transport, таймаутов и retry стратегии.
 
@@ -70,7 +82,7 @@ resp, err := client.Do(req)
 
 ## Connection pooling — как работает Transport
 
-`http.Transport` поддерживает **connection pool** (idle connections). Это ключевая оптимизация: не создавать TCP+TLS соединение на каждый запрос.
+`http.Transport` поддерживает connection pool (idle connections). Это ключевая оптимизация: не создавать TCP+TLS соединение на каждый запрос.
 
 ```
 Request 1: dial TCP → TLS handshake → HTTP request → HTTP response → [keep-alive → pool]
@@ -78,7 +90,7 @@ Request 2:                                                             [get from
 ```
 
 **Правила для production:**
-1. Создавай `http.Client` **один раз** — при старте приложения (и переиспользуй)
+1. Создавай `http.Client` один раз — при старте приложения (и переиспользуй)
 2. `http.Transport` не копируй — thread-safe, разделяй между запросами
 3. Всегда закрывай `resp.Body` — иначе соединение не вернётся в pool
 
@@ -244,6 +256,9 @@ client := &http.Client{
 
 ### API Client как сервис
 
+<details>
+<summary>API-клиент как сервис: конструктор, таймауты, разбор ответа</summary>
+
 ```go
 type UserAPIClient struct {
     base   string
@@ -292,6 +307,8 @@ func (c *UserAPIClient) GetUser(ctx context.Context, id string) (*User, error) {
     return &user, nil
 }
 ```
+
+</details>
 
 ### Circuit Breaker (базовый паттерн)
 

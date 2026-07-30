@@ -1,9 +1,29 @@
 # 10. Структура proto-репозитория
 
-Самая частая боль больших proto-кодовых баз — **дублирование message'ей между
-external и internal сервисами** и обилие мапперов между ними. Этот файл — как
+## Содержание
+
+- [Корневой принцип](#корневой-принцип)
+- [Структура директорий](#структура-директорий)
+- [Один доменный тип, один файл](#один-доменный-тип-один-файл)
+- [Один request/response, один файл](#один-requestresponse-один-файл)
+- [External service](#external-service)
+- [Internal service](#internal-service)
+- [Где живёт userId](#где-живёт-userid)
+- [additional_bindings для нескольких HTTP-форм](#additional_bindings-для-нескольких-http-форм)
+- [Когда дублирование message'ей всё-таки оправдано](#когда-дублирование-messageей-всё-таки-оправдано)
+- [Codegen для мапперов](#codegen-для-мапперов)
+- [События и async](#события-и-async)
+- [Antipattern: «общий types.proto на всё»](#antipattern-общий-typesproto-на-всё)
+- [Antipattern: «один сервис = один файл со всеми типами»](#antipattern-один-сервис--один-файл-со-всеми-типами)
+- [Чек-лист для нового proto-файла](#чек-лист-для-нового-proto-файла)
+- [Связанные документы](#связанные-документы)
+
+Самая частая боль больших proto-кодовых баз — дублирование message'ей между
+external и internal сервисами и обилие мапперов между ними. Этот файл — как
 организовать proto-репозиторий так, чтобы дубли не плодились, а мапперы не
 писались вручную.
+
+---
 
 ## Корневой принцип
 
@@ -16,6 +36,8 @@ List, Create, Update, Delete) и переиспользуются между ext
 
 **Различие external vs internal** живёт только в `service`-определении и
 HTTP-аннотациях, не в payload-типах.
+
+---
 
 ## Структура директорий
 
@@ -57,6 +79,8 @@ proto/
 - `services/external/` — публичные HTTP-сервисы с `google.api.http`.
 - `services/internal/` — gRPC-сервисы для service-mesh.
 - `events/` — event-схемы для async-коммуникации.
+
+---
 
 ## Один доменный тип, один файл
 
@@ -105,6 +129,8 @@ enum OrderStatus {
 `Order` здесь — единственный «правдивый» тип во всём API. И external HTTP, и
 internal gRPC, и события — все ссылаются на него.
 
+---
+
 ## Один request/response, один файл
 
 ```protobuf
@@ -151,6 +177,8 @@ message CancelOrderRequest {
 ```
 
 Один набор — для всех сервисов, что работают с Order.
+
+---
 
 ## External service
 
@@ -199,6 +227,8 @@ service BookingService {
 
 Никаких своих request/response. Только импорт `requests/` + `common/` + HTTP-аннотации.
 
+---
+
 ## Internal service
 
 ```protobuf
@@ -232,13 +262,15 @@ message ApplyRefundRequest {
 // ... остальные internal-only типы
 ```
 
-`BookingInternalService` использует **те же** request-типы. Различие:
+`BookingInternalService` использует те же request-типы. Различие:
 
 - Нет HTTP-аннотаций (это gRPC-only в mesh).
 - Есть дополнительные rpc, которые недоступны через external.
 
 **Никаких мапперов между external и internal.** Один `common.v1.Order` — везде
 один и тот же.
+
+---
 
 ## Где живёт userId
 
@@ -268,6 +300,8 @@ func (s *Server) GetOrder(ctx context.Context, req *requestsv1.GetOrderRequest) 
 Поле `Order.userId` остаётся в типе для consistency, но помечено `OUTPUT_ONLY` —
 клиент его не присылает.
 
+---
+
 ## additional_bindings для нескольких HTTP-форм
 
 Один rpc может иметь несколько HTTP-маппингов:
@@ -289,13 +323,15 @@ rpc GetOrder(GetOrderRequest) returns (Order) {
 Не нужно дублировать `GetOrder` в `BookingService` и `AdminBookingService`,
 если логика та же.
 
+---
+
 ## Когда дублирование message'ей всё-таки оправдано
 
 Не всегда «один тип — на всё». Иногда нужна явная anti-corruption boundary:
 
 ### 1. Жирная разница в данных
 
-Internal Payment service знает поля, которые **нельзя** отдавать наружу даже
+Internal Payment service знает поля, которые нельзя отдавать наружу даже
 случайно:
 
 ```protobuf
@@ -311,7 +347,7 @@ message InternalPayment {
 
 В external — `common.v1.Payment` без этих полей. В internal —
 `InternalPayment`, который содержит `Payment` + sensitive. Mapper между ними —
-это **явная** boundary, защищающая от утечки.
+это явная boundary, защищающая от утечки.
 
 ### 2. Версионная развязка
 
@@ -349,6 +385,8 @@ message PublicUser { ...только публичные поля... }
 - Mapper покрыт тестами на field-coverage (если в Internal появится новое
   PII-поле, тест должен предупредить).
 
+---
+
 ## Codegen для мапперов
 
 В Go популярные варианты:
@@ -375,8 +413,10 @@ message PublicUser { ...только публичные поля... }
 
 - **Свой buf-плагин:** на 100 строк — генерация map-функций по proto-аннотациям.
 
-Главное — **не вручную**. 50 строк `dst.Foo = src.Foo` в каждом обработчике —
+Главное — не вручную. 50 строк `dst.Foo = src.Foo` в каждом обработчике —
 гарантированный источник багов.
+
+---
 
 ## События и async
 
@@ -388,7 +428,7 @@ proto/v1/events/
   payment_events.proto      # PaymentSucceededEvent, PaymentFailedEvent
 ```
 
-И **используют те же domain-типы** из `common/`:
+И используют те же domain-типы из `common/`:
 
 ```protobuf
 import "common/booking.proto";
@@ -403,6 +443,8 @@ message BookingPaidEvent {
 поднять консистентность (event имеет полный snapshot, а API — нет) — это
 дополнительные поля внутри события, а не отдельный тип ордера.
 
+---
+
 ## Antipattern: «общий types.proto на всё»
 
 ```
@@ -413,6 +455,8 @@ common/
 Один файл с десятками типов = постоянные конфликты при merge, медленный
 buf-compile, плохая навигация. Разбивай по доменам:
 `booking.proto`, `rec.proto`, `quiz.proto`, `money.proto`.
+
+---
 
 ## Antipattern: «один сервис = один файл со всеми типами»
 
@@ -428,6 +472,8 @@ services/external/booking.proto:
 `services/internal/` без circular dependency. Domain-типы — в `common/`,
 request-shapes — в `requests/`.
 
+---
+
 ## Чек-лист для нового proto-файла
 
 1. Это domain-тип? → `common/<domain>.proto`.
@@ -438,6 +484,8 @@ request-shapes — в `requests/`.
    `OUTPUT_ONLY` или (лучше) убрать.
 6. Update*Request с повторением полей? → переделать на `FieldMask` (AIP-134).
 7. Запустить `buf lint` локально перед PR.
+
+---
 
 ## Связанные документы
 

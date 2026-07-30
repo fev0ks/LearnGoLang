@@ -1,14 +1,28 @@
 # 06. Cross-cutting concerns
 
+## Содержание
+
+- [Список cross-cutting полей](#список-cross-cutting-полей)
+- [userId, tenantId — самое важное](#userid-tenantid--самое-важное)
+- [locale / language](#locale--language)
+- [currency](#currency)
+- [traceId, requestId](#traceid-requestid)
+- [Idempotency-Key](#idempotency-key)
+- [API key / альтернативные токены](#api-key--альтернативные-токены)
+- [Deadline / timeout](#deadline--timeout)
+- [Передача cross-cutting через grpc-gateway](#передача-cross-cutting-через-grpc-gateway)
+- [Frontend / mobile client считает поля «настолько важными, что должны быть в API»](#frontend--mobile-client-считает-поля-настолько-важными-что-должны-быть-в-api)
+- [Связанные документы](#связанные-документы)
+
 Cross-cutting — это «сквозные» поля, которые одинаково присутствуют в большинстве
 ручек API, но не являются доменными данными конкретной операции. Они либо
-приходят из контекста сессии (auth), либо описывают **как** обработать запрос
-(locale, idempotency), а не **что** обработать.
-
+приходят из контекста сессии (auth), либо описывают как обработать запрос
+(locale, idempotency), а не что обработать.
 **Правило: cross-cutting concerns живут в metadata/headers, не в payload.**
-
 Это правило одно убирает огромное количество проблем — security, контракт,
 дублирование external/internal message'ей.
+
+---
 
 ## Список cross-cutting полей
 
@@ -26,6 +40,8 @@ Cross-cutting — это «сквозные» поля, которые один�
 
 Признак, что поле — cross-cutting: оно одинаково для всех ручек, и клиент его
 **не выбирает** — оно принадлежит сессии/среде.
+
+---
 
 ## userId, tenantId — самое важное
 
@@ -107,6 +123,8 @@ metadata из service identity).
 
 4. Через 1-2 версии — удалить поле и зарезервировать номер.
 
+---
+
 ## locale / language
 
 Антипаттерн (в каждом request-message):
@@ -146,10 +164,12 @@ accept-language: en-GB
 
 grpc-gateway автоматически пробрасывает HTTP-заголовки в gRPC metadata.
 
+---
+
 ## currency
 
-Тонкий момент: currency — это иногда **данные** ресурса (валюта прайса,
-зафиксирована в момент создания заказа), а иногда — **preference** клиента
+Тонкий момент: currency — это иногда данные ресурса (валюта прайса,
+зафиксирована в момент создания заказа), а иногда — preference клиента
 («покажи мне в EUR»).
 
 | Тип | Где |
@@ -157,9 +177,11 @@ grpc-gateway автоматически пробрасывает HTTP-загол
 | Валюта данных ресурса (зафиксированная) | в payload (`Money { currencyCode, amountMinor }`) |
 | Предпочтение клиента (что показывать) | header `X-Currency` или из user profile |
 
-Не смешивать. Если клиент хочет «пересчитать в EUR» — это **новая операция**
+Не смешивать. Если клиент хочет «пересчитать в EUR» — это новая операция
 (`POST /v1/orders/{id}:convertCurrency` или query `?displayCurrency=EUR`), а не
 поле в каждом request.
+
+---
 
 ## traceId, requestId
 
@@ -185,6 +207,8 @@ OpenTelemetry SDK (для Go, Python, JS) автоматически читае�
 
 `X-Request-Id` — для request-level логирования, обычно генерируется gateway,
 если не пришёл от клиента.
+
+---
 
 ## Idempotency-Key
 
@@ -213,7 +237,9 @@ message CreatePaymentRequest {
 
 Но лучше — через header + middleware, чтобы поле не загромождало каждый request.
 
-Подробно — в [../protocols/07-idempotency.md](../protocols/07-idempotency.md).
+Подробно — в [../protocols/07-idempotency.md](../protocols/14-idempotency.md).
+
+---
 
 ## API key / альтернативные токены
 
@@ -242,13 +268,17 @@ X-Payment-Token: <payment-specific-token>
 
 В любом случае токен не в теле/query — иначе он попадает в access-log.
 
+---
+
 ## Deadline / timeout
 
 gRPC имеет встроенный `Deadline` через context. grpc-gateway транслирует его в
 HTTP-заголовок `Grpc-Timeout`.
 
 Если нужно client-specified timeout в HTTP API — добавляйте `Request-Timeout`
-header. **Не** добавляйте `timeoutMs` в каждый message.
+header. Не добавляйте `timeoutMs` в каждый message.
+
+---
 
 ## Передача cross-cutting через grpc-gateway
 
@@ -294,6 +324,8 @@ func UserIDFromContext(ctx context.Context) string {
 }
 ```
 
+---
+
 ## Frontend / mobile client считает поля «настолько важными, что должны быть в API»
 
 Бывает соблазн положить в API поля типа `clientVersion`, `platform`, `country`,
@@ -306,7 +338,9 @@ func UserIDFromContext(ctx context.Context) string {
 - `X-Experiment: feed_v2_enabled`
 
 Они часто нужны на серверной стороне для A/B-тестов, feature flags, аналитики.
-Но **не** для бизнес-логики операции. Поэтому — headers.
+Но не для бизнес-логики операции. Поэтому — headers.
+
+---
 
 ## Связанные документы
 
@@ -316,5 +350,5 @@ func UserIDFromContext(ctx context.Context) string {
   postponed deletion.
 - [10-protobuf-repo-layout.md](./10-protobuf-repo-layout.md) — как это помогает
   объединить external/internal message'и.
-- [../protocols/07-idempotency.md](../protocols/07-idempotency.md) — реализация
+- [../protocols/07-idempotency.md](../protocols/14-idempotency.md) — реализация
   идемпотентности.

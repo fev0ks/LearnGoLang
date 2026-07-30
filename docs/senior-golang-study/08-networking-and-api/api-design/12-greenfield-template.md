@@ -1,9 +1,23 @@
 # 12. Greenfield-шаблон
 
+## Содержание
+
+- [Шаг 1. Domain-тип](#шаг-1-domain-тип)
+- [Шаг 2. Request/response](#шаг-2-requestresponse)
+- [Шаг 3. External service](#шаг-3-external-service)
+- [Шаг 4. Internal service](#шаг-4-internal-service)
+- [Шаг 5. Events](#шаг-5-events)
+- [Шаг 6. Handler (Go)](#шаг-6-handler-go)
+- [Чек-лист для нового домена](#чек-лист-для-нового-домена)
+- [Антипример того же домена](#антипример-того-же-домена)
+- [Связанные документы](#связанные-документы)
+
 Шаблон нового домена с нуля. Применяет все принципы из предыдущих файлов.
 Берём пример «Payment» — он закрывает все интересные сценарии (Create, Update
 через FieldMask, custom actions, idempotency, internal-only поля,
 sub-resources).
+
+---
 
 ## Шаг 1. Domain-тип
 
@@ -77,6 +91,8 @@ message PaypalMethod {
 - `Timestamp` для всех момент-полей.
 - `Money` — отдельный тип, никаких `int64 amount`.
 
+---
+
 ## Шаг 2. Request/response
 
 ```protobuf
@@ -140,6 +156,8 @@ message RefundPaymentRequest {
 - Никаких `userId` в request'ах. Не нужен.
 - `Idempotency-Key` — header, не поле.
 - `UpdatePaymentRequest` использует FieldMask — никаких 15 повторяющихся полей.
+
+---
 
 ## Шаг 3. External service
 
@@ -213,6 +231,8 @@ service PaymentService {
   поле внутри body).
 - Каждый rpc возвращает `common.v1.Payment` — единый ресурс.
 
+---
+
 ## Шаг 4. Internal service
 
 ```protobuf
@@ -260,6 +280,8 @@ message RecordProcessorFeeRequest {
 - Добавляет internal-only rpc, которых нет в external.
 - `HandleWebhook` принимает `verifiedPayload` — уже верифицированный на edge.
 
+---
+
 ## Шаг 5. Events
 
 ```protobuf
@@ -299,6 +321,8 @@ message PaymentRefundedEvent {
 - Используется `common.v1.Payment` — событие содержит полный snapshot.
 - `idempotencyKey` — для at-least-once семантики Kafka/PubSub (consumer dedup).
 - Events изолированы от service-определений (не зависят от gRPC).
+
+---
 
 ## Шаг 6. Handler (Go)
 
@@ -353,6 +377,8 @@ func (h *PaymentHandler) CreatePayment(ctx context.Context, req *requestsv1.Crea
 }
 ```
 
+---
+
 ## Чек-лист для нового домена
 
 Когда добавляешь новый домен `X`:
@@ -374,9 +400,11 @@ func (h *PaymentHandler) CreatePayment(ctx context.Context, req *requestsv1.Crea
 - [ ] Idempotency-Key на платежах и других опасных мутациях.
 - [ ] `buf lint` и `buf breaking` зелёные.
 
+---
+
 ## Антипример того же домена
 
-Чтобы было контрастно — как **не** надо:
+Чтобы было контрастно — как не надо:
 
 ```protobuf
 // плохой пример
@@ -427,6 +455,8 @@ service PaymentService {
 
 Каждая строка нарушает какое-то правило из этого раздела. Получившийся API
 будет тяжело документировать, поддерживать, версионировать и валидировать.
+
+---
 
 ## Связанные документы
 

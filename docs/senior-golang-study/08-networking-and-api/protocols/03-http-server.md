@@ -1,4 +1,16 @@
-# HTTP Server in Go
+# HTTP-сервер в Go
+
+## Содержание
+
+- [Базовый сервер](#базовый-сервер)
+- [Middleware chain](#middleware-chain)
+- [Timeouts: зачем и какие](#timeouts-зачем-и-какие)
+- [Graceful shutdown](#graceful-shutdown)
+- [JSON response helpers](#json-response-helpers)
+- [Читать request body безопасно](#читать-request-body-безопасно)
+- [Важные детали `net/http`](#важные-детали-nethttp)
+- [Организация кода (типичная структура)](#организация-кода-типичная-структура)
+- [Interview-ready answer](#interview-ready-answer)
 
 `net/http` — стандартная библиотека, которой хватает для production серверов. Знание её internals объясняет почему third-party фреймворки (Chi, Gin, Echo) добавляют так мало.
 
@@ -67,6 +79,9 @@ func Chain(h http.Handler, middlewares ...Middleware) http.Handler {
 ```
 
 ### Примеры middleware
+
+<details>
+<summary>Полный набор типовых middleware: логирование, восстановление после паники, CORS, аутентификация</summary>
 
 ```go
 // Логирование
@@ -146,6 +161,8 @@ handler := Chain(mux,
     Auth,
 )
 ```
+
+</details>
 
 ---
 
@@ -318,7 +335,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
     if err != nil {
         http.Error(w, "bad request", 400)
         // WriteHeader и тело уже отправлены
-        return // ОБЯЗАТЕЛЬНО return после записи ошибки
+        return // выйти сразу: после записи ошибки писать в ответ уже нельзя
     }
     json.NewEncoder(w).Encode(result) // была бы двойная запись без return
 }

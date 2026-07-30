@@ -1,6 +1,20 @@
 # 13. Ссылки и источники
 
+## Содержание
+
+- [Google AIP — API Improvement Proposals](#google-aip--api-improvement-proposals)
+- [RFC](#rfc)
+- [Публичные стайлгайды](#публичные-стайлгайды)
+- [Документация конкретных API (как пример)](#документация-конкретных-api-как-пример)
+- [Tooling](#tooling)
+- [Книги и статьи](#книги-и-статьи)
+- [Полезные блоги](#полезные-блоги)
+- [Внутренние ссылки](#внутренние-ссылки)
+- [Где практиковаться](#где-практиковаться)
+
 Куда смотреть дальше, когда нужна детализация или авторитетный источник.
+
+---
 
 ## Google AIP — API Improvement Proposals
 
@@ -41,6 +55,8 @@
 | [AIP-234](https://google.aip.dev/234) | Batch methods: Update |
 | [AIP-235](https://google.aip.dev/235) | Batch methods: Delete |
 
+---
+
 ## RFC
 
 | RFC | Тема |
@@ -61,6 +77,8 @@
 | [RFC 6902](https://www.rfc-editor.org/rfc/rfc6902) | JSON Patch |
 | [W3C Trace Context](https://www.w3.org/TR/trace-context/) | `traceparent`/`tracestate` headers |
 
+---
+
 ## Публичные стайлгайды
 
 - [Microsoft REST API Guidelines](https://github.com/microsoft/api-guidelines/blob/vNext/azure/Guidelines.md) — подробный гайд от Microsoft Azure.
@@ -69,12 +87,16 @@
 - [Heroku Platform API Reference](https://devcenter.heroku.com/categories/platform-api) — идеоматичный REST.
 - [JSON:API specification](https://jsonapi.org/) — стандарт для JSON-ответов с relationships, фильтрацией, пагинацией.
 
+---
+
 ## Документация конкретных API (как пример)
 
 - [Stripe API Reference](https://stripe.com/docs/api) — эталон REST API: pagination, idempotency, versioning, errors.
 - [GitHub REST API](https://docs.github.com/en/rest) — большой публичный API с продуманным дизайном.
 - [Twilio API Docs](https://www.twilio.com/docs/usage/api) — единый стиль ошибок, idempotency.
 - [Square API](https://developer.squareup.com/docs) — pagination, idempotency, явные коды ошибок.
+
+---
 
 ## Tooling
 
@@ -87,6 +109,8 @@
 - [OpenAPI Specification](https://swagger.io/specification/) — формат OpenAPI 3.
 - [openapi-generator](https://openapi-generator.tech/) — генерация клиентских SDK из OpenAPI.
 
+---
+
 ## Книги и статьи
 
 - **«REST API Design Rulebook»**, Mark Massé — короткая практичная книга.
@@ -96,6 +120,8 @@
 - **«Building Microservices»**, Sam Newman — главы про API между сервисами.
 - [Roy Fielding's dissertation](https://ics.uci.edu/~fielding/pubs/dissertation/top.htm) — оригинальное определение REST. Читать редко, ссылаться часто.
 
+---
+
 ## Полезные блоги
 
 - [Brandur Leach's blog](https://brandur.org/) — много статей про Stripe API
@@ -104,14 +130,18 @@
 - [Nordic APIs Blog](https://nordicapis.com/blog/) — обзорные статьи.
 - [Microsoft REST API Guidelines blog posts](https://github.com/microsoft/api-guidelines/blob/vNext/Guidelines.md#references) — обоснования правил.
 
+---
+
 ## Внутренние ссылки
 
-- [Раздел про gRPC и protobuf](../protocols/01-grpc.md)
-- [HTTP-сервер на Go](../protocols/02-http-server.md)
-- [Webhooks](../protocols/06-webhooks.md)
-- [Idempotency](../protocols/07-idempotency.md)
-- [OpenAPI и Swagger](../protocols/13-openapi-and-swagger.md)
+- [Раздел про gRPC и protobuf](../protocols/06-grpc.md)
+- [HTTP-сервер на Go](../protocols/03-http-server.md)
+- [Webhooks](../protocols/13-webhooks.md)
+- [Idempotency](../protocols/14-idempotency.md)
+- [OpenAPI и Swagger](../protocols/08-openapi-and-swagger.md)
 - [Раздел про архитектуру и паттерны](../../04-architecture-and-patterns/)
+
+---
 
 ## Где практиковаться
 

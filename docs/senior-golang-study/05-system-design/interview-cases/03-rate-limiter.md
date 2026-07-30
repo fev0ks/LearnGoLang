@@ -207,7 +207,7 @@ flowchart TB
 
 **Rate Limit Middleware (в Gateway).**
 *Зачем:* извлекает ключ (user_id/IP), зовёт Redis, выставляет заголовки `X-RateLimit-*`, пропускает или режет 429.
-*Почему в Gateway, а не в каждом сервисе:* лимит должен считаться один раз на входе; дублировать его в N сервисах — рассинхрон и лишний overhead. Готовые реализации — [networking / rate-limiting](../../08-networking-and-api/protocols/04-rate-limiting.md), паттерн — [reliability / rate-limiting](../reliability-patterns/04-rate-limiting.md).
+*Почему в Gateway, а не в каждом сервисе:* лимит должен считаться один раз на входе; дублировать его в N сервисах — рассинхрон и лишний overhead. Готовые реализации — [networking / rate-limiting](../../08-networking-and-api/protocols/15-rate-limiting.md), паттерн — [reliability / rate-limiting](../reliability-patterns/04-rate-limiting.md).
 
 **Redis Cluster (atomic check + increment).**
 *Зачем:* хранит счётчики окон; Lua-скрипт делает «проверить и инкрементировать» атомарно.
@@ -473,7 +473,7 @@ API:
   }
 ```
 
-Overhead: один gRPC call + Redis = ~1-2ms. Нужно кешировать в сервисе-клиенте при строгих latency требованиях. Протокол — [networking / gRPC](../../08-networking-and-api/protocols/01-grpc.md).
+Overhead: один gRPC call + Redis = ~1-2ms. Нужно кешировать в сервисе-клиенте при строгих latency требованиях. Протокол — [networking / gRPC](../../08-networking-and-api/protocols/06-grpc.md).
 
 ---
 

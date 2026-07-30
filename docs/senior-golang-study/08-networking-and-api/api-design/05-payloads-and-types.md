@@ -1,8 +1,25 @@
 # 05. Payload и типы данных
 
+## Содержание
+
+- [Время: Timestamp vs Date vs string](#время-timestamp-vs-date-vs-string)
+- [Деньги](#деньги)
+- [Enum: canonical стиль](#enum-canonical-стиль)
+- [FieldMask для частичных обновлений](#fieldmask-для-частичных-обновлений)
+- [field_behavior аннотации](#field_behavior-аннотации)
+- [oneof для расширяемых типов](#oneof-для-расширяемых-типов)
+- [reserved для эволюции](#reserved-для-эволюции)
+- [Naming полей](#naming-полей)
+- [Дубль типов из google.protobuf](#дубль-типов-из-googleprotobuf)
+- [Что не класть в payload](#что-не-класть-в-payload)
+- [Шпаргалка по типам](#шпаргалка-по-типам)
+- [Связанные документы](#связанные-документы)
+
 URL — это только половина API. Вторая половина — какие message'и (request/response)
 видят клиенты как JSON. Здесь много мелких, но важных решений, которые
 «навсегда» застревают в контракте.
+
+---
 
 ## Время: Timestamp vs Date vs string
 
@@ -25,7 +42,7 @@ message DateRange {
 
 ### Инстант (момент времени)
 
-`createdAt`, `expiresAt`, `paidAt`, `bookedAt` — это **глобальная** точка во
+`createdAt`, `expiresAt`, `paidAt`, `bookedAt` — это глобальная точка во
 времени. Тип:
 
 ```protobuf
@@ -94,6 +111,8 @@ message Trip {
 - `string from`, `string to` для дат без указания формата. Минимум —
   комментарий «ISO 8601 date".
 
+---
+
 ## Деньги
 
 Правильно — `int64` минорные единицы + currency code:
@@ -126,6 +145,8 @@ message PaymentInfo {
 ```
 
 Парсинг строки в локали с запятой («10,99») сломается. Минорные int — нет.
+
+---
 
 ## Enum: canonical стиль
 
@@ -166,8 +187,10 @@ enum OrderStatus {
 позволяет — неизвестное значение остаётся числом). Но JSON-имя — публичный
 контракт. Менять имя = breaking change.
 
-Поэтому **с первого дня** используйте canonical стиль. Перейти потом — это
+Поэтому с первого дня используйте canonical стиль. Перейти потом — это
 ломать клиентов.
+
+---
 
 ## FieldMask для частичных обновлений
 
@@ -233,6 +256,8 @@ rpc UpdatePromoCode(UpdatePromoCodeRequest) returns (PromoCode) {
 
 Запрос: `PATCH /v1/promo-codes/abc?updateMask=description,discountValue`.
 
+---
+
 ## field_behavior аннотации
 
 Аннотации из `google/api/field_behavior.proto` управляют семантикой полей и
@@ -275,6 +300,8 @@ message Order {
 поле `userId` с `OUTPUT_ONLY` — в схеме клиента его нет, но в proto-сообщении
 оно есть для использования внутри сервиса.
 
+---
+
 ## oneof для расширяемых типов
 
 `oneof` — это «одно из» полей. Полезно для:
@@ -305,13 +332,15 @@ message Question {
 
 - **Старый клиент не понимает новый вариант.** Если добавишь `DateOption` —
   клиенты со старой схемой не смогут его прочитать. Это нормально для эволюции,
-  но **новые варианты должны быть опциональны** для пользовательского сценария.
+  но новые варианты должны быть опциональны для пользовательского сценария.
 - **JSON omitempty.** В Go-generated коде oneof — это интерфейс, который
   сериализуется как `null` при пустом. Внимательно с json.Marshal.
 
+---
+
 ## reserved для эволюции
 
-При удалении поля **никогда не переиспользовать** его номер. Это создаст
+При удалении поля никогда не переиспользовать его номер. Это создаст
 несовместимость со старыми клиентами, у которых сериализованные данные с
 прежней семантикой.
 
@@ -343,6 +372,8 @@ message Question {
 }
 ```
 
+---
+
 ## Naming полей
 
 Правила:
@@ -360,6 +391,8 @@ message Question {
 6. **Один тип под один концепт.** `days` всегда `int32` (не `int64`), `userId`
    всегда `string`. Не «здесь int64, там int32».
 
+---
+
 ## Дубль типов из google.protobuf
 
 Не изобретайте свои `BoolValue` / `StringValue`:
@@ -370,7 +403,7 @@ message BoolValue { bool value = 1; }
 
 // хорошо
 import "google/protobuf/wrappers.proto";
-// и используй google.protobuf.BoolValue
+// и использовать google.protobuf.BoolValue
 ```
 
 Стандартные wrappers решают проблему «значение явно false vs не задано» в proto3
@@ -389,6 +422,8 @@ message Order {
 В сгенерированном Go-коде это будет указатель `*bool` (а не bool), и проверка
 `o.IsActive != nil`.
 
+---
+
 ## Что не класть в payload
 
 Cross-cutting concerns (`userId`, `tenantId`, `locale`, `traceId`,
@@ -397,6 +432,8 @@ Cross-cutting concerns (`userId`, `tenantId`, `locale`, `traceId`,
 
 Если очень надо оставить в proto-сообщении для удобства работы на сервере —
 помечать `OUTPUT_ONLY`, чтобы поле не появилось в публичной схеме.
+
+---
 
 ## Шпаргалка по типам
 
@@ -411,6 +448,8 @@ Cross-cutting concerns (`userId`, `tenantId`, `locale`, `traceId`,
 | Полиморфный тип | `oneof` | `payment_method` |
 | Изменяемый частично | `FieldMask` | `UpdateRequest` |
 | Server-set field | `[(field_behavior) = OUTPUT_ONLY]` | `id`, `createdAt` |
+
+---
 
 ## Связанные документы
 
