@@ -13,6 +13,7 @@
 **Точка входа**
 
 - [00. Сравнение протоколов](./protocols/00-protocol-comparison.md) — большая таблица REST/gRPC/GraphQL/WebSocket/SSE/Webhooks/WebRTC/SOAP, decision tree, смешанные архитектуры (Gateway/BFF)
+- [01. Модель OSI и стек TCP/IP](./protocols/01-osi-and-tcp-ip-model.md) — семь уровней и четыре уровня RFC 1122, инкапсуляция и происхождение MTU/MSS, где модель не сходится (TLS, QUIC, туннели, SNI), L4 против L7, диагностика по уровням
 
 **[01. Транспорт](./protocols/01-transport/README.md)**
 
