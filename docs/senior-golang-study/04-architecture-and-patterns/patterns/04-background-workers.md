@@ -1,18 +1,20 @@
 # Background Workers и Job Orchestration
 
-Фоновые воркеры — отдельный класс задач в Go: graceful shutdown, worker pools, распределённые lease'ы, защита от дублирования. Спрашивают на интервью именно детали реализации.
-
 ## Содержание
 
 - [Типы фоновых задач](#типы-фоновых-задач)
 - [Worker pool](#worker-pool)
-- [Graceful shutdown](#graceful-shutdown) → [подробнее](./08-graceful-shutdown.md)
-- [Periodic jobs (cron-style)](#periodic-jobs-cron-style)
+- [Graceful shutdown](#graceful-shutdown)
+- [Периодические задачи](#периодические-задачи)
 - [Distributed lease: один воркер в кластере](#distributed-lease-один-воркер-в-кластере)
-- [Idempotent workers](#idempotent-workers)
-- [Backpressure и bounded concurrency](#backpressure-и-bounded-concurrency)
-- [Observability воркеров](#observability-воркеров)
+- [Идемпотентные воркеры](#идемпотентные-воркеры)
+- [Backpressure и ограничение параллелизма](#backpressure-и-ограничение-параллелизма)
+- [Наблюдаемость воркеров](#наблюдаемость-воркеров)
 - [Interview-ready answer](#interview-ready-answer)
+
+Фоновый воркер отличается от обработчика HTTP-запроса тем, что у него нет клиента, который заметит проблему. Никто не ждёт ответа, никто не увидит ошибку 500, и сбой обнаруживается по косвенным признакам: отчёт не пришёл, письмо не отправлено, статус заказа завис.
+
+Отсюда четыре темы, которые в фоновой обработке приходится решать явно: корректная остановка при деплое, ограничение параллелизма, единственность периодической задачи в кластере из нескольких реплик и устойчивость к повторной обработке.
 
 ---
 
@@ -20,59 +22,61 @@
 
 | Тип | Описание | Пример |
 |---|---|---|
-| **One-shot** | Выполнить один раз и завершить | Миграция данных |
-| **Periodic** | Запускаться по расписанию | Отчёт раз в сутки |
-| **Queue consumer** | Читать задачи из очереди | Обработка заказов |
-| **Reconciler** | Периодически сверять состояние | Sync с внешним API |
-| **Event listener** | Реагировать на события из брокера | Kafka consumer |
-| **Scheduled at-time** | Запустить в определённое время | Напоминание пользователю |
+| One-shot | Выполнить один раз и завершить | Миграция данных |
+| Periodic | Запускаться по расписанию | Отчёт раз в сутки |
+| Queue consumer | Читать задачи из очереди | Обработка заказов |
+| Reconciler | Периодически сверять состояние | Синхронизация с внешним API |
+| Event listener | Реагировать на события из брокера | Kafka consumer |
+| Scheduled at-time | Запустить в определённое время | Напоминание пользователю |
+
+Различие между reconciler и event listener важнее, чем кажется. Слушатель событий реагирует на факт изменения и ломается, если событие потеряно. Reconciler сравнивает желаемое состояние с фактическим и на следующем цикле исправляет расхождение сам — потеря события для него не событие вовсе. Подробнее — в [Architecture Patterns](./02-architecture-patterns.md).
 
 ---
 
 ## Worker pool
 
-Ограниченный пул воркеров защищает от self-DoS под нагрузкой.
+Ограниченный пул воркеров защищает сервис от собственной нагрузки: количество одновременно выполняемых задач фиксируется, а всё, что сверх этого, ждёт в канале.
 
 ```go
+var ErrPoolClosed = errors.New("worker pool is closed")
+
 type WorkerPool struct {
-    workers  int
-    jobs     chan Job
-    wg       sync.WaitGroup
-    ctx      context.Context
-    cancel   context.CancelFunc
+    workers int
+    jobs    chan Job
+    wg      sync.WaitGroup
+
+    mu     sync.RWMutex // защищает closed и запрещает send после close(jobs)
+    closed bool
 }
 
-func NewWorkerPool(workers int) *WorkerPool {
-    ctx, cancel := context.WithCancel(context.Background())
+func NewWorkerPool(workers, queueSize int) *WorkerPool {
     return &WorkerPool{
         workers: workers,
-        jobs:    make(chan Job, workers*2),  // буфер = 2x количество воркеров
-        ctx:     ctx,
-        cancel:  cancel,
+        jobs:    make(chan Job, queueSize),
     }
 }
 
-func (p *WorkerPool) Start() {
+func (p *WorkerPool) Start(ctx context.Context) {
     for i := 0; i < p.workers; i++ {
         p.wg.Add(1)
-        go func(id int) {
+        go func() {
             defer p.wg.Done()
-            for {
-                select {
-                case job, ok := <-p.jobs:
-                    if !ok {
-                        return  // канал закрыт
-                    }
-                    p.process(job)
-                case <-p.ctx.Done():
-                    return
-                }
+            // range по каналу выходит, когда канал закрыт И опустошён:
+            // принятые задачи не теряются при остановке.
+            for job := range p.jobs {
+                p.process(ctx, job)
             }
-        }(i)
+        }()
     }
 }
 
 func (p *WorkerPool) Submit(ctx context.Context, job Job) error {
+    p.mu.RLock()
+    defer p.mu.RUnlock()
+
+    if p.closed {
+        return ErrPoolClosed
+    }
     select {
     case p.jobs <- job:
         return nil
@@ -81,20 +85,50 @@ func (p *WorkerPool) Submit(ctx context.Context, job Job) error {
     }
 }
 
-func (p *WorkerPool) Shutdown() {
-    p.cancel()
-    close(p.jobs)  // сигнал воркерам что задач больше не будет
-    p.wg.Wait()    // ждём завершения текущих задач
+func (p *WorkerPool) Shutdown(ctx context.Context) error {
+    p.mu.Lock()
+    if p.closed {
+        p.mu.Unlock()
+        return nil
+    }
+    p.closed = true
+    close(p.jobs) // под Lock ни один Submit не находится внутри send
+    p.mu.Unlock()
+
+    done := make(chan struct{})
+    go func() {
+        p.wg.Wait()
+        close(done)
+    }()
+
+    select {
+    case <-done:
+        return nil
+    case <-ctx.Done():
+        return fmt.Errorf("worker pool shutdown: %w", ctx.Err())
+    }
 }
 ```
+
+Три места в этом коде заслуживают отдельного внимания, потому что именно в них ломаются самодельные пулы.
+
+**Почему `close(jobs)` под мьютексом, а не просто `close`.** Закрывать канал имеет право только сторона, которая в него пишет. Если `Shutdown` закроет канал в момент, когда `Submit` из другой горутины выполняет `p.jobs <- job`, программа падает с `send on closed channel` — и падает редко, под нагрузкой, в момент деплоя. `RLock` в `Submit` и `Lock` в `Shutdown` дают гарантию: пока идёт закрытие, ни один отправитель не находится внутри отправки, а все последующие видят `closed == true` и получают ошибку.
+
+**Почему `for range`, а не `select` с `ctx.Done()`.** Соблазн написать в воркере `select` из двух веток — задача и отмена контекста — приводит к потере задач: как только контекст отменён, обе ветки готовы одновременно, и `select` выбирает случайную. Половина очереди при этом просто исчезает. `for range` по каналу таких вариантов не оставляет: воркер выйдет только после того, как канал закрыт и пуст. Ограничение по времени вносится отдельно — через контекст самого `Shutdown`.
+
+**Зачем `Shutdown` принимает контекст.** Без таймаута зависшая задача держит процесс до `SIGKILL`. Контекст переводит «ждём завершения» в «ждём не дольше N секунд, дальше возвращаем ошибку и даём вызывающему решить». Значение N выбирается меньше `terminationGracePeriodSeconds` в Kubernetes — подробности в [08. Graceful Shutdown](./08-graceful-shutdown.md).
 
 **Выбор размера пула:**
 
 | Тип задачи | Рекомендация |
 |---|---|
 | CPU-bound | `runtime.NumCPU()` или `runtime.NumCPU() + 1` |
-| IO-bound (DB, HTTP) | `50–500`, зависит от upstream capacity |
-| Mixed | Профилировать, начать с `runtime.NumCPU() * 4` |
+| IO-bound (БД, HTTP) | По ёмкости получателя, обычно десятки-сотни |
+| Смешанная | Измерить; отправная точка — `runtime.NumCPU() * 4` |
+
+Числа во второй строке берутся не из воздуха. Для задач, упирающихся в базу, потолок задаёт пул соединений: тридцать воркеров при `MaxOpenConns=10` не дают тройного ускорения — двадцать из них стоят в очереди за соединением, а нагрузка на планировщик и память растёт. Разумная отправная точка — размер пула соединений; дальше значение подбирается по замеру пропускной способности, а не по интуиции.
+
+Размер буфера канала (`queueSize`) отвечает за другое — за то, сколько задач допустимо принять в память до того, как `Submit` начнёт блокироваться. Нулевой буфер означает, что отправитель ждёт свободного воркера; это самый честный вариант и хорошая настройка по умолчанию. Буфер сглаживает короткие всплески, но большой буфер лишь маскирует нехватку воркеров: очередь растёт, задачи стареют, а при падении процесса всё принятое в память теряется.
 
 ---
 
@@ -106,7 +140,7 @@ func (p *WorkerPool) Shutdown() {
 
 ---
 
-## Periodic jobs (cron-style)
+## Периодические задачи
 
 ```go
 // Простой ticker-based job
@@ -137,6 +171,25 @@ go RunPeriodic(ctx, 5*time.Minute, reconciler.Reconcile, logger)
 go RunPeriodic(ctx, 1*time.Hour, reporter.GenerateHourly, logger)
 ```
 
+У такого цикла есть два свойства, о которых стоит знать заранее.
+
+**Тики не накапливаются.** У `time.Ticker` буфер канала равен единице, и если очередной тик приходит, пока предыдущий ещё не прочитан, он отбрасывается. Для задачи, которая иногда выполняется дольше интервала, это скорее защита: очередь запусков не растёт, отставание не превращается в лавину. Но и рассчитывать на «ровно 12 запусков в час» нельзя — при `interval = 5 минут` и обработке в 7 минут запуск происходит примерно раз в 7 минут, а не по расписанию.
+
+**Все реплики стартуют синхронно.** После общего деплоя поды поднимаются почти одновременно, немедленный первый вызов `fn(ctx)` происходит у всех сразу, и дальше тики совпадают. Получается регулярный всплеск нагрузки на базу или внешний API от всех реплик разом. Лечится случайной задержкой перед началом цикла:
+
+```go
+// Разводим реплики по времени: случайный сдвиг в диапазоне 0..interval.
+// rand — это math/rand/v2 (Go 1.22+), глобальный источник в нём
+// уже безопасен для одновременного использования и не требует Seed.
+select {
+case <-time.After(time.Duration(rand.Int64N(int64(interval)))):
+case <-ctx.Done():
+    return
+}
+```
+
+Для задачи, которая и так защищена распределённой блокировкой (следующий раздел), сдвиг менее важен: лишние реплики просто не получат блокировку. Для задачи без блокировки — обязателен.
+
 **Cron-библиотека для сложных расписаний:**
 
 ```go
@@ -161,139 +214,264 @@ defer c.Stop()
 
 ## Distributed lease: один воркер в кластере
 
-**Проблема:** есть 3 реплики сервиса. Periodic job должна запускаться только на одной из них (иначе дублирование).
+**Проблема:** у сервиса три реплики. Периодическая задача должна выполняться только на одной из них, иначе отчёт сформируется трижды, а письмо уйдёт клиенту три раза.
+
+Готового «главного» узла в такой схеме нет: реплики равноправны и друг о друге не знают. Роль арбитра берёт на себя внешнее хранилище, у которого есть атомарная операция «занять, если свободно».
 
 ```go
+var ErrLockLost = errors.New("distributed lock lost")
+
 // Distributed lock через Redis
 type DistributedLock struct {
     redis  *redis.Client
     key    string
     ttl    time.Duration
-    nodeID string
+    nodeID string // уникален для реплики: имя пода или UUID при старте
 }
 
+// TryAcquire занимает ключ, если он свободен.
+// SET key nodeID NX EX ttl атомарен: одновременную попытку выигрывает
+// ровно одна реплика, остальные получают false.
 func (l *DistributedLock) TryAcquire(ctx context.Context) (bool, error) {
-    // SET key nodeID NX EX ttl — атомарная операция
-    ok, err := l.redis.SetNX(ctx, l.key, l.nodeID, l.ttl).Result()
-    return ok, err
+    return l.redis.SetNX(ctx, l.key, l.nodeID, l.ttl).Result()
 }
 
+// Renew продлевает TTL, но только если ключ всё ещё наш.
+// Проверка и продление обязаны быть одной операцией, поэтому Lua-скрипт:
+// между отдельными GET и EXPIRE ключ мог протухнуть и достаться другому,
+// и тогда EXPIRE продлил бы чужую блокировку.
 func (l *DistributedLock) Renew(ctx context.Context) error {
-    // Продлить TTL если мы ещё держим lock
-    script := `
+    const script = `
         if redis.call("GET", KEYS[1]) == ARGV[1] then
             return redis.call("EXPIRE", KEYS[1], ARGV[2])
         end
         return 0
     `
-    result, err := l.redis.Eval(ctx, script, []string{l.key}, l.nodeID, int(l.ttl.Seconds())).Int()
-    if result == 0 {
-        return errors.New("lock lost")
+    res, err := l.redis.Eval(ctx, script,
+        []string{l.key}, l.nodeID, int(l.ttl.Seconds())).Int()
+    if err != nil {
+        return fmt.Errorf("renew lock: %w", err)
     }
-    return err
+    if res == 0 {
+        return ErrLockLost
+    }
+    return nil
 }
 
-// Использование в periodic job
-func RunWithLease(ctx context.Context, lock *DistributedLock, interval time.Duration, fn func(ctx context.Context) error) {
+// Release снимает блокировку, тоже с проверкой владельца:
+// иначе задача, затянувшаяся дольше TTL, удалит чужой ключ.
+func (l *DistributedLock) Release(ctx context.Context) error {
+    const script = `
+        if redis.call("GET", KEYS[1]) == ARGV[1] then
+            return redis.call("DEL", KEYS[1])
+        end
+        return 0
+    `
+    _, err := l.redis.Eval(ctx, script, []string{l.key}, l.nodeID).Int()
+    return err
+}
+```
+
+Продление TTL нужно ровно на время выполнения задачи, поэтому цикл продления живёт внутри одного запуска, а не рядом с ним:
+
+```go
+func RunWithLease(
+    ctx context.Context,
+    lock *DistributedLock,
+    interval time.Duration,
+    fn func(ctx context.Context) error,
+    log *slog.Logger,
+) {
     ticker := time.NewTicker(interval)
     defer ticker.Stop()
-
-    renewTicker := time.NewTicker(l.ttl / 3)  // продлевать каждые TTL/3
-    defer renewTicker.Stop()
 
     for {
         select {
         case <-ticker.C:
             acquired, err := lock.TryAcquire(ctx)
-            if err != nil || !acquired {
-                continue  // другой инстанс держит lock
+            if err != nil {
+                log.Error("acquire lock", "err", err)
+                continue
             }
-            if err := fn(ctx); err != nil {
-                log.Error("job error", "err", err)
+            if !acquired {
+                continue // блокировку держит другая реплика
             }
-
-        case <-renewTicker.C:
-            if err := lock.Renew(ctx); err != nil {
-                log.Warn("lock lost, skipping renewal")
-            }
+            runOnce(ctx, lock, fn, log)
 
         case <-ctx.Done():
             return
         }
     }
 }
+
+func runOnce(
+    ctx context.Context,
+    lock *DistributedLock,
+    fn func(ctx context.Context) error,
+    log *slog.Logger,
+) {
+    // Контекст задачи отменяется, если блокировка потеряна:
+    // продолжать работу без неё нельзя — её уже мог взять кто-то другой.
+    jobCtx, cancel := context.WithCancel(ctx)
+    defer cancel()
+
+    var wg sync.WaitGroup
+    wg.Add(1)
+    go func() {
+        defer wg.Done()
+        // TTL/3 — не меньше двух попыток продления до истечения срока,
+        // так одна сетевая ошибка не приводит к потере блокировки.
+        t := time.NewTicker(lock.ttl / 3)
+        defer t.Stop()
+        for {
+            select {
+            case <-t.C:
+                if err := lock.Renew(jobCtx); err != nil {
+                    log.Warn("lock lost, cancelling job", "err", err)
+                    cancel()
+                    return
+                }
+            case <-jobCtx.Done():
+                return
+            }
+        }
+    }()
+
+    if err := fn(jobCtx); err != nil {
+        log.Error("job error", "err", err)
+    }
+    cancel()
+    wg.Wait()
+
+    // Release с новым контекстом: jobCtx уже отменён,
+    // а запрос в Redis всё ещё нужно выполнить.
+    relCtx, relCancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+    defer relCancel()
+    if err := lock.Release(relCtx); err != nil {
+        log.Warn("release lock", "err", err) // не критично: ключ протухнет по TTL
+    }
+}
 ```
+
+**Чего такая блокировка не гарантирует.** Redis-блокировка ограничивает время, а не доступ. Реплика может «зависнуть» — попасть под долгую паузу GC, потерять сеть, быть остановленной планировщиком — и очнуться уже после истечения TTL, когда ключ занят другой репликой. Формально блокировки у неё больше нет, но код об этом ещё не знает и продолжает писать в базу.
+
+Отмена контекста при потере блокировки, как в примере, сокращает окно, но не закрывает его: между проверкой и записью всегда есть промежуток. Полностью проблему решает только защита на стороне получателя записи — сравнение номера владения (`fencing token`) или условное обновление по версии строки. Практический вывод простой: распределённая блокировка годится как средство от дублирования работы, но не как замена идемпотентности.
 
 **Альтернатива через PostgreSQL Advisory Locks:**
 
 ```go
-func withAdvisoryLock(ctx context.Context, db *pgxpool.Pool, lockID int64, fn func() error) error {
+func withAdvisoryLock(
+    ctx context.Context,
+    db *pgxpool.Pool,
+    lockID int64,
+    fn func(ctx context.Context) error,
+) error {
+    // Блокировка живёт в рамках соединения, поэтому соединение
+    // берётся из пула явно и удерживается до конца работы.
     conn, err := db.Acquire(ctx)
     if err != nil {
-        return err
+        return fmt.Errorf("acquire conn: %w", err)
     }
     defer conn.Release()
 
-    // Попытаться взять lock (non-blocking)
     var acquired bool
     if err := conn.QueryRow(ctx,
         "SELECT pg_try_advisory_lock($1)", lockID).Scan(&acquired); err != nil {
-        return err
+        return fmt.Errorf("try advisory lock: %w", err)
     }
     if !acquired {
-        return nil  // другой инстанс держит lock, пропустить
+        return nil // блокировку держит другая реплика, пропускаем цикл
     }
-    defer conn.Exec(ctx, "SELECT pg_advisory_unlock($1)", lockID)
 
-    return fn()
+    // Снятие — с собственным контекстом: основной может быть уже отменён,
+    // а незакрытая блокировка вернётся в пул вместе с соединением.
+    defer func() {
+        unlockCtx, cancel := context.WithTimeout(
+            context.WithoutCancel(ctx), 5*time.Second)
+        defer cancel()
+        if _, err := conn.Exec(unlockCtx,
+            "SELECT pg_advisory_unlock($1)", lockID); err != nil {
+            // Не снятая блокировка отпустится сама при закрытии соединения,
+            // но до тех пор следующие циклы будут пропускаться.
+            log.Error("advisory unlock failed", "err", err, "lock_id", lockID)
+        }
+    }()
+
+    return fn(ctx)
 }
-
-// Использование
-go func() {
-    ticker := time.NewTicker(5 * time.Minute)
-    for range ticker.C {
-        withAdvisoryLock(ctx, db, 42, func() error {
-            return reconcile(ctx)
-        })
-    }
-}()
 ```
+
+Разница между двумя вариантами не в удобстве, а в модели отказа.
+
+| | Redis `SET NX EX` | `pg_try_advisory_lock` |
+|---|---|---|
+| Что освобождает блокировку | Истечение TTL | Закрытие сессии PostgreSQL |
+| Реплика зависла | Блокировка уйдёт другому через TTL | Блокировка держится, пока жива сессия |
+| Реплика умерла | Ждём TTL | Освобождается сразу, как сервер заметит разрыв |
+| Нужна ли отдельная система | Да, Redis | Нет, если база уже есть |
+| Главный риск | Работа двоих после истечения TTL | Зависший процесс блокирует задачу надолго |
+
+Advisory lock точнее в определении «узел умер» — за этим следит сам PostgreSQL. Но с пулом соединений с ним нужно обращаться аккуратно: блокировка привязана к сессии, а не к транзакции, поэтому соединение приходится удерживать явно и возвращать в пул только после снятия. Возврат соединения с невыпущенной блокировкой означает, что следующий владелец этого соединения унаследует её, а задача будет пропускаться до перезапуска процесса. Транзакционный вариант `pg_advisory_xact_lock` этой проблемы лишён — блокировка снимается при завершении транзакции автоматически, — но требует держать транзакцию открытой всё время работы задачи.
 
 ---
 
-## Idempotent workers
+## Идемпотентные воркеры
 
-Воркер должен быть idempotent: повторная обработка одного сообщения не ломает систему.
+Повторная обработка одного и того же сообщения — не исключительная ситуация, а норма работы брокера. Потребитель успел выполнить работу, но не успел подтвердить смещение; произошла перебалансировка группы; сработал повтор после таймаута — во всех случаях сообщение приходит второй раз. Брокеры дают at-least-once, и защита от повторов — обязанность воркера.
+
+Базовая идея: отметка об обработке хранится в той же базе, что и результат работы, и записывается той же транзакцией. Тогда «работа выполнена» и «сообщение отмечено» становятся одним неделимым фактом.
 
 ```go
 func (w *Worker) processOrder(ctx context.Context, msg Message) error {
     var event OrderCreatedEvent
     if err := json.Unmarshal(msg.Body, &event); err != nil {
-        return fmt.Errorf("unmarshal: %w", err)
+        // Разобрать не удалось и не удастся — повтор не поможет.
+        // Такое сообщение отправляют в DLQ, а не возвращают брокеру.
+        return fmt.Errorf("unmarshal %s: %w", msg.ID, err)
     }
 
-    // Idempotency check: уже обработали это событие?
-    processed, err := w.db.ExecContext(ctx, `
+    tx, err := w.db.BeginTx(ctx, nil)
+    if err != nil {
+        return fmt.Errorf("begin tx: %w", err)
+    }
+    defer tx.Rollback() //nolint:errcheck // no-op после успешного Commit
+
+    // Отметка о сообщении. Если строка уже есть, INSERT не вставит ничего
+    // и RowsAffected вернёт 0 — значит, сообщение уже обработано.
+    res, err := tx.ExecContext(ctx, `
         INSERT INTO processed_messages (message_id, processed_at)
         VALUES ($1, NOW())
         ON CONFLICT (message_id) DO NOTHING
     `, msg.ID)
     if err != nil {
-        return fmt.Errorf("idempotency check: %w", err)
+        return fmt.Errorf("mark message %s: %w", msg.ID, err)
     }
-    if processed.RowsAffected() == 0 {
-        // Уже обработано — idempotent skip
-        return nil
+    affected, err := res.RowsAffected()
+    if err != nil {
+        return fmt.Errorf("rows affected: %w", err)
+    }
+    if affected == 0 {
+        return nil // дубликат: работа уже выполнена в прошлый раз
     }
 
-    // Основная обработка
-    return w.fulfillOrder(ctx, event)
+    // Основная работа — в той же транзакции, что и отметка.
+    if err := w.fulfillOrder(ctx, tx, event); err != nil {
+        return fmt.Errorf("fulfill order %s: %w", event.OrderID, err)
+    }
+
+    return tx.Commit()
 }
 ```
 
+**Почему отметка и работа должны быть в одной транзакции.** Если вставить отметку отдельным запросом и закоммитить её до основной работы, то падение процесса между двумя операциями делает сообщение потерянным навсегда: при повторной доставке `INSERT` упрётся в конфликт, воркер решит, что всё уже сделано, и заказ останется несобранным. Обратный порядок — сначала работа, потом отметка — даёт зеркальную проблему: падение между ними приводит к повторному выполнению. Одна транзакция снимает оба случая.
+
+**Где приём не работает.** Транзакция покрывает только собственную базу. Если работа воркера — вызов внешнего API (списать деньги, отправить письмо), откатить его нельзя, и одна транзакция ничего не гарантирует. Там нужна идемпотентность на стороне получателя: ключ идемпотентности в запросе к платёжному провайдеру, дедупликация по идентификатору у почтового сервиса. Подробнее — в [Saga и Outbox](./09-saga-and-outbox.md).
+
+**Что делать со старыми записями.** Таблица `processed_messages` растёт линейно по объёму трафика. Её чистят по времени — удаляют записи старше срока хранения в топике, потому что сообщение старше этого срока прийти уже не может.
+
 ---
 
-## Backpressure и bounded concurrency
+## Backpressure и ограничение параллелизма
 
 ```go
 // Semaphore для ограничения параллельных задач
@@ -318,44 +496,58 @@ func (s *Semaphore) Release() {
     <-s.ch
 }
 
-// Использование: не более 10 параллельных внешних API вызовов
+// Использование: не более 10 одновременных вызовов внешнего API
 sem := NewSemaphore(10)
+var wg sync.WaitGroup
 
 for _, item := range items {
-    item := item
     if err := sem.Acquire(ctx); err != nil {
-        break
+        break // контекст отменён — новые задачи не запускаем
     }
+    wg.Add(1)
     go func() {
+        defer wg.Done()
         defer sem.Release()
         if err := externalAPI.Process(ctx, item); err != nil {
-            log.Error("process error", "err", err)
+            log.Error("process error", "err", err, "item", item.ID)
         }
     }()
 }
+
+wg.Wait() // без этого функция вернётся раньше, чем завершится работа
 ```
 
-**Почему это важно:**
+Семафор ограничивает число одновременных задач, но сам по себе не дожидается их окончания: последние десять горутин продолжают работать после выхода из цикла. Поэтому рядом всегда стоит `sync.WaitGroup` — иначе вызывающий код решит, что обработка закончена, а `main` может завершиться прямо посреди запросов.
+
+Переменная цикла отдельной копией (`item := item`) больше не нужна: начиная с Go 1.22 у каждой итерации собственный экземпляр переменной. В коде под более старые версии эта строка обязательна, иначе все горутины увидят последний элемент.
+
+**Почему ограничение необходимо:**
 
 ```
-Без bounded concurrency:
-  10000 задач → 10000 goroutines → 10000 параллельных DB запросов
-  → DB connection pool exhausted
-  → Все запросы fail
-  → Service unavailable
+Без ограничения:
+  10000 задач -> 10000 горутин -> 10000 одновременных запросов в БД
+  -> пул соединений исчерпан
+  -> запросы ждут соединения и упираются в таймаут
+  -> ошибки идут и по фоновым задачам, и по пользовательскому трафику
 
-С bounded concurrency:
-  10000 задач → 50 параллельных → DB нормально
-  → Остальные ждут в канале
-  → Throughput стабилен
+С ограничением:
+  10000 задач -> 50 одновременных -> БД работает в штатном режиме
+  -> остальные ждут в канале
+  -> пропускная способность стабильна, задержка предсказуема
 ```
+
+Существенная деталь: страдает не только фоновая обработка. Пул соединений у процесса общий, поэтому воркер, запустивший десять тысяч запросов, отбирает соединения у HTTP-обработчиков того же сервиса. Отказ выглядит как деградация API, хотя причина — фоновая задача.
+
+В стандартной библиотеке аналога нет, но в `golang.org/x/sync/semaphore` есть готовая реализация с весами: `semaphore.NewWeighted(10)` и `Acquire(ctx, 1)`. Свой семафор на канале уместен, когда веса не нужны и не хочется тянуть зависимость.
 
 ---
 
-## Observability воркеров
+## Наблюдаемость воркеров
+
+У фоновой задачи нет клиента, который пожалуется, поэтому метрики здесь — единственный способ узнать о проблеме до того, как о ней спросит бизнес.
 
 ```go
-// Метрики которые обязательны для воркера
+// Обязательный минимум метрик воркера
 type WorkerMetrics struct {
     processed    prometheus.Counter      // сколько задач обработано
     failed       prometheus.Counter      // сколько упало
@@ -381,15 +573,17 @@ func (w *Worker) process(ctx context.Context, job Job) {
 }
 ```
 
-**Алерты которые должны быть:**
+**Алерты, которые должны быть:**
 
-| Метрика | Условие алерта |
-|---|---|
-| `queue_depth` | > 1000 (воркеры не успевают) |
-| `job_failure_rate` | > 5% за 5 минут |
-| `job_duration_p99` | > 30 сек (задачи зависают) |
-| `in_flight` | = 0 при непустой очереди (воркер завис) |
-| Worker uptime | restart > 3 раз за час |
+| Метрика | Условие алерта | Что означает |
+|---|---|---|
+| `queue_depth` | растёт монотонно несколько интервалов подряд | Воркеры не успевают: приход задач выше пропускной способности |
+| `job_failure_rate` | > 5% за 5 минут | Отказ получателя или ядовитое сообщение в цикле повторов |
+| `job_duration_p99` | превышает нормальное значение в несколько раз | Задачи зависают: обычно нет таймаута у внешнего вызова |
+| `in_flight` | = 0 при непустой очереди | Воркер завис или умер, а очередь продолжает наполняться |
+| Перезапуски процесса | > 3 раз за час | Паника в обработчике или превышение лимита памяти |
+
+Абсолютный порог по `queue_depth` («больше 1000») плох тем, что зависит от сервиса: для одного это авария, для другого — обычный вечерний всплеск. Полезнее следить за производной — очередь, которая растёт и не возвращается к прежнему уровню, означает нехватку пропускной способности независимо от абсолютных чисел. Второй по важности сигнал — возраст самой старой задачи в очереди: он прямо отвечает на вопрос «насколько мы отстали», а глубина очереди отвечает на него только вместе со скоростью обработки.
 
 ---
 
@@ -397,16 +591,33 @@ func (w *Worker) process(ctx context.Context, job Job) {
 
 **1. Что главное в фоновых воркерах на Go?**
 
-- Правильный graceful shutdown и bounded concurrency. Shutdown: `signal.NotifyContext` ловит SIGTERM, ctx передаётся в воркеры, они дорабатывают текущую задачу и выходят; `sync.WaitGroup` + timeout-контекст гарантируют завершение до SIGKILL.
+- Главное — корректная остановка и ограниченный параллелизм; всё остальное вторично.
+- Остановка — `signal.NotifyContext` ловит SIGTERM, контекст доходит до воркеров, `sync.WaitGroup` фиксирует полное завершение до SIGKILL.
+- Причина внимания к теме — у фоновой задачи нет клиента, который заметит сбой, поэтому ошибка обнаруживается по последствиям.
 
-**2. Зачем ограничивать параллелизм?**
+**2. Как безопасно остановить пул воркеров?**
 
-- Worker pool с bounded channel как семафором: без ограничения под нагрузкой получаются десятки тысяч горутин и исчерпанный DB connection pool — latency растёт до таймаутов.
+- Закрывать канал задач — право только пишущей стороны, поэтому `close` идёт под мьютексом, а `Submit` под ним же проверяет флаг закрытия.
+- Воркер — `for range` по каналу: выходит, когда канал закрыт и опустошён, поэтому принятые задачи не теряются.
+- Чего нельзя — `select` из задачи и `ctx.Done()`: при отмене обе ветки готовы, выбор случайный, часть очереди теряется.
+- Ограничение по времени — контекст у самого `Shutdown`, значение меньше `terminationGracePeriodSeconds`.
 
-**3. Как сделать periodic job единственным в кластере?**
+**3. Зачем ограничивать параллелизм?**
 
-- Distributed lock: Redis `SETNX` или PostgreSQL advisory lock — просто и надёжно, отдельный координатор не нужен.
+- Причина — пул соединений к базе конечен: десять тысяч горутин превращаются в очередь за соединением и таймауты.
+- Побочный эффект — пул общий на процесс, поэтому фоновая задача отбирает соединения у пользовательского трафика.
+- Инструмент — семафор на буферизованном канале или `golang.org/x/sync/semaphore`, рядом обязательно `WaitGroup`.
 
-**4. Как получить exactly-once на уровне бизнес-логики?**
+**4. Как сделать периодическую задачу единственной в кластере?**
 
-- At-least-once доставка из брокера + идемпотентный воркер: таблица `processed_messages` с `ON CONFLICT DO NOTHING` — повторная обработка того же сообщения становится no-op.
+- Механизм — распределённая блокировка: Redis `SET NX EX` или `pg_try_advisory_lock`, отдельный координатор не нужен.
+- Продление — Lua-скриптом с проверкой владельца, интервал TTL/3, чтобы одна сетевая ошибка не стоила блокировки.
+- Ограничение — блокировка ограничивает время, а не доступ: пауза GC дольше TTL, и работают двое.
+- Вывод — блокировка снимает дублирование работы, но не заменяет идемпотентность.
+
+**5. Как получить exactly-once на уровне бизнес-логики?**
+
+- Исходное условие — брокер даёт at-least-once, повторная доставка нормальна.
+- Приём — таблица `processed_messages` с `ON CONFLICT DO NOTHING`, `RowsAffected() == 0` означает дубликат.
+- Ключевое требование — отметка и сама работа в одной транзакции, иначе падение между ними теряет или дублирует задачу.
+- Граница применимости — внешний вызов транзакцией не покрывается, там нужен ключ идемпотентности на стороне получателя.
