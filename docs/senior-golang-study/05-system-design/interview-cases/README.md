@@ -1,6 +1,6 @@
 # System Design Interview Cases
 
-Разборы популярных задач system design этапа с полным прохождением по фазам: уточнение требований → оценка нагрузки → высокоуровневый дизайн → deep dive → трейдоффы.
+Разборы популярных задач system design этапа с полным прохождением по фазам: уточнение требований → оценка нагрузки → высокоуровневый дизайн → deep dive → финальное резюме.
 
 ## Как использовать
 
@@ -31,6 +31,8 @@
 - [14.1 Stock / Inventory Service — расширенный разбор](./14.1-stock-inventory-service.md) — подробные DDL, capacity-расчёты, shortage/recovery, failure scenarios, SLO и альтернативы hot-shard design
 - [15. TMS / Transport Management](./15-tms-transport-management.md) — нормализация разнородных источников (anti-corruption adapters), заказ↔маршрут many-to-many (консолидация ~1300/маршрут), типы маршрутов (line-haul/первая/последняя миля/смешанный), составной заказ как бизнес-сага (DAG этапов через хабы), назначение исполнителя (Redis geo + NX-лок), трекинг 10K водителей (stateless WS-gateway)
 - [16. Gmail / Email Service](./16-gmail-email-service.md) — тонкий SMTP-приём + durable-лог (250 OK = Kafka ack), immutable blob + mutable metadata, дедуп рассылок по body_hash, labels вместо папок, wide-column шард по user_id (ящик = один range-scan), per-user поисковый индекс, threading по RFC-заголовкам, outbound-ретраи с backoff до 24ч
+- [17. Music Playlist Service](./17-music-playlist-service.md) — versioned playlist, materialized shuffle queue, Fisher–Yates, стабильная playback session и handoff между устройствами через epoch
+- [18. Marketplace Messenger](./18-marketplace-messenger.md) — durable-first сообщения, строгий per-chat seq, WebSocket + push, listing snapshot, outbox fan-out и бессрочная hot/cold история
 
 ## Структура каждого кейса
 
@@ -50,8 +52,11 @@
 Трейдоффы
   → сравнение альтернативных решений с обоснованием
 
-Interview-ready ответ
+Фаза 5: Финал
   → 2-минутный summary для реального интервью
+
+Interview-ready answer
+  → короткий тренажёр уточняющих вопросов по решению
 ```
 
 ## Принципы написания кейсов
