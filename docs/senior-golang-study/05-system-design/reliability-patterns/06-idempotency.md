@@ -1,7 +1,5 @@
 # Idempotency
 
-Идемпотентная операция — операция которую можно выполнить несколько раз с тем же результатом что и один раз. Это фундаментальное требование для надёжных retry и at-least-once delivery.
-
 ## Содержание
 
 - [Зачем idempotency](#зачем-idempotency)
@@ -10,12 +8,19 @@
 - [At-most-once vs At-least-once vs Exactly-once](#at-most-once-vs-at-least-once-vs-exactly-once)
 - [Idempotency в message queues](#idempotency-в-message-queues)
 - [Антипаттерны](#антипаттерны)
+- [Interview-ready answer](#interview-ready-answer)
+
+Идемпотентная операция даёт при повторном выполнении тот же результат, что и при первом. Требование это выглядит теоретическим ровно до момента, когда в системе появляется первый повтор, — а появляется он неизбежно: их делают клиентские библиотеки, брокеры сообщений, балансировщики и сами пользователи, нажимая кнопку второй раз.
+
+Часть операций идемпотентны по своей природе. Чтение не меняет состояния вовсе. Присвоение значения (`статус = отменён`) можно повторять сколько угодно. Проблемы создают операции, выражающие изменение относительно текущего состояния: списать сумму, добавить позицию, увеличить счётчик. Именно они требуют отдельного механизма.
+
+Это отражено и в семантике HTTP-методов: `GET`, `PUT` и `DELETE` объявлены идемпотентными, `POST` — нет. Практический вывод прямой: `PUT /orders/42/status` повторять безопасно, `POST /payments` — нет, пока не добавлен ключ идемпотентности.
 
 ---
 
 ## Зачем idempotency
 
-Сетевые запросы ненадёжны. Клиент не знает дошёл ли запрос до сервера, если получил timeout или сетевую ошибку:
+Клиент, получивший таймаут или сетевую ошибку, не знает, дошёл ли запрос до сервера:
 
 ```
 Клиент                          Сервер
@@ -28,15 +33,20 @@
   │ Не retry? Может не списали вообще.
 ```
 
-Идемпотентный API позволяет retry без риска дублей:
+Ключевая деталь этой схемы: неопределённость принципиально неустранима. Клиент не может выяснить исход, потому что канал, по которому пришёл бы ответ, и есть то, что сломалось. Любое решение, принятое вслепую, в половине случаев окажется неверным — повтор даст двойное списание, отказ от повтора оставит платёж непроведённым.
+
+Идемпотентность убирает саму развилку: повторять становится безопасно всегда.
+
 ```
-Клиент посылает уникальный ключ:
+Клиент отправляет уникальный ключ:
   POST /payments
   Idempotency-Key: 550e8400-e29b-41d4-a716-446655440000
 
-Первый запрос: списать деньги, сохранить результат под ключом.
-Повторный запрос с тем же ключом: вернуть сохранённый результат, не списывать снова.
+Первый запрос: выполнить операцию, сохранить результат под ключом.
+Повтор с тем же ключом: вернуть сохранённый результат, операцию не выполнять.
 ```
+
+Ключ генерирует клиент, и это существенно. Сервер не может отличить намеренный второй платёж от повтора первого — эти два случая различает только тот, кто нажимал кнопку. Ключ создаётся один раз на логическую операцию и переиспользуется во всех её повторах.
 
 ---
 
@@ -85,128 +95,106 @@ func (h *PaymentHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 Таблица для хранения idempotency records:
 
-```sql
-CREATE TABLE idempotency_keys (
-    key         TEXT PRIMARY KEY,
-    request_hash TEXT NOT NULL,  -- hash запроса для обнаружения коллизий ключей
-    response     JSONB,          -- сохранённый ответ
-    status_code  INT,
-    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    completed_at TIMESTAMPTZ  -- NULL пока в процессе
-);
+Записи хранят не только сам ключ, но и слепок запроса вместе с сохранённым ответом. Слепок нужен, чтобы отличить повтор от новой операции, случайно отправленной с тем же ключом; ответ — чтобы повтор получил тот же результат, а не выполнил работу заново.
 
--- Автоудаление старых записей
-CREATE INDEX ON idempotency_keys (created_at);
--- Крон или pg_partman для очистки записей старше 24 часов
-```
+Хранятся записи ограниченное время: суток обычно достаточно, поскольку повторы приходят в пределах минут. Чистит их отдельная задача по `created_at`.
 
-Сервис:
+
+Порядок действий здесь важнее самих запросов. Начинать с `SELECT` нельзя: между чтением и вставкой вклинится второй запрос с тем же ключом, и операция выполнится дважды. Захват ключа должен быть первой операцией и должен быть атомарным.
 
 ```go
-type IdempotencyRecord struct {
-    Key         string
-    RequestHash string
-    Response    []byte
-    StatusCode  int
-    CompletedAt *time.Time
-}
-
-type PaymentService struct {
-    db *pgxpool.Pool
-}
-
-func (s *PaymentService) CreatePayment(ctx context.Context, idempKey string, req CreatePaymentRequest) (*PaymentResult, error) {
-    // 1. Проверить существующую запись
-    existing, err := s.getIdempRecord(ctx, idempKey)
-    if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-        return nil, err
-    }
+func (s *PaymentService) CreatePayment(
+    ctx context.Context, idempKey string, req CreatePaymentRequest,
+) (*PaymentResult, error) {
 
     reqHash := hashRequest(req)
 
-    if existing != nil {
-        // Ключ уже существует
-        if existing.RequestHash != reqHash {
-            // Тот же ключ, другой запрос — конфликт
+    tx, err := s.db.Begin(ctx)
+    if err != nil {
+        return nil, fmt.Errorf("begin: %w", err)
+    }
+    defer tx.Rollback(ctx) //nolint:errcheck // no-op после Commit
+
+    // 1. Захват ключа. Проверка и вставка — одна атомарная операция:
+    //    раздельные SELECT и INSERT дают гонку между двумя повторами.
+    tag, err := tx.Exec(ctx, `
+        INSERT INTO idempotency_keys (key, request_hash, lease_until)
+        VALUES ($1, $2, NOW() + INTERVAL '60 seconds')
+        ON CONFLICT (key) DO UPDATE
+           SET lease_until = NOW() + INTERVAL '60 seconds'
+         WHERE idempotency_keys.completed_at IS NULL
+           AND idempotency_keys.lease_until < NOW()
+    `, idempKey, reqHash)
+    if err != nil {
+        return nil, fmt.Errorf("claim key: %w", err)
+    }
+
+    // 2. Ключ занят: либо операция завершена, либо выполняется прямо сейчас.
+    if tag.RowsAffected() == 0 {
+        rec, err := s.loadRecord(ctx, tx, idempKey)
+        if err != nil {
+            return nil, err
+        }
+        if rec.RequestHash != reqHash {
+            // Тот же ключ с другим телом — почти всегда ошибка клиента.
             return nil, ErrIdempotencyConflict
         }
-        if existing.CompletedAt == nil {
-            // Операция ещё выполняется (concurrent request)
+        if rec.CompletedAt == nil {
+            // Первый запрос ещё в работе. Клиенту — 409 с Retry-After.
             return nil, ErrRequestInProgress
         }
-        // Вернуть кешированный результат
-        return &PaymentResult{
-            Payment:   deserialize(existing.Response),
-            WasCached: true,
-        }, nil
+        return &PaymentResult{Payment: rec.Payment(), WasCached: true}, nil
     }
 
-    // 2. Создать запись (in-progress)
-    if err := s.insertIdempRecord(ctx, idempKey, reqHash); err != nil {
-        if isUniqueViolation(err) {
-            // Конкурентный запрос создал запись — retry
-            return nil, ErrRequestInProgress
-        }
-        return nil, err
-    }
-
-    // 3. Выполнить операцию
-    payment, err := s.doCreatePayment(ctx, req)
+    // 3. Бизнес-операция — в той же транзакции, что и запись результата.
+    payment, err := s.insertPayment(ctx, tx, req)
     if err != nil {
-        // Удалить запись чтобы позволить retry
-        s.deleteIdempRecord(ctx, idempKey)
-        return nil, err
+        // Транзакция откатится целиком, ключ не останется захваченным,
+        // и повтор сможет выполнить операцию заново.
+        return nil, fmt.Errorf("create payment: %w", err)
     }
 
-    // 4. Сохранить результат
-    responseBytes, _ := json.Marshal(payment)
-    if err := s.completeIdempRecord(ctx, idempKey, responseBytes, http.StatusCreated); err != nil {
-        // Не критично — операция выполнена, следующий retry вернёт результат или выполнит снова
-        // (зависит от требований)
+    response, err := json.Marshal(payment)
+    if err != nil {
+        return nil, fmt.Errorf("marshal payment: %w", err)
     }
-
-    return &PaymentResult{Payment: payment, WasCached: false}, nil
-}
-
-func (s *PaymentService) insertIdempRecord(ctx context.Context, key, reqHash string) error {
-    _, err := s.db.Exec(ctx, `
-        INSERT INTO idempotency_keys (key, request_hash)
-        VALUES ($1, $2)
-    `, key, reqHash)
-    return err
-}
-
-func (s *PaymentService) completeIdempRecord(ctx context.Context, key string, response []byte, statusCode int) error {
-    _, err := s.db.Exec(ctx, `
+    if _, err := tx.Exec(ctx, `
         UPDATE idempotency_keys
-        SET response = $1, status_code = $2, completed_at = NOW()
-        WHERE key = $3
-    `, response, statusCode, key)
-    return err
+           SET response = $1, status_code = $2, completed_at = NOW()
+         WHERE key = $3
+    `, response, http.StatusCreated, idempKey); err != nil {
+        return nil, fmt.Errorf("complete key: %w", err)
+    }
+
+    if err := tx.Commit(ctx); err != nil {
+        return nil, fmt.Errorf("commit: %w", err)
+    }
+    return &PaymentResult{Payment: payment, WasCached: false}, nil
 }
 ```
 
-### Транзакция + idempotency key в одной операции
+Три решения в этом коде определяют его корректность.
 
-Для атомарности: сохранить ключ и результат операции в одной транзакции:
+**Ключ, платёж и результат фиксируются одной транзакцией.** Это снимает целый класс промежуточных состояний. Разделив их, легко получить запись с ключом без платежа (повтор вернёт несуществующий результат) или платёж без записи (повтор спишет деньги второй раз).
+
+**Захваченный ключ имеет срок аренды.** Процесс может упасть между захватом и завершением, и без срока запись останется незавершённой навсегда — все последующие повторы будут получать «операция выполняется» до ручного вмешательства. Поле `lease_until` позволяет перехватить брошенный ключ по истечении срока. Срок берут заведомо больше максимальной длительности операции.
+
+**Ошибка бизнес-операции откатывает захват ключа.** Удалять запись отдельным запросом, как в наивной версии, опасно: если операция успела дать внешний эффект — например, обращение к платёжному шлюзу прошло, а запись в базу нет — снятие ключа разрешит повтор и второе списание. Транзакция делает это согласованным: либо есть и ключ, и запись, либо нет ничего. Для внешних эффектов, не покрываемых транзакцией, ключ передают дальше — платёжные провайдеры принимают собственный ключ идемпотентности.
+
+Схема таблицы с учётом аренды:
 
 ```sql
-BEGIN;
-  -- Вставить idempotency record
-  INSERT INTO idempotency_keys (key, request_hash, completed_at)
-  VALUES ($1, $2, NOW())
-  ON CONFLICT (key) DO NOTHING;
+CREATE TABLE idempotency_keys (
+    key          TEXT PRIMARY KEY,
+    request_hash TEXT NOT NULL,
+    response     JSONB,
+    status_code  INT,
+    lease_until  TIMESTAMPTZ NOT NULL,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    completed_at TIMESTAMPTZ
+);
 
-  -- Если вставка не произошла (дубль) — откатить
-  -- SELECT ... FOR UPDATE чтобы прочитать существующий
-
-  -- Выполнить бизнес-операцию
-  INSERT INTO payments (id, user_id, amount) VALUES (...)
-  RETURNING id, amount, created_at;
-
-  -- Сохранить ответ
-  UPDATE idempotency_keys SET response = $3 WHERE key = $1;
-COMMIT;
+CREATE INDEX idempotency_keys_created_at_idx ON idempotency_keys (created_at);
 ```
 
 ---
@@ -219,45 +207,54 @@ COMMIT;
 | At-least-once | retry до подтверждения | дубли |
 | Exactly-once | ровно один раз | сложно, требует idempotency |
 
-**Exactly-once** в распределённых системах — не примитив, а результат комбинации:
-- At-least-once delivery (retry до получения ack)
-- Idempotent receiver (дедупликация дублей на стороне получателя)
+Exactly-once в распределённой системе не является примитивом, который можно включить в настройках. Это результат сложения двух свойств, каждое из которых реализуется отдельно:
 
 ```
-Exactly-once = At-least-once + Idempotent consumer
+Exactly-once = доставка не реже одного раза + идемпотентный получатель
 ```
+
+Почему нельзя иначе — следует из той же неопределённости, с которой статья началась. Отправитель, не получивший подтверждения, обязан выбрать: повторить (риск дубля) или не повторять (риск потери). Третьего варианта нет, поскольку подтверждение может потеряться так же, как и само сообщение. Поэтому «ровно один раз» строят из «не реже одного раза» плюс отбрасывание дублей на приёмной стороне — и это единственная работающая конструкция.
+
+Отдельно стоит развести два разных «exactly-once», которые часто смешивают. Транзакции Kafka дают атомарность в пределах самой Kafka: прочитать, обработать и записать в другой топик как одну операцию. Но запись во внешнюю базу или вызов платёжного API в эту транзакцию не входят — там по-прежнему нужна идемпотентность получателя.
 
 ---
 
 ## Idempotency в message queues
 
-При обработке сообщений из Kafka / RabbitMQ / SQS — всегда assume at-least-once:
+Брокеры сообщений дают доставку не реже одного раза, поэтому повторная обработка — штатное событие, а не сбой. Причины повторов обыденные: перебалансировка группы потребителей, падение процесса между обработкой и подтверждением смещения, повторное чтение партиции.
 
 ```go
 func (h *PaymentEventHandler) Handle(ctx context.Context, msg kafka.Message) error {
     var event PaymentEvent
     if err := json.Unmarshal(msg.Value, &event); err != nil {
-        return err  // skip bad message
+        // Возврат ошибки означал бы вечный повтор одного и того же
+        // неразбираемого сообщения. Такие отправляют в DLQ и идут дальше.
+        h.metrics.MalformedMessages.Inc()
+        return h.dlq.Publish(ctx, msg, err)
     }
 
-    // Дедупликация по event ID
-    processed, err := h.repo.IsProcessed(ctx, event.ID)
-    if err != nil {
-        return err
-    }
-    if processed {
-        return nil  // уже обработано — skip
-    }
-
-    // Обработать + пометить как processed в одной транзакции
     return h.repo.WithTx(ctx, func(tx pgx.Tx) error {
-        if err := processPaymentEvent(ctx, tx, event); err != nil {
-            return err
+        // Проверка и захват — одной операцией и внутри транзакции.
+        // Отдельный IsProcessed до транзакции даёт гонку между
+        // двумя потребителями одного сообщения.
+        tag, err := tx.Exec(ctx, `
+            INSERT INTO processed_events (event_id) VALUES ($1)
+            ON CONFLICT (event_id) DO NOTHING
+        `, event.ID)
+        if err != nil {
+            return fmt.Errorf("claim event %s: %w", event.ID, err)
         }
-        return markProcessed(ctx, tx, event.ID)
+        if tag.RowsAffected() == 0 {
+            return nil // дубликат, работа уже выполнена
+        }
+        return processPaymentEvent(ctx, tx, event)
     })
 }
 ```
+
+Различать нужно два вида ошибок, и обходятся они по-разному. Неразбираемое сообщение повтором не исправить — оно останется неразбираемым и заблокирует партицию навсегда; такие уходят в очередь неразобранных сообщений. Временная ошибка базы, наоборот, требует именно повтора: подтверждать смещение нельзя, иначе событие потеряется.
+
+Таблица обработанных событий растёт линейно по трафику. Чистят её по времени: записи старше срока хранения в топике удаляют, поскольку сообщение старше этого срока прийти уже не может.
 
 ```sql
 -- Таблица processed events
@@ -279,18 +276,61 @@ CREATE TABLE processed_events (
 
 **Idempotency key в теле запроса, а не в header** — тело может быть прочитано один раз. Header доступен в middleware для ранней дедупликации.
 
-**Делать операцию idempotent через SELECT + INSERT** — это race condition без транзакции:
+**Проверка ключа отдельно от вставки** — самая частая ошибка реализации:
 ```go
-// плохо — race condition
+// Плохо: между Exists и Insert проходит время,
+// и два одновременных повтора оба видят «ключа нет».
 exists, _ := repo.Exists(ctx, key)
 if !exists {
-    repo.Insert(ctx, key, data)  // два конкурентных запроса оба пройдут сюда
+    repo.Insert(ctx, key, data)
 }
 
-// хорошо — атомарно
-_, err := db.Exec(ctx, `
+// Хорошо: проверка и захват — одна атомарная операция,
+// а признак дубликата даёт число изменённых строк.
+tag, err := db.Exec(ctx, `
     INSERT INTO idempotency_keys (key) VALUES ($1)
     ON CONFLICT (key) DO NOTHING
 `, key)
-// Проверить был ли INSERT или CONFLICT
 ```
+
+**Ключ и бизнес-операция в разных транзакциях** — появляются промежуточные состояния: ключ без результата (повтор вернёт пустоту) или результат без ключа (повтор выполнит операцию второй раз).
+
+**Захваченный ключ без срока аренды** — процесс, упавший между захватом и завершением, оставляет запись незавершённой навсегда, и все повторы получают «операция выполняется» до ручной правки.
+
+**Ключ генерирует сервер** — тогда каждый повтор получает новый ключ, и смысл механизма теряется. Отличить повтор от новой операции может только сторона, инициировавшая её.
+
+---
+
+## Interview-ready answer
+
+**1. Зачем нужна идемпотентность?**
+
+- Исходная причина — клиент, получивший таймаут, не знает исхода: ответ мог потеряться уже после выполнения операции.
+- Неопределённость неустранима — сломан именно тот канал, по которому пришёл бы ответ.
+- Без идемпотентности любое решение вслепую ошибочно в половине случаев: повтор даёт дубль, отказ от повтора — потерю.
+- Природно идемпотентны — чтение и присвоение значения; не идемпотентны операции относительно текущего состояния: списать, добавить, увеличить.
+- В HTTP это закреплено — `GET`, `PUT`, `DELETE` идемпотентны, `POST` нет.
+
+**2. Как работает ключ идемпотентности?**
+
+- Генерирует клиент — сервер не отличит намеренный второй платёж от повтора первого.
+- Один ключ — одна логическая операция, переиспользуется во всех её повторах.
+- Сервер хранит ключ вместе со слепком запроса и сохранённым ответом.
+- Слепок нужен для обнаружения конфликта — тот же ключ с другим телом означает ошибку клиента, а не повтор.
+- Срок хранения — сутки: повторы приходят в пределах минут.
+
+**3. Какие ошибки в реализации самые частые?**
+
+- Проверка ключа отдельно от вставки — два одновременных повтора проходят проверку оба.
+- Правильный приём — `INSERT ... ON CONFLICT DO NOTHING` и число изменённых строк как признак дубликата.
+- Ключ и бизнес-операция в разных транзакциях — появляется либо ключ без результата, либо результат без ключа.
+- Захват без срока аренды — упавший процесс блокирует ключ навсегда, и все повторы получают «операция выполняется».
+- Удаление ключа при ошибке отдельным запросом — если внешний эффект уже произошёл, повтор выполнит его второй раз.
+
+**4. Что означает exactly-once на практике?**
+
+- Это не примитив, а сумма: доставка не реже одного раза плюс идемпотентный получатель.
+- Иначе быть не может — подтверждение теряется так же, как и само сообщение, поэтому отправитель всегда выбирает между дублем и потерей.
+- У потребителя — таблица обработанных идентификаторов, захват и работа в одной транзакции.
+- Транзакции Kafka дают атомарность внутри Kafka, но не покрывают запись во внешнюю базу или вызов платёжного API.
+- Отдельно от повторов — неразбираемое сообщение отправляют в DLQ, иначе оно блокирует партицию навсегда.
