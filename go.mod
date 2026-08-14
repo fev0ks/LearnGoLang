@@ -1,20 +1,17 @@
 module test.com
 
-go 1.23.0
+go 1.26
 
 //toolchain go1.24.1
-
-toolchain go1.23.3
 
 require (
 	github.com/go-redis/redis/v8 v8.11.5
 	github.com/sirupsen/logrus v1.6.0
 	go.mongodb.org/mongo-driver v1.17.1
 	go.uber.org/goleak v1.3.0
-	golang.org/x/sync v0.13.0
+	golang.org/x/sync v0.22.0
 	golang.org/x/sys v0.28.0
 	golang.org/x/time v0.10.0
-	google.golang.org/grpc v1.70.0
 )
 
 require (
@@ -31,6 +28,4 @@ require (
 	golang.org/x/crypto v0.30.0 // indirect
 	golang.org/x/net v0.32.0 // indirect
 	golang.org/x/text v0.21.0 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20241202173237-19429a94021a // indirect
-	google.golang.org/protobuf v1.35.2 // indirect
 )
