@@ -1,49 +1,84 @@
-# System Primitives Tasks
+# Системные примитивы
 
-Задачи на реализацию **production primitives** — стандартных блоков надёжных систем. На собеседовании их часто просят написать "по-простому", без полного production API, чтобы оценить понимание ключевых концепций.
+Раздел тренирует не столько написание структуры данных, сколько проектирование
+контракта при отказах: кто владеет ресурсом, что происходит при timeout, как
+компонент завершается и какие гарантии сохраняются при конкурентном доступе.
 
-## Задачи
+## Материалы
 
-1. [Connection Pool](./01-connection-pool.md) — переиспользование connections, lifecycle, health checks
-2. [Retry с Backoff](./02-retry-with-backoff.md) — exponential backoff + jitter, идемпотентность, retryable errors
-3. [Circuit Breaker](./03-circuit-breaker.md) — closed/open/half-open, sliding window, recovery
-4. [Distributed Lock](./04-distributed-lock.md) — Redis-based, lease renewal, Redlock, fencing tokens
-5. [Idempotency Key Handler](./05-idempotency-handler.md) — middleware для idempotent endpoint'ов
+1. [Connection Pool](./01-connection-pool.md) — лимит открытых ресурсов,
+   ожидание с `context`, lease и корректный `Close`.
+2. [Retry с Backoff](./02-retry-with-backoff.md) — bounded attempts,
+   exponential backoff, Full Jitter и `Retry-After`.
+3. [Circuit Breaker](./03-circuit-breaker.md) — состояния
+   `closed/open/half-open`, единственный probe и классификация ошибок.
+4. [Distributed Lock](./04-distributed-lock.md) — Redis lease, безопасный
+   release, потеря владения и fencing tokens.
+5. [Idempotency Key Handler](./05-idempotency-handler.md) — атомарный claim,
+   replay результата и связь с business transaction.
+6. [Балансировщик по наименьшей загрузке](./06-least-loaded-balancer.md) —
+   атомарный выбор экземпляра, passive health check, min-heap против P2C и
+   поведение под массовым timeout.
 
-## Когда что просят
+Рекомендуемый порядок — по нумерации. Retry, circuit breaker и idempotency
+особенно важно рассматривать вместе: повтор без общего time budget и защиты от
+повторного side effect легко ухудшает исходный сбой.
 
-| Задача | Когда спрашивают |
-|---|---|
-| Connection pool | "Что делает database/sql под капотом?", "Реализуй pool ресурсов" |
-| Retry | "Что делать при transient failure?", "Сделай надёжный HTTP client" |
-| Circuit breaker | "Защити сервис от cascade failure", "Микросервисная resilience" |
-| Distributed lock | "Только один сервис должен делать X", "Leader election" |
-| Idempotency | "Как сделать чтобы повторный POST не дублировал заказ?" |
+---
 
-## Общие принципы
+## Как выбирать примитив
 
-### Production primitives — это про **сценарии отказа**
+| Проблема | Основной примитив | Чего он не гарантирует |
+|---|---|---|
+| дорого создавать resource | pool | здоровье зависимости |
+| transient failure | retry | отсутствие duplicate side effect |
+| зависимость массово падает | circuit breaker | ограничение локальной concurrency |
+| несколько процессов претендуют на работу | distributed lock | исключительность после истечения lease |
+| клиент повторяет mutation | idempotency key | exactly-once для внешнего side effect |
+| пул одинаковых экземпляров, часть деградирует | least-loaded balancer + outlier detection | защиту от общей для пула причины сбоя |
 
-Все эти задачи решают одну фундаментальную проблему: **внешние зависимости иногда падают**. Сервис должен:
-- Не делать новых вызовов когда зависимость down (circuit breaker)
-- Повторять transient ошибки правильно (retry с backoff)
-- Не плодить новые соединения когда есть свободные (pool)
-- Координироваться между instance'ами (distributed lock)
-- Не дублировать действия при retry (idempotency)
+Примитивы не взаимозаменяемы. Например, circuit breaker не ограничивает число
+медленных вызовов в `closed`, а distributed lock без fencing token не может
+остановить прежнего владельца после истечения TTL.
 
-### Context — везде
+---
 
-Каждая операция принимает `context.Context` для отмены/timeout. Это не опционально — это must.
+## Общие инварианты
 
-### Метрики — обязательно
+- **Bounded resources —** ограничены attempts, очередь ожидания, открытые
+  соединения, размер cached response и длительность lease.
+- **Context —** каждый блокирующий wait, timer и внешний вызов имеет путь
+  отмены. Наличие `context.Context` только в сигнатуре недостаточно.
+- **Lifecycle —** `Close` или `Release` имеет явную семантику, повторный вызов
+  определён, фоновая goroutine завершается.
+- **Ownership —** ресурс возвращает только текущий владелец; потеря lease
+  становится наблюдаемым событием, а не сообщением в логе.
+- **Time budget —** timeout одной попытки меньше общего deadline операции;
+  retry не создаёт неограниченный хвост latency.
+- **Observability —** метрики различают отказ операции, rejection примитивом,
+  ожидание, retry и потерю владения.
 
-Production primitive без метрик — слепое пятно. Минимум:
-- counter успехов/ошибок
-- histogram latency
-- gauge активных операций / open circuits
+---
 
-## Связки
+## Как проверять решение
 
-- [Reliability Patterns](../../../05-system-design/reliability-patterns/) — теория retry, circuit breaker, idempotency
-- [Connection Pooling](../../../06-databases/database-systems-catalog/postgresql/09-connection-pooling.md) — глубоко про БД pool
-- [Saga и Outbox](../../../04-architecture-and-patterns/patterns/09-saga-and-outbox.md) — distributed transactions
+Одних happy-path тестов недостаточно. Для каждого примитива нужны тесты на:
+
+- конкурентный доступ под `go test -race`;
+- отмену во время блокировки или timer;
+- boundary вокруг TTL, timeout и смены состояния с управляемыми часами;
+- повторный `Release`/`Close`;
+- ошибку factory, storage или callback;
+- отсутствие утечки goroutine и потерянного ресурса.
+
+`time.Sleep` в тесте перехода состояния обычно делает тест flaky. Лучше
+инъецировать clock, sleeper или синхронизироваться каналом.
+
+---
+
+## Связанные материалы
+
+- [Reliability Patterns](../../../05-system-design/reliability-patterns/)
+- [Connection Pooling](../../../06-databases/database-systems-catalog/postgresql/09-connection-pooling.md)
+- [Bulkhead](../../../05-system-design/reliability-patterns/07-bulkhead.md)
+- [Saga и Outbox](../../../04-architecture-and-patterns/patterns/09-saga-and-outbox.md)

@@ -1,41 +1,67 @@
 # Задача 2: Retry с Exponential Backoff
 
-Retry с правильным backoff — must для любого надёжного клиента. Спрашивают на собеседованиях для понимания: что retry'ить, как retry'ить, и **что НЕ retry'ить**.
+## Содержание
 
-## Формулировка
+- [Контракт задачи](#контракт-задачи)
+- [Backoff и jitter](#backoff-и-jitter)
+- [Корректная реализация](#корректная-реализация)
+- [HTTP и Retry-After](#http-и-retry-after)
+- [Retry budget и композиция](#retry-budget-и-композиция)
+- [Тестирование и метрики](#тестирование-и-метрики)
+- [Типичные ошибки](#типичные-ошибки)
+- [Interview-ready answer](#interview-ready-answer)
 
-> "Реализуй функцию которая retry'ит вызов при transient ошибке. Используй exponential backoff с jitter."
-
-Вариации:
-- "HTTP client с retry"
-- "Идемпотентная retry-обёртка"
-- "Resilient API client"
-
----
-
-## Уточняющие вопросы
-
-1. **Что считать retryable?**
-   "Transient: network timeout, 502/503/504, rate limit (429), DB connection lost. Non-retryable: 400/401/403, validation errors, ctx cancelled."
-
-2. **Сколько попыток?**
-   "5 — типичный максимум. Больше — только усугубляет проблему."
-
-3. **Backoff strategy — exponential? fixed?**
-   "Exponential обычно. Fixed — для предсказуемых задержек."
-
-4. **Jitter обязательно?**
-   "Да — иначе thundering herd при общем failure."
-
-5. **Идемпотентность гарантируется caller'ом?**
-   "Должен — retry неидемпотентного создаёт дубли."
-
-6. **Total timeout?**
-   "Через context.WithTimeout. Retry не должен превышать."
+Retry полезен для кратковременной ошибки, но каждую попытку оплачивают latency
+и дополнительной нагрузкой на уже нездоровую зависимость. Поэтому корректный
+retry всегда bounded, cancelable и разрешён только для безопасной операции.
 
 ---
 
-## Базовое решение
+## Контракт задачи
+
+До кода нужно определить:
+
+1. `MaxAttempts` включает первый вызов или только повторы?
+2. Какие ошибки retryable и кто их классифицирует?
+3. Безопасно ли повторить side effect после неизвестного результата?
+4. Есть ли timeout одной попытки и общий deadline всей операции?
+5. Как учитывать server hint `Retry-After`?
+6. Где расположен retry, чтобы несколько слоёв не умножали attempts?
+
+Ниже `MaxAttempts` включает первый вызов. При `MaxAttempts=3` callback
+выполнится не более трёх раз, а ожиданий между ними будет не более двух.
+
+---
+
+## Backoff и jitter
+
+Exponential backoff задаёт верхнюю границу ожидания перед повтором:
+
+```text
+cap(retry) = min(MaxDelay, BaseDelay * Multiplier^retry)
+```
+
+`retry=0` — ожидание после первой неуспешной попытки. При `BaseDelay=100ms`,
+`Multiplier=2`, `MaxDelay=1s` caps равны `100ms, 200ms, 400ms, 800ms, 1s`.
+
+Full Jitter выбирает случайную задержку равномерно из `[0, cap)`:
+
+```text
+delay = random(0, cap)
+```
+
+Он разносит клиентов во времени. Выражение `cap/2 + random(0, cap/2)` — это не
+Full Jitter, а другой диапазон. Конкретная стратегия — trade-off: случайная
+задержка уменьшает синхронные пики, но делает latency отдельного запроса менее
+предсказуемой.
+
+---
+
+## Корректная реализация
+
+Generic `Do` сделан функцией, потому что Go не разрешает методам объявлять свои
+type parameters. RNG защищён mutex-ом: `*rand.Rand` не безопасен для concurrent
+использования.
 
 ```go
 package retry
@@ -43,610 +69,334 @@ package retry
 import (
     "context"
     "errors"
+    "fmt"
+    "math"
     "math/rand"
+    "sync"
     "time"
 )
 
 type Config struct {
-    MaxAttempts int           // максимум попыток (включая первую)
-    BaseDelay   time.Duration // 100ms типично
-    MaxDelay    time.Duration // 30s типично — ограничивает рост exponential
-    Multiplier  float64       // 2.0 обычно
-    Jitter      float64       // 0.0-1.0, доля randomness
-}
-
-func DefaultConfig() Config {
-    return Config{
-        MaxAttempts: 5,
-        BaseDelay:   100 * time.Millisecond,
-        MaxDelay:    30 * time.Second,
-        Multiplier:  2.0,
-        Jitter:      0.5,
-    }
-}
-
-// RetryableError помечает что ошибка retryable.
-type RetryableError struct {
-    Err error
-}
-
-func (e *RetryableError) Error() string { return e.Err.Error() }
-func (e *RetryableError) Unwrap() error { return e.Err }
-
-// Retryable оборачивает error в RetryableError.
-func Retryable(err error) error {
-    if err == nil {
-        return nil
-    }
-    return &RetryableError{Err: err}
-}
-
-// Do выполняет fn с retry при retryable ошибках.
-func Do(ctx context.Context, cfg Config, fn func(ctx context.Context) error) error {
-    var lastErr error
-    delay := cfg.BaseDelay
-
-    for attempt := 0; attempt < cfg.MaxAttempts; attempt++ {
-        // Первая попытка без задержки
-        if attempt > 0 {
-            // Apply jitter
-            jitteredDelay := applyJitter(delay, cfg.Jitter)
-
-            select {
-            case <-ctx.Done():
-                return ctx.Err()
-            case <-time.After(jitteredDelay):
-            }
-
-            // Increase delay для следующего раза (capped)
-            delay = time.Duration(float64(delay) * cfg.Multiplier)
-            if delay > cfg.MaxDelay {
-                delay = cfg.MaxDelay
-            }
-        }
-
-        err := fn(ctx)
-        if err == nil {
-            return nil
-        }
-
-        // Non-retryable error — выходим сразу
-        var retryable *RetryableError
-        if !errors.As(err, &retryable) {
-            return err
-        }
-
-        lastErr = err
-    }
-
-    return lastErr
-}
-
-// applyJitter добавляет случайность к delay (full jitter — самый безопасный).
-func applyJitter(delay time.Duration, jitter float64) time.Duration {
-    if jitter <= 0 {
-        return delay
-    }
-    // Full jitter: [0, delay*jitter] добавляется к (delay * (1-jitter))
-    base := float64(delay) * (1 - jitter)
-    random := rand.Float64() * float64(delay) * jitter
-    return time.Duration(base + random)
-}
-```
-
-**Использование:**
-
-```go
-ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-defer cancel()
-
-err := retry.Do(ctx, retry.DefaultConfig(), func(ctx context.Context) error {
-    resp, err := httpClient.Do(req)
-    if err != nil {
-        // Network error — retry
-        return retry.Retryable(err)
-    }
-    defer resp.Body.Close()
-
-    if resp.StatusCode >= 500 {
-        return retry.Retryable(fmt.Errorf("server error: %d", resp.StatusCode))
-    }
-    if resp.StatusCode == 429 {
-        return retry.Retryable(errors.New("rate limited"))
-    }
-    if resp.StatusCode >= 400 {
-        // 4xx (кроме 429) — не retry, это ошибка клиента
-        return fmt.Errorf("client error: %d", resp.StatusCode)
-    }
-
-    // Success
-    return nil
-})
-```
-
-**Что важно:**
-- **Marker error type** (`RetryableError`) — caller явно говорит "это retryable"
-- **`time.After`** + `ctx.Done()` — interruptible sleep
-- **Jitter** — обязательно, иначе все клиенты ретраят одновременно (thundering herd)
-- **MaxDelay cap** — exponential без ограничения уйдёт в секунды/минуты
-
----
-
-## Backoff стратегии
-
-### Fixed delay
-
-```
-attempt: 1  2  3  4  5
-delay:   1s 1s 1s 1s 1s
-```
-
-Просто, предсказуемо. Не подходит когда зависимость нагружена — все retry одновременно.
-
-### Linear
-
-```
-delay = base * attempt
-attempt: 1  2  3  4  5
-delay:   1s 2s 3s 4s 5s
-```
-
-Полусерьёзно используется. Лучше fixed, хуже exponential.
-
-### Exponential
-
-```
-delay = base * multiplier^(attempt-1)
-attempt: 1   2   3   4    5
-delay:   1s  2s  4s  8s   16s
-```
-
-**Стандарт для retry.** Быстро даёт зависимости время восстановиться.
-
-### Exponential with jitter (Full Jitter)
-
-```
-delay = random(0, base * multiplier^(attempt-1))
-```
-
-Используется AWS, Google. **Безопаснее всего** — равномерно распределяет retry'и во времени, никаких "коллективных всплесков" после общего failure.
-
-### Decorrelated Jitter
-
-```
-delay = random(base, prev_delay * 3)
-```
-
-Иногда лучше Full Jitter — баланс между равномерностью и быстрым backoff. См. [AWS blog post](https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/).
-
----
-
-## Production-grade с metrics
-
-```go
-package retry
-
-import (
-    "context"
-    "errors"
-    "math"
-    "math/rand"
-    "time"
-)
-
-type Metrics interface {
-    RecordAttempt(attempt int)
-    RecordRetry(attempt int)
-    RecordSuccess(attempt int)
-    RecordFailure(err error, attempt int)
-    RecordDuration(d time.Duration)
+    MaxAttempts      int
+    BaseDelay        time.Duration
+    MaxDelay         time.Duration
+    Multiplier       float64
+    AttemptTimeout   time.Duration
+    Retryable        func(error) bool
 }
 
 type Retrier struct {
-    cfg     Config
-    metrics Metrics
+    cfg Config
+
+    randomMu sync.Mutex
+    random   *rand.Rand
+    wait     func(context.Context, time.Duration) error
 }
 
-func New(cfg Config, m Metrics) *Retrier {
-    return &Retrier{cfg: cfg, metrics: m}
+func New(cfg Config, source rand.Source) (*Retrier, error) {
+    if cfg.MaxAttempts < 1 {
+        return nil, fmt.Errorf("max attempts must be positive")
+    }
+    if cfg.MaxAttempts > 1 && cfg.BaseDelay <= 0 {
+        return nil, fmt.Errorf("base delay must be positive")
+    }
+    if cfg.MaxDelay < cfg.BaseDelay {
+        return nil, fmt.Errorf("max delay must be >= base delay")
+    }
+    if cfg.Multiplier < 1 || math.IsNaN(cfg.Multiplier) ||
+        math.IsInf(cfg.Multiplier, 0) {
+        return nil, fmt.Errorf("multiplier must be finite and >= 1")
+    }
+    if cfg.AttemptTimeout < 0 {
+        return nil, fmt.Errorf("attempt timeout must not be negative")
+    }
+    if cfg.Retryable == nil {
+        return nil, fmt.Errorf("retryable classifier is required")
+    }
+    if source == nil {
+        source = rand.NewSource(time.Now().UnixNano())
+    }
+
+    return &Retrier{
+        cfg:    cfg,
+        random: rand.New(source),
+        wait:   waitContext,
+    }, nil
 }
 
-// Do — generic version. Возвращает result типа T.
 func Do[T any](
     ctx context.Context,
     r *Retrier,
-    fn func(ctx context.Context) (T, error),
+    fn func(context.Context) (T, error),
 ) (T, error) {
-    var (
-        zero    T
-        lastErr error
-    )
-    start := time.Now()
-    defer func() {
-        if r.metrics != nil {
-            r.metrics.RecordDuration(time.Since(start))
-        }
-    }()
+    var zero T
+    var lastErr error
 
     for attempt := 1; attempt <= r.cfg.MaxAttempts; attempt++ {
-        if r.metrics != nil {
-            r.metrics.RecordAttempt(attempt)
+        if err := ctx.Err(); err != nil {
+            return zero, err
         }
 
-        if attempt > 1 {
-            delay := r.computeDelay(attempt)
-            if r.metrics != nil {
-                r.metrics.RecordRetry(attempt)
-            }
-            select {
-            case <-ctx.Done():
-                return zero, ctx.Err()
-            case <-time.After(delay):
-            }
-        }
-
-        result, err := fn(ctx)
+        value, err := callAttempt(ctx, r.cfg.AttemptTimeout, fn)
         if err == nil {
-            if r.metrics != nil {
-                r.metrics.RecordSuccess(attempt)
-            }
-            return result, nil
+            return value, nil
         }
-
-        // Context cancelled — выходим сразу, не retry
-        if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-            return zero, err
-        }
-
-        var retryable *RetryableError
-        if !errors.As(err, &retryable) {
-            if r.metrics != nil {
-                r.metrics.RecordFailure(err, attempt)
-            }
-            return zero, err
-        }
-
         lastErr = err
+
+        if !r.cfg.Retryable(err) {
+            return zero, err
+        }
+        if attempt == r.cfg.MaxAttempts {
+            break
+        }
+
+        delay := r.delay(attempt - 1)
+        if hinted, ok := retryDelay(err); ok {
+            delay = hinted
+            if delay > r.cfg.MaxDelay {
+                delay = r.cfg.MaxDelay
+            }
+            if delay < 0 {
+                delay = 0
+            }
+        }
+
+        if err := r.wait(ctx, delay); err != nil {
+            return zero, err
+        }
     }
 
-    if r.metrics != nil {
-        r.metrics.RecordFailure(lastErr, r.cfg.MaxAttempts)
+    return zero, fmt.Errorf(
+        "retry exhausted after %d attempts: %w",
+        r.cfg.MaxAttempts,
+        lastErr,
+    )
+}
+
+func callAttempt[T any](
+    parent context.Context,
+    timeout time.Duration,
+    fn func(context.Context) (T, error),
+) (T, error) {
+    if timeout <= 0 {
+        return fn(parent)
     }
-    return zero, lastErr
+    ctx, cancel := context.WithTimeout(parent, timeout)
+    defer cancel()
+    return fn(ctx)
 }
 
-func (r *Retrier) computeDelay(attempt int) time.Duration {
-    // attempt = 2 (first retry), 3, 4, 5...
-    backoff := float64(r.cfg.BaseDelay) * math.Pow(r.cfg.Multiplier, float64(attempt-2))
-    if backoff > float64(r.cfg.MaxDelay) {
-        backoff = float64(r.cfg.MaxDelay)
+func (r *Retrier) delay(retry int) time.Duration {
+    capDelay := float64(r.cfg.BaseDelay)
+    maxDelay := float64(r.cfg.MaxDelay)
+
+    for i := 0; i < retry; i++ {
+        if capDelay >= maxDelay/r.cfg.Multiplier {
+            capDelay = maxDelay
+            break
+        }
+        capDelay *= r.cfg.Multiplier
+    }
+    if capDelay > maxDelay {
+        capDelay = maxDelay
     }
 
-    // Full jitter
-    return time.Duration(rand.Float64() * backoff)
-}
-```
-
-**Использование с generics:**
-
-```go
-type APIResponse struct {
-    Data []byte
+    r.randomMu.Lock()
+    sample := r.random.Float64()
+    r.randomMu.Unlock()
+    return time.Duration(sample * capDelay)
 }
 
-resp, err := retry.Do(ctx, retrier, func(ctx context.Context) (APIResponse, error) {
-    return callAPI(ctx)
-})
-```
+func waitContext(ctx context.Context, delay time.Duration) error {
+    timer := time.NewTimer(delay)
+    defer timer.Stop()
 
----
+    select {
+    case <-ctx.Done():
+        return ctx.Err()
+    case <-timer.C:
+        return nil
+    }
+}
 
-## Smart retry: учитывать Retry-After header
+type delayHint interface {
+    RetryDelay() time.Duration
+}
 
-HTTP 429/503 часто содержат `Retry-After` header — сервер говорит когда retry.
-
-```go
-func parseRetryAfter(resp *http.Response) (time.Duration, bool) {
-    val := resp.Header.Get("Retry-After")
-    if val == "" {
+func retryDelay(err error) (time.Duration, bool) {
+    var hint delayHint
+    if !errors.As(err, &hint) {
         return 0, false
     }
-
-    // Может быть число секунд: "120"
-    if seconds, err := strconv.Atoi(val); err == nil {
-        return time.Duration(seconds) * time.Second, true
-    }
-
-    // Или HTTP date: "Wed, 21 Oct 2025 07:28:00 GMT"
-    if t, err := http.ParseTime(val); err == nil {
-        return time.Until(t), true
-    }
-
-    return 0, false
-}
-
-// В retry — если сервер дал hint, использовать
-func httpDo(ctx context.Context, req *http.Request) error {
-    resp, err := http.DefaultClient.Do(req)
-    if err != nil {
-        return retry.Retryable(err)
-    }
-    defer resp.Body.Close()
-
-    if resp.StatusCode == 429 || resp.StatusCode == 503 {
-        if delay, ok := parseRetryAfter(resp); ok {
-            // Сервер сказал когда retry — wait и retry
-            time.Sleep(delay)
-            return retry.Retryable(fmt.Errorf("server overloaded: %d", resp.StatusCode))
-        }
-        return retry.Retryable(fmt.Errorf("server error: %d", resp.StatusCode))
-    }
-    // ...
+    return hint.RetryDelay(), true
 }
 ```
 
+Инъекция `rand.Source` и приватной `wait` позволяет тестировать последовательность
+без реального времени. В production observer/hook вызывают вне внутренних
+locks; его panic или блокировка не должны ломать retry protocol.
+
+Вычисление caps насыщается до `MaxDelay` до умножения и не конвертирует огромное
+`math.Pow` напрямую в `time.Duration`.
+
 ---
 
-## Тесты
+## HTTP и Retry-After
+
+RFC 9110 разрешает `Retry-After` как целое число секунд или HTTP-date. Parser
+должен отвергать отрицательные и переполняющие значения и использовать
+инъецированный `now` для теста:
 
 ```go
-func TestRetry_SucceedsAfterFailures(t *testing.T) {
-    var attempts atomic.Int32
-    cfg := Config{
-        MaxAttempts: 5,
-        BaseDelay:   time.Millisecond,
-        Multiplier:  2,
-        MaxDelay:    100 * time.Millisecond,
+func ParseRetryAfter(value string, now time.Time) (time.Duration, error) {
+    if seconds, err := strconv.ParseInt(value, 10, 32); err == nil {
+        if seconds < 0 {
+            return 0, fmt.Errorf("negative Retry-After")
+        }
+        return time.Duration(seconds) * time.Second, nil
     }
 
-    err := Do(context.Background(), cfg, func(ctx context.Context) error {
-        n := attempts.Add(1)
-        if n < 3 {
-            return Retryable(errors.New("fail"))
-        }
-        return nil
-    })
-
+    deadline, err := http.ParseTime(value)
     if err != nil {
-        t.Fatal(err)
+        return 0, fmt.Errorf("parse Retry-After: %w", err)
     }
-    if attempts.Load() != 3 {
-        t.Errorf("attempts %d, want 3", attempts.Load())
+    if !deadline.After(now) {
+        return 0, nil
     }
-}
-
-func TestRetry_GivesUpAfterMax(t *testing.T) {
-    var attempts atomic.Int32
-    cfg := Config{
-        MaxAttempts: 3,
-        BaseDelay:   time.Millisecond,
-    }
-
-    err := Do(context.Background(), cfg, func(ctx context.Context) error {
-        attempts.Add(1)
-        return Retryable(errors.New("fail"))
-    })
-
-    if err == nil {
-        t.Fatal("expected error")
-    }
-    if attempts.Load() != 3 {
-        t.Errorf("attempts %d, want 3", attempts.Load())
-    }
-}
-
-func TestRetry_NonRetryable(t *testing.T) {
-    var attempts atomic.Int32
-    cfg := DefaultConfig()
-    cfg.BaseDelay = time.Millisecond
-
-    nonRetryable := errors.New("validation failed")
-    err := Do(context.Background(), cfg, func(ctx context.Context) error {
-        attempts.Add(1)
-        return nonRetryable  // NOT wrapped в Retryable
-    })
-
-    if !errors.Is(err, nonRetryable) {
-        t.Errorf("got %v, want %v", err, nonRetryable)
-    }
-    if attempts.Load() != 1 {
-        t.Errorf("attempts %d, want 1", attempts.Load())
-    }
-}
-
-func TestRetry_ContextCancelled(t *testing.T) {
-    cfg := Config{
-        MaxAttempts: 100,
-        BaseDelay:   time.Second,
-    }
-
-    ctx, cancel := context.WithCancel(context.Background())
-    go func() {
-        time.Sleep(50 * time.Millisecond)
-        cancel()
-    }()
-
-    err := Do(ctx, cfg, func(ctx context.Context) error {
-        return Retryable(errors.New("fail"))
-    })
-
-    if !errors.Is(err, context.Canceled) {
-        t.Errorf("got %v, want Canceled", err)
-    }
-}
-
-func TestRetry_ExponentialBackoff(t *testing.T) {
-    cfg := Config{
-        MaxAttempts: 4,
-        BaseDelay:   10 * time.Millisecond,
-        Multiplier:  2,
-        Jitter:      0,  // detect predictable
-    }
-
-    var times []time.Time
-    Do(context.Background(), cfg, func(ctx context.Context) error {
-        times = append(times, time.Now())
-        return Retryable(errors.New("fail"))
-    })
-
-    // delays между attempts должны расти: ~10ms, 20ms, 40ms
-    for i := 1; i < len(times); i++ {
-        d := times[i].Sub(times[i-1])
-        expected := time.Duration(10*math.Pow(2, float64(i-1))) * time.Millisecond
-        if d < expected*8/10 || d > expected*15/10 {
-            t.Errorf("attempt %d delay %v, expected ~%v", i, d, expected)
-        }
-    }
+    return deadline.Sub(now), nil
 }
 ```
 
----
+Hint следует вернуть из attempt как часть typed error. Нельзя сначала сделать
+`time.Sleep(Retry-After)` внутри HTTP callback, а затем ещё раз ждать backoff во
+внешнем retrier: это удваивает delay и игнорирует cancellation первого sleep.
 
-## Подводные камни
+HTTP retry имеет дополнительные условия:
 
-### 1. Retry для non-idempotent операций
+- `http.Client.Do` не считает non-2xx ошибкой — status классифицирует caller;
+- response body закрывают; для reuse HTTP/1 connection его обычно дочитывают до
+  EOF в разумной bounded policy;
+- request body для новой попытки создают заново через request factory или
+  `GetBody`;
+- transport error не доказывает, что server не применил mutation;
+- `PUT` и `DELETE` идемпотентны по HTTP semantics, а `POST` и `PATCH` — не
+  гарантированно; фактический business effect всё равно нужно проверить;
+- `429`, `503` и некоторые другие ответы могут нести `Retry-After`, но policy
+  зависит от API.
+
+Безопасная форма callback создаёт новый request на каждой попытке:
 
 ```go
-// ❌ POST /orders — создание заказа
-retry.Do(ctx, cfg, func(ctx context.Context) error {
-    return createOrder(ctx)  // ← дубли при retry!
+result, err := retry.Do(ctx, retrier, func(attemptCtx context.Context) (*http.Response, error) {
+    req, err := newRequest(attemptCtx)
+    if err != nil {
+        return nil, err // classifier должен считать build error permanent
+    }
+    return client.Do(req)
 })
 ```
 
-POST/PATCH/DELETE — обычно non-idempotent. Retry без idempotency-key создаёт дубликаты. См. [05-idempotency-handler.md](./05-idempotency-handler.md).
-
-### 2. Retry на 4xx
-
-```go
-// ❌ 401, 403, 400 — НЕ retry
-if resp.StatusCode >= 400 {
-    return retry.Retryable(err)
-}
-```
-
-4xx — ошибка **клиента**. Retry не поможет. Только 429 (rate limit) — retryable из 4xx.
-
-### 3. Retry без context
-
-```go
-// ❌ Бесконечный wait
-time.Sleep(delay)
-```
-
-Должно быть `select { case <-ctx.Done(): ... case <-time.After(delay): }`.
-
-### 4. Retry без jitter — thundering herd
-
-```go
-// ❌ 1000 клиентов retry'ят одновременно
-time.Sleep(exponential(attempt))
-```
-
-Зависимость только-только начала восстанавливаться → бомбардировка → опять падает. Jitter обязателен.
-
-### 5. Retry амплифицирует нагрузку
-
-Зависимость в стрессе → клиенты массово retry → ещё больше нагрузка → больше failures → больше retry.
-
-**Решение:** circuit breaker (см. [03-circuit-breaker.md](./03-circuit-breaker.md)) или token bucket для retry'ев.
-
-### 6. Не учитывать ctx.Done в самом fn
-
-```go
-fn := func(ctx context.Context) error {
-    resp, err := http.Get(url)  // ← ctx не передан!
-    // ...
-}
-```
-
-Длинная operation продолжается после ctx cancelled.
-
-### 7. Логировать каждую попытку как error
-
-```
-ERROR: retry attempt 1 failed
-ERROR: retry attempt 2 failed
-ERROR: retry attempt 3 failed
-ERROR: retry attempt 4 failed
-ERROR: retry attempt 5 failed
-```
-
-5 error логов на одну операцию. Лучше WARN на промежуточные и ERROR на final.
-
-### 8. Слишком много попыток
-
-```go
-MaxAttempts: 50  // ← на сценарии "запрос упал" будет минуты ждать
-```
-
-5-7 — практичный max. После — alert / circuit breaker.
-
-### 9. Не сохранять оригинальную ошибку
-
-```go
-// ❌ Только last attempt info
-return errors.New("retry exhausted")
-```
-
-Caller хочет видеть оригинал → wrap последнюю: `fmt.Errorf("retry exhausted: %w", lastErr)`.
-
-### 10. Retry внутри retry
-
-Service A retries 5 раз → каждый запрос вызывает Service B который retries 5 → 25 retries per logical request. Multiplicative explosion.
-
-**Решение:** retry **только на крайнем слое** (entry point), внутренние сервисы не retry.
+Не следует слепо повторять все `4xx` или все `5xx`: классификатор должен знать
+семантику endpoint и конкретного ответа.
 
 ---
 
-## Возможные расширения
+## Retry budget и композиция
 
-### 1. Retry budget
+Общий deadline ограничивает сумму:
 
-Глобальный лимит "сколько retry в секунду" — защита от retry storm.
-
-### 2. Custom retryable predicate
-
-```go
-func(err error) bool {
-    var httpErr *HTTPError
-    return errors.As(err, &httpErr) && httpErr.StatusCode >= 500
-}
+```text
+attempts latency + backoff waits + queueing
 ```
 
-Гибче чем marker error.
+Например, общий budget `800ms`, timeout попытки `250ms` и максимум три attempts
+не гарантируют выполнение всех трёх: две попытки по `250ms` плюс waits могут
+израсходовать deadline раньше. Это корректно — deadline важнее счётчика.
 
-### 3. Hedged requests
+Retries усиливают нагрузку. Если три слоя независимо делают до трёх attempts,
+один входной запрос способен породить:
 
-Для latency-critical — отправить N запросов параллельно, использовать первый успешный. См. Tail at Scale paper Google.
+```text
+3 * 3 * 3 = 27 downstream attempts
+```
 
-### 4. Retry с different endpoints
+Поэтому retry обычно принадлежит одному слою, который понимает операцию и её
+budget. Дополнительно применяют:
 
-При фейле на server-1 — retry на server-2 (round robin).
+- retry budget как долю от обычного трафика;
+- circuit breaker для fast fail нездоровой dependency;
+- bulkhead/concurrency limit;
+- rate-limit headers и server hints;
+- idempotency key для mutations.
 
-### 5. Persistent retry queue
-
-Если retry exhausted — положить в DB queue, retry asynchronously позже.
-
-### 6. Adaptive retry
-
-Снизить MaxAttempts когда circuit breaker open / error rate высокий.
+Hedged request отличается от retry: следующая копия стартует до завершения
+первой и расходует concurrency. Его применяют только к безопасным операциям и
+по измеренному latency tail.
 
 ---
 
-## Что важно показать на собеседовании
+## Тестирование и метрики
 
-1. **Что retryable, что нет** — 5xx/429/network yes, 4xx no
-2. **Exponential backoff с jitter** — почему jitter обязателен (thundering herd)
-3. **MaxDelay cap** — не уходить в minutes
-4. **Context propagation** — interruptible sleep
-5. **Идемпотентность** — caller responsibility
-6. **Retry budget / circuit breaker** — защита от amplification
-7. **Retry-After header** — respect сервера
-8. **Стандартные библиотеки** — cenkalti/backoff, avast/retry-go
+Подменив `r.wait`, можно записывать delays без `Sleep`. Проверяются:
 
-## Связки
+1. `MaxAttempts=1` вызывает callback один раз и не ждёт;
+2. permanent error возвращается сразу;
+3. successful attempt возвращает value;
+4. exhaustion сохраняет `errors.Is` для исходной ошибки;
+5. cancel во время wait немедленно завершает операцию;
+6. timeout попытки не превышает parent deadline;
+7. cap не превышает `MaxDelay` при большом retry;
+8. deterministic source даёт ожидаемый Full Jitter;
+9. `Retry-After` не добавляется к ещё одному backoff;
+10. concurrent вызовы проходят под `go test -race`.
 
-- [Retries и backoff (reliability)](../../../05-system-design/reliability-patterns/02-retries-and-backoff.md)
-- [Circuit Breaker](./03-circuit-breaker.md) — защита от retry storm
-- [Idempotency](./05-idempotency-handler.md) — обязательно для retry'ев на mutations
-- [AWS blog: Exponential Backoff and Jitter](https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/)
+Метрики: operations, attempts per operation, retry delay, terminal reason,
+exhausted, canceled и budget remaining. Логировать каждую попытку как `error`
+обычно шумно: промежуточный retry — событие, terminal failure — итог операции.
+
+---
+
+## Типичные ошибки
+
+- Считать retries отдельно от первого вызова и получить off-by-one.
+- Не валидировать zero/negative durations и multiplier.
+- Называть Full Jitter другой формулой.
+- Использовать `time.Sleep`, который нельзя отменить context-ом.
+- Повторно отправлять уже прочитанный request body.
+- Retry-ить mutation после transport error без idempotency protocol.
+- Ждать и `Retry-After`, и собственный backoff последовательно.
+- Разрешить retries на каждом слое и получить multiplicative amplification.
+- Использовать глобальный RNG или user callback конкурентно без оговорённой
+  thread safety.
+- Выбирать «пять попыток» без общего deadline и capacity calculation.
+
+---
+
+## Interview-ready answer
+
+1. **Из чего состоит корректный retry?**
+   - **Bounded attempts —** первый вызов входит в `MaxAttempts`.
+   - **Backoff + jitter —** caps растут до `MaxDelay`, Full Jitter разносит
+     клиентов.
+   - **Cancellation —** attempt и wait подчиняются общему context.
+
+2. **Какие ошибки можно повторять?**
+   - **Transient —** timeout/connect failure или явно retryable response.
+   - **Operation-aware —** transport error мог скрывать уже выполненный side
+     effect.
+   - **Idempotency —** mutation повторяют только с доказанной защитой от
+     дубля.
+
+3. **Как не устроить retry storm?**
+   - **One owner —** policy находится на одном подходящем слое.
+   - **Budget —** общий deadline и retry quota ограничивают amplification.
+   - **Coordination —** учитывать `Retry-After`, circuit breaker и bulkhead.
+
+---
+
+## Связанные материалы
+
+- [RFC 9110: Retry-After](https://www.rfc-editor.org/rfc/rfc9110.html#section-10.2.3)
+- [RFC 9110: Idempotent Methods](https://www.rfc-editor.org/rfc/rfc9110.html#section-9.2.2)
+- [Circuit Breaker](./03-circuit-breaker.md)
+- [Idempotency handler](./05-idempotency-handler.md)

@@ -1,42 +1,61 @@
 # Задача 1: Connection Pool
 
-Connection pool — переиспользование дорогих ресурсов (TCP connections, БД handles). Знание устройства pool'а — критично для senior, потому что под капотом `database/sql`, `http.Transport`, `redis.Client` все используют один и тот же паттерн.
+## Содержание
 
-## Формулировка
+- [Контракт задачи](#контракт-задачи)
+- [Инварианты](#инварианты)
+- [Реализация с lease](#реализация-с-lease)
+- [Acquire, Release и Close](#acquire-release-и-close)
+- [Lifetime и health check](#lifetime-и-health-check)
+- [Настройка capacity](#настройка-capacity)
+- [Тестирование и метрики](#тестирование-и-метрики)
+- [Типичные ошибки](#типичные-ошибки)
+- [Interview-ready answer](#interview-ready-answer)
 
-> "Реализуй generic resource pool: Acquire/Release. Лимит на максимальный размер, переиспользование, health check на release."
-
-Вариации:
-- "Что делает database/sql.DB?"
-- "Реализуй HTTP client pool"
-- "Сделай TCP connection pool с lifecycle"
-
----
-
-## Уточняющие вопросы
-
-1. **Какой максимальный размер?**
-   "Max active connections. Limit на total — иначе можно exhaust resources."
-
-2. **Что делать когда лимит достигнут — ждать или error?**
-   "Обычно ждать (с timeout через ctx). Reject — если приоритет latency over success."
-
-3. **Idle timeout — закрывать неиспользуемые?**
-   "Да. Иначе connections живут вечно, БД может их разорвать со своей стороны."
-
-4. **Max lifetime — закрывать старые?**
-   "Да. Защита от cached state (e.g., DNS TTL, SSL session refresh)."
-
-5. **Health check при Acquire?**
-   "Опционально. Стоит ping/validate. Но добавляет latency."
-
-6. **Thread safe? Обязательно.**
+Pool переиспользует дорогие ресурсы и одновременно ограничивает их число.
+Буферизированный канал только хранит idle objects; сам по себе он не ограничивает
+число созданных ресурсов и не решает гонку `Close` с `Release`.
 
 ---
 
-## Базовое решение: buffered channel
+## Контракт задачи
 
-Самый простой и идиоматичный Go-way — channel как pool.
+Перед кодом нужно уточнить:
+
+1. `MaxOpen` ограничивает idle или все созданные ресурсы?
+2. Что делает `Acquire`, когда limit достигнут: ждёт, отклоняет или создаёт ещё?
+3. Как caller возвращает broken resource?
+4. Ждёт ли `Close` занятые ресурсы и можно ли ограничить ожидание context-ом?
+5. Нужны ли max lifetime, max idle time и health check?
+6. Как защищаться от double release?
+
+Ниже `MaxOpen` — строгий предел `idle + in-use + factory in-flight`.
+`Acquire` ждёт с `context`, а `Close` запрещает новые acquisitions, закрывает
+idle и ждёт возврата in-use до deadline.
+
+---
+
+## Инварианты
+
+Для любого состояния pool:
+
+```text
+0 <= idle <= MaxIdle <= MaxOpen
+open = idle + in-use + factory-in-flight
+```
+
+Каждый успешно созданный resource ровно один раз либо находится в pool/lease,
+либо закрыт. Нельзя закрывать channel, в который concurrent `Release` ещё может
+отправить: это приводит к panic. В реализации ниже ожидатели просыпаются через
+versioned notification channel, а сами resources хранятся под mutex.
+
+---
+
+## Реализация с lease
+
+Lease хранит метаданные момента создания и не позволяет вернуть один resource
+дважды. Это надёжнее API `Acquire() T` + `Release(T)`, где pool не отличает
+легитимный возврат от double release.
 
 ```go
 package pool
@@ -44,548 +63,379 @@ package pool
 import (
     "context"
     "errors"
+    "fmt"
     "sync"
-)
-
-type Conn interface {
-    Close() error
-}
-
-// Pool — простой connection pool через buffered channel.
-type Pool[T Conn] struct {
-    mu       sync.Mutex
-    factory  func(context.Context) (T, error)
-    closed   bool
-    pool     chan T
-    capacity int
-}
-
-func New[T Conn](capacity int, factory func(context.Context) (T, error)) *Pool[T] {
-    return &Pool[T]{
-        factory:  factory,
-        pool:     make(chan T, capacity),
-        capacity: capacity,
-    }
-}
-
-// Acquire берёт connection из pool. Если pool пустой — создаёт новый.
-// Блокируется ничего нет и достигнут лимит — ждёт пока кто-то Release.
-// Не реализовано в простой версии — добавим в production.
-func (p *Pool[T]) Acquire(ctx context.Context) (T, error) {
-    var zero T
-
-    if p.closed {
-        return zero, errors.New("pool closed")
-    }
-
-    select {
-    case c := <-p.pool:
-        return c, nil
-    default:
-        // pool пуст — создать новое
-        return p.factory(ctx)
-    }
-}
-
-// Release возвращает connection в pool.
-// Если pool полон — закрывает соединение.
-func (p *Pool[T]) Release(c T) {
-    if p.closed {
-        c.Close()
-        return
-    }
-
-    select {
-    case p.pool <- c:
-        // OK
-    default:
-        // pool полон — закрываем (соединение лишнее)
-        c.Close()
-    }
-}
-
-func (p *Pool[T]) Close() error {
-    p.mu.Lock()
-    if p.closed {
-        p.mu.Unlock()
-        return nil
-    }
-    p.closed = true
-    close(p.pool)
-    p.mu.Unlock()
-
-    for c := range p.pool {
-        c.Close()
-    }
-    return nil
-}
-```
-
-**Использование:**
-
-```go
-pool := pool.New(10, func(ctx context.Context) (*MyConn, error) {
-    return dialConn(ctx, "host:5432")
-})
-defer pool.Close()
-
-conn, err := pool.Acquire(ctx)
-if err != nil {
-    return err
-}
-defer pool.Release(conn)
-
-// ... use conn
-```
-
-**Что важно объяснить:**
-- `select { default }` — non-blocking, если pool пустой — создаём новый
-- `Release` non-blocking — если pool полон, лишний conn закрывается
-- Channel сам обеспечивает thread safety (no manual mutex для acquire/release)
-
-**Проблемы базового:**
-- Нет лимита **общего** числа соединений (только pool buffer'а)
-- Нет idle timeout
-- Нет health check
-- Нет ожидания при exhaustion
-
----
-
-## Production-grade: лимит total, idle/lifetime, wait
-
-```go
-package pool
-
-import (
-    "context"
-    "errors"
-    "sync"
-    "sync/atomic"
     "time"
 )
 
-type pooledConn[T Conn] struct {
-    conn       T
+var (
+    ErrClosed        = errors.New("pool is closed")
+    ErrLeaseReleased = errors.New("lease already released")
+)
+
+type Config struct {
+    MaxOpen        int
+    MaxIdle        int
+    MaxLifetime    time.Duration
+    MaxIdleTime    time.Duration
+}
+
+type entry[T any] struct {
+    value      T
     createdAt  time.Time
     lastUsedAt time.Time
 }
 
-type Pool[T Conn] struct {
-    factory     func(context.Context) (T, error)
-    healthCheck func(T) bool
+type Pool[T any] struct {
+    cfg     Config
+    factory func(context.Context) (T, error)
+    closeFn func(T) error
+    healthy func(context.Context, T) error
+    now     func() time.Time
 
-    maxOpen     int           // лимит total active
-    maxIdle     int           // лимит idle в pool'е
-    maxIdleTime time.Duration // idle > этого = закрыть
-    maxLifetime time.Duration // age > этого = закрыть
+    mu      sync.Mutex
+    idle    []entry[T]
+    open    int
+    closed  bool
+    changed chan struct{}
+}
+
+type Lease[T any] struct {
+    pool  *Pool[T]
+    entry entry[T]
 
     mu       sync.Mutex
-    idle     []*pooledConn[T]
-    open     int          // active = idle + in-use
-    waiters  []chan T     // ждут когда освободится
-    closed   bool
-
-    // Метрики
-    acquired atomic.Int64
-    waited   atomic.Int64
-    created  atomic.Int64
-    closed_  atomic.Int64
+    released bool
 }
 
-type Config[T Conn] struct {
-    Factory     func(context.Context) (T, error)
-    HealthCheck func(T) bool
-    MaxOpen     int
-    MaxIdle     int
-    MaxIdleTime time.Duration
-    MaxLifetime time.Duration
+func New[T any](
+    cfg Config,
+    factory func(context.Context) (T, error),
+    closeFn func(T) error,
+    healthy func(context.Context, T) error,
+) (*Pool[T], error) {
+    if cfg.MaxOpen < 1 {
+        return nil, fmt.Errorf("max open must be positive")
+    }
+    if cfg.MaxIdle < 0 || cfg.MaxIdle > cfg.MaxOpen {
+        return nil, fmt.Errorf("max idle must be in [0, max open]")
+    }
+    if cfg.MaxLifetime < 0 || cfg.MaxIdleTime < 0 {
+        return nil, fmt.Errorf("lifetimes must not be negative")
+    }
+    if factory == nil || closeFn == nil {
+        return nil, fmt.Errorf("factory and close function are required")
+    }
+
+    return &Pool[T]{
+        cfg:     cfg,
+        factory: factory,
+        closeFn: closeFn,
+        healthy: healthy,
+        now:     time.Now,
+        changed: make(chan struct{}),
+    }, nil
 }
 
-func New[T Conn](cfg Config[T]) *Pool[T] {
-    p := &Pool[T]{
-        factory:     cfg.Factory,
-        healthCheck: cfg.HealthCheck,
-        maxOpen:     cfg.MaxOpen,
-        maxIdle:     cfg.MaxIdle,
-        maxIdleTime: cfg.MaxIdleTime,
-        maxLifetime: cfg.MaxLifetime,
-    }
-    if p.healthCheck == nil {
-        p.healthCheck = func(T) bool { return true }
-    }
-    go p.cleanup()
-    return p
+func (p *Pool[T]) signalLocked() {
+    close(p.changed)
+    p.changed = make(chan struct{})
 }
 
-func (p *Pool[T]) Acquire(ctx context.Context) (T, error) {
-    p.acquired.Add(1)
+func (p *Pool[T]) expired(e entry[T], now time.Time) bool {
+    lifetimeExpired := p.cfg.MaxLifetime > 0 &&
+        now.Sub(e.createdAt) >= p.cfg.MaxLifetime
+    idleExpired := p.cfg.MaxIdleTime > 0 &&
+        now.Sub(e.lastUsedAt) >= p.cfg.MaxIdleTime
+    return lifetimeExpired || idleExpired
+}
+```
 
-    var zero T
-    p.mu.Lock()
+Метаданные принадлежат pool, поэтому `createdAt` не сбрасывается при каждом
+`Release`. Иначе `MaxLifetime` незаметно превращается в ещё один idle timeout.
 
-    if p.closed {
-        p.mu.Unlock()
-        return zero, errors.New("pool closed")
-    }
+---
 
-    // Найти валидный idle connection
-    for len(p.idle) > 0 {
-        n := len(p.idle) - 1
-        pc := p.idle[n]
-        p.idle = p.idle[:n]
+## Acquire, Release и Close
 
-        // Проверки lifecycle
-        if p.isExpired(pc) || !p.healthCheck(pc.conn) {
-            pc.conn.Close()
-            p.open--
-            p.closed_.Add(1)
-            continue
+Factory, health check и resource `Close` могут блокироваться, поэтому они не
+вызываются под mutex pool-а.
+
+```go
+func (p *Pool[T]) Acquire(ctx context.Context) (*Lease[T], error) {
+    for {
+        if err := ctx.Err(); err != nil {
+            return nil, err
         }
 
-        pc.lastUsedAt = time.Now()
-        p.mu.Unlock()
-        return pc.conn, nil
-    }
-
-    // Idle пуст. Можно создать новое?
-    if p.open < p.maxOpen {
-        p.open++
-        p.mu.Unlock()
-
-        conn, err := p.factory(ctx)
-        if err != nil {
-            p.mu.Lock()
-            p.open--
-            p.mu.Unlock()
-            return zero, err
-        }
-        p.created.Add(1)
-        return conn, nil
-    }
-
-    // Лимит достигнут — встаём в очередь
-    p.waited.Add(1)
-    ch := make(chan T, 1)
-    p.waiters = append(p.waiters, ch)
-    p.mu.Unlock()
-
-    select {
-    case conn := <-ch:
-        return conn, nil
-    case <-ctx.Done():
-        // Удалить себя из waiters
-        p.mu.Lock()
-        for i, w := range p.waiters {
-            if w == ch {
-                p.waiters = append(p.waiters[:i], p.waiters[i+1:]...)
-                break
-            }
-        }
-        p.mu.Unlock()
-        return zero, ctx.Err()
-    }
-}
-
-func (p *Pool[T]) Release(conn T) {
-    p.mu.Lock()
-    defer p.mu.Unlock()
-
-    if p.closed {
-        conn.Close()
-        p.open--
-        return
-    }
-
-    // Если кто-то ждёт — отдать ему напрямую
-    if len(p.waiters) > 0 {
-        w := p.waiters[0]
-        p.waiters = p.waiters[1:]
-        w <- conn
-        return
-    }
-
-    // Иначе — в idle pool
-    if len(p.idle) >= p.maxIdle {
-        conn.Close()
-        p.open--
-        p.closed_.Add(1)
-        return
-    }
-
-    p.idle = append(p.idle, &pooledConn[T]{
-        conn:       conn,
-        createdAt:  time.Now(),  // simplified — реально надо сохранить
-        lastUsedAt: time.Now(),
-    })
-}
-
-// cleanup периодически удаляет expired idle connections.
-func (p *Pool[T]) cleanup() {
-    ticker := time.NewTicker(time.Minute)
-    defer ticker.Stop()
-    for range ticker.C {
         p.mu.Lock()
         if p.closed {
             p.mu.Unlock()
-            return
+            return nil, ErrClosed
         }
-        var kept []*pooledConn[T]
-        for _, pc := range p.idle {
-            if p.isExpired(pc) {
-                pc.conn.Close()
-                p.open--
-            } else {
-                kept = append(kept, pc)
+
+        if n := len(p.idle); n > 0 {
+            e := p.idle[n-1]
+            p.idle = p.idle[:n-1]
+            p.mu.Unlock()
+
+            if p.expired(e, p.now()) {
+                _ = p.retire(e.value)
+                continue
             }
+            if p.healthy != nil {
+                if err := p.healthy(ctx, e.value); err != nil {
+                    if ctx.Err() != nil {
+                        _ = p.put(e, false)
+                        return nil, ctx.Err()
+                    }
+                    _ = p.retire(e.value)
+                    continue
+                }
+            }
+            return &Lease[T]{pool: p, entry: e}, nil
         }
-        p.idle = kept
+
+        if p.open < p.cfg.MaxOpen {
+            p.open++
+            p.signalLocked()
+            p.mu.Unlock()
+
+            value, err := p.factory(ctx)
+            if err != nil {
+                p.decrementOpen()
+                return nil, fmt.Errorf("create resource: %w", err)
+            }
+
+            now := p.now()
+            e := entry[T]{value: value, createdAt: now, lastUsedAt: now}
+
+            p.mu.Lock()
+            closed := p.closed
+            p.mu.Unlock()
+            if closed || ctx.Err() != nil {
+                _ = p.retire(value)
+                if ctx.Err() != nil {
+                    return nil, ctx.Err()
+                }
+                return nil, ErrClosed
+            }
+            return &Lease[T]{pool: p, entry: e}, nil
+        }
+
+        changed := p.changed
+        p.mu.Unlock()
+
+        select {
+        case <-ctx.Done():
+            return nil, ctx.Err()
+        case <-changed:
+        }
+    }
+}
+
+func (l *Lease[T]) Value() T {
+    return l.entry.value
+}
+
+func (l *Lease[T]) Release(discard bool) error {
+    l.mu.Lock()
+    if l.released {
+        l.mu.Unlock()
+        return ErrLeaseReleased
+    }
+    l.released = true
+    l.mu.Unlock()
+
+    return l.pool.put(l.entry, discard)
+}
+
+func (p *Pool[T]) put(e entry[T], discard bool) error {
+    now := p.now()
+
+    p.mu.Lock()
+    shouldClose := discard || p.closed || p.expired(e, now) ||
+        len(p.idle) >= p.cfg.MaxIdle
+    if !shouldClose {
+        e.lastUsedAt = now
+        p.idle = append(p.idle, e)
+        p.signalLocked()
+        p.mu.Unlock()
+        return nil
+    }
+    p.mu.Unlock()
+
+    return p.retire(e.value)
+}
+
+func (p *Pool[T]) retire(value T) error {
+    err := p.closeFn(value)
+    p.decrementOpen()
+    return err
+}
+
+func (p *Pool[T]) decrementOpen() {
+    p.mu.Lock()
+    p.open--
+    p.signalLocked()
+    p.mu.Unlock()
+}
+
+func (p *Pool[T]) Close(ctx context.Context) error {
+    p.mu.Lock()
+    if !p.closed {
+        p.closed = true
+        idle := p.idle
+        p.idle = nil
+        p.open -= len(idle)
+        p.signalLocked()
+        p.mu.Unlock()
+
+        for _, e := range idle {
+            _ = p.closeFn(e.value)
+        }
+    } else {
         p.mu.Unlock()
     }
-}
 
-func (p *Pool[T]) isExpired(pc *pooledConn[T]) bool {
-    now := time.Now()
-    if p.maxIdleTime > 0 && now.Sub(pc.lastUsedAt) > p.maxIdleTime {
-        return true
-    }
-    if p.maxLifetime > 0 && now.Sub(pc.createdAt) > p.maxLifetime {
-        return true
-    }
-    return false
-}
-
-type Stats struct {
-    Acquired int64
-    Waited   int64
-    Created  int64
-    Closed   int64
-}
-
-func (p *Pool[T]) Stats() Stats {
-    return Stats{
-        Acquired: p.acquired.Load(),
-        Waited:   p.waited.Load(),
-        Created:  p.created.Load(),
-        Closed:   p.closed_.Load(),
-    }
-}
-```
-
-**Что добавлено:**
-- **maxOpen** vs **maxIdle** — разные лимиты на active vs cached
-- **idle timeout / max lifetime** — лечит "застрявшие" соединения
-- **Waiter queue** — если лимит достигнут, новый caller ждёт через channel
-- **Health check** на acquire
-- **Metrics** — acquired/waited/created/closed
-- **Cleanup goroutine** — фоновое удаление expired
-
----
-
-## Тесты
-
-```go
-func TestPool_BasicAcquireRelease(t *testing.T) {
-    var created atomic.Int32
-
-    p := New(Config[*fakeConn]{
-        MaxOpen: 5,
-        MaxIdle: 3,
-        Factory: func(ctx context.Context) (*fakeConn, error) {
-            created.Add(1)
-            return &fakeConn{}, nil
-        },
-    })
-    defer p.Close()
-
-    // Take 3, release 3 → должно переиспользовать
-    for i := 0; i < 3; i++ {
-        c, err := p.Acquire(context.Background())
-        if err != nil {
-            t.Fatal(err)
+    for {
+        p.mu.Lock()
+        if p.open == 0 {
+            p.mu.Unlock()
+            return nil
         }
-        p.Release(c)
-    }
+        changed := p.changed
+        p.mu.Unlock()
 
-    if created.Load() > 3 {
-        t.Errorf("created %d, expected <= 3", created.Load())
-    }
-}
-
-func TestPool_LimitsTotal(t *testing.T) {
-    p := New(Config[*fakeConn]{
-        MaxOpen: 2,
-        MaxIdle: 2,
-        Factory: func(ctx context.Context) (*fakeConn, error) {
-            return &fakeConn{}, nil
-        },
-    })
-    defer p.Close()
-
-    c1, _ := p.Acquire(context.Background())
-    c2, _ := p.Acquire(context.Background())
-
-    // Третий — должен ждать
-    ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
-    defer cancel()
-    _, err := p.Acquire(ctx)
-    if !errors.Is(err, context.DeadlineExceeded) {
-        t.Errorf("expected timeout, got %v", err)
-    }
-
-    p.Release(c1)
-    p.Release(c2)
-}
-
-func TestPool_WaitsForRelease(t *testing.T) {
-    p := New(Config[*fakeConn]{
-        MaxOpen: 1,
-        MaxIdle: 1,
-        Factory: func(ctx context.Context) (*fakeConn, error) {
-            return &fakeConn{}, nil
-        },
-    })
-    defer p.Close()
-
-    c1, _ := p.Acquire(context.Background())
-
-    // Третий ждёт
-    done := make(chan bool)
-    go func() {
-        c2, _ := p.Acquire(context.Background())
-        _ = c2
-        done <- true
-    }()
-
-    time.Sleep(20 * time.Millisecond)
-    p.Release(c1)
-
-    select {
-    case <-done:
-        // OK
-    case <-time.After(100 * time.Millisecond):
-        t.Error("waiter didn't get connection after release")
+        select {
+        case <-ctx.Done():
+            return ctx.Err()
+        case <-changed:
+        }
     }
 }
 ```
 
----
+`Close` не отбирает in-use resources: он ждёт их возврата. Если deadline
+истёк, pool остаётся закрытым, а последующие `Release` всё равно закроют свои
+resources. Ошибки закрытия idle resources в компактном примере не агрегируются;
+production API должен решить, возвращать ли `errors.Join` и как метрифицировать
+такие ошибки.
 
-## Подводные камни
-
-### 1. Counter `open` без mutex
-
-Acquire `p.open < maxOpen` и Acquire `p.open++` — race condition между двумя horizutines. Всегда под mutex'ом.
-
-### 2. Waiter не получил уведомление при close
-
-```go
-p.Close()
-// waiters висят навсегда
-```
-
-При Close — нужно закрыть все waiter channels (или послать err).
-
-### 3. Health check блокирует acquire
-
-Если health check включает ping (network), Acquire становится медленнее. Trade-off: проверять только перед использованием, не на release.
-
-### 4. Pooled connection остался unused при ctx.Done
-
-```go
-conn, _ := pool.Acquire(ctx)
-// ... ctx cancelled ...
-// Forgot to Release(conn) — leak
-```
-
-Обычно решается через `defer pool.Release(conn)`. Если caller забыл — пулом нельзя ничего сделать.
-
-### 5. Resource leak при panic
-
-```go
-conn, _ := pool.Acquire(ctx)
-defer pool.Release(conn)
-panic("oops")  // ← defer вызовется, OK
-```
-
-`defer pool.Release()` спасает.
-
-### 6. Stale connections — server side close
-
-БД закрыла соединение со своей стороны (idle timeout на server). Pool не знает. При следующем acquire — connection даёт ошибку.
-
-**Решение:** retry once при ошибке от соединения из pool'а — если pool'ed conn invalid, открыть новое. database/sql делает это автоматически.
-
-### 7. Buffer size = MaxOpen
-
-```go
-pool := make(chan Conn, maxOpen)  // ← это buffer pool'а, не максимальный open
-```
-
-Buffer'a channel'а — сколько **idle** можно хранить. Не то же самое что лимит на total.
-
-### 8. Goroutine leak в cleanup
-
-```go
-go p.cleanup()
-// Никогда не выйдет если pool не Close'нут
-```
-
-`cleanup` должна реагировать на `p.closed` или receive из `ctx.Done()`.
-
-### 9. Health check возвращает false для всех
-
-Все idle отбрасываются → создаются новые → factory bombs. Если бэкенд down — нужно тоже понимать (через circuit breaker наверху).
-
-### 10. Pool без max — DoS на себя
-
-```go
-p := New(0, factory)  // ← unlimited!
-```
-
-Каждый запрос создаёт connection → OOM или exhausting downstream. Всегда maxOpen > 0.
+Успешная проверка `closed` под mutex является linearization point выдачи нового
+lease. Если `Close` захватит mutex сразу после неё, acquisition логически уже
+произошёл: `open` включает этот resource, поэтому `Close` дождётся его возврата.
+Если `Close` успел раньше, factory result закрывается через `retire` и caller
+получает `ErrClosed`.
 
 ---
 
-## Возможные расширения
+## Lifetime и health check
 
-### 1. Lazy pooling
+Пример делает lazy eviction перед выдачей и при возврате. Поэтому idle resource
+может физически лежать дольше `MaxIdleTime`, пока нет следующей операции. Если
+нужно освобождать capacity по времени без трафика, добавляют cleanup goroutine с
+явными `stop`/`done`; expired entries отсоединяют под mutex, а закрывают снаружи.
 
-Не создавать min connections заранее, только по запросу.
+Health check перед каждым acquire добавляет latency и нагрузку. Для DB connection
+часто лучше:
 
-### 2. Eager warm-up
+- доверять ошибке реальной операции и discard broken connection;
+- проверять только давно idle connection;
+- ограничивать ping отдельным timeout;
+- не считать caller cancellation признаком broken connection автоматически.
 
-Наоборот — создать min connections на старте чтобы первые запросы не ждали.
-
-### 3. Per-target pool
-
-Один pool struct, внутри map[host] → pool. Используется в `http.Transport`.
-
-### 4. Stats для Prometheus
-
-Expose metrics — acquire latency histogram, in-use gauge, wait time.
-
-### 5. Graceful close
-
-Подождать пока все active соединения вернутся в pool, потом закрыть.
-
-### 6. Connection-level retry
-
-Если pool'ed соединение возвращает ошибку — retry с новым.
+Для `database/sql` собственный pool обычно не нужен: `*sql.DB` уже является
+concurrent-safe pool. `sql.Open` часто не устанавливает соединение сразу;
+доступность проверяет `PingContext`. Настраивают `SetMaxOpenConns`,
+`SetMaxIdleConns`, `SetConnMaxLifetime`, `SetConnMaxIdleTime` и наблюдают
+`DBStats`.
 
 ---
 
-## Что важно показать на собеседовании
+## Настройка capacity
 
-1. **Channel как pool** — идиоматичный Go-way
-2. **MaxOpen vs MaxIdle** — два разных лимита
-3. **Waiter queue с context** — правильное ожидание с возможностью отмены
-4. **Lifecycle (idle/max lifetime)** — почему нужно
-5. **Health check** — на acquire вместо при release
-6. **Metrics** — для production observability
-7. **database/sql.DB** — стандартный пример pool'а в Go
+Оценка через закон Литтла:
 
-## Связки
+```text
+in-flight = throughput * average service time
+```
 
-- [Database connection pooling](../../../06-databases/database-systems-catalog/postgresql/09-connection-pooling.md)
-- [Bulkhead](../../../05-system-design/reliability-patterns/07-bulkhead.md) — connection pool per dependency
-- [database/sql docs](https://pkg.go.dev/database/sql) — реальный example pool'а
+При 200 DB operations/s и среднем времени 25 ms ожидаемый concurrency:
+
+```text
+200 * 0.025 = 5 connections
+```
+
+Это среднее, не готовый `MaxOpen`. Нужны headroom для variance/peak и общий
+лимит БД. Если 20 pods имеют `MaxOpen=30`, потенциально это 600 connections.
+Этот предел должен помещаться в capacity PostgreSQL с резервом для migrations,
+admin и background jobs.
+
+Слишком маленький pool увеличивает wait duration; слишком большой переносит
+очередь в БД, повышает memory/context switching и может ухудшить latency.
+
+---
+
+## Тестирование и метрики
+
+Нужны детерминированные barriers, а не `Sleep`:
+
+1. одновременно создаётся не больше `MaxOpen`;
+2. waiter просыпается после `Release`;
+3. canceled waiter не забирает и не теряет resource;
+4. factory error освобождает capacity;
+5. broken/expired resource закрывается и заменяется;
+6. double release отклоняется;
+7. `Close` гоняется с factory и `Release` без panic/race;
+8. deadline `Close` не переоткрывает pool;
+9. каждый созданный resource закрывается ровно один раз.
+
+Метрики: open, in-use, idle, factory-in-flight, wait count/duration, acquire
+timeout, created/closed по причинам и health-check latency. Для `database/sql`
+часть уже доступна в `DBStats`, включая `WaitCount`, `WaitDuration` и причины
+закрытия.
+
+---
+
+## Типичные ошибки
+
+- Использовать capacity канала как `MaxOpen`, создавая resources вне лимита.
+- Закрыть channel в `Close`, пока `Release` может в него отправить.
+- Получить zero value из закрытого channel и вернуть его как успешный acquire.
+- Выполнять factory, ping или network close под общим mutex.
+- Сбрасывать `createdAt` при возврате и тем самым отключать max lifetime.
+- Потерять resource в гонке между `ctx.Done()` и handoff waiter-у.
+- Не защищаться от double release.
+- Забыть суммарный connection budget всех replicas.
+
+---
+
+## Interview-ready answer
+
+1. **Какие инварианты у connection pool?**
+   - **Strict limit —** `idle + in-use + creating <= MaxOpen`.
+   - **Ownership —** resource находится ровно в одном месте и закрывается один
+     раз.
+   - **Cancelable wait —** достижение limit не блокирует caller навсегда.
+
+2. **Почему недостаточно buffered channel?**
+   - **Idle only —** capacity ограничивает сохранённые значения, не число
+     созданных.
+   - **Shutdown race —** concurrent send в закрытый channel вызывает panic.
+   - **Metadata —** lifetime, health и double release требуют отдельного
+     ownership state.
+
+3. **Как выбирать размер?**
+   - **Demand —** начать с throughput × service time и измерений ожидания.
+   - **Global budget —** умножить per-instance limit на число replicas.
+   - **Trade-off —** малый pool создаёт локальную очередь, большой перегружает
+     downstream.
+
+---
+
+## Связанные материалы
+
+- [`database/sql`](https://pkg.go.dev/database/sql)
+- [Connection Pooling](../../../06-databases/database-systems-catalog/postgresql/09-connection-pooling.md)
+- [Context patterns](../../../01-go-core/concurrency-and-performance/04-context-patterns.md)

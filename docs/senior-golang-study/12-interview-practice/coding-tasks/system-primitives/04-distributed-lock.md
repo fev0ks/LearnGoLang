@@ -1,42 +1,64 @@
 # Задача 4: Distributed Lock
 
-В одном процессе достаточно `sync.Mutex`. Но что если **10 pod'ов** делят одну работу, и нужно чтобы **только один** делал её одновременно? Это distributed lock — координация между процессами через shared store (обычно Redis или etcd).
+## Содержание
 
-## Формулировка
+- [Когда lock действительно нужен](#когда-lock-действительно-нужен)
+- [Контракт Redis lease](#контракт-redis-lease)
+- [Acquire и безопасный Release](#acquire-и-безопасный-release)
+- [Renewal и потеря владения](#renewal-и-потеря-владения)
+- [Fencing tokens](#fencing-tokens)
+- [Redis Cluster и Redlock](#redis-cluster-и-redlock)
+- [PostgreSQL и etcd](#postgresql-и-etcd)
+- [Тестирование и метрики](#тестирование-и-метрики)
+- [Типичные ошибки](#типичные-ошибки)
+- [Interview-ready answer](#interview-ready-answer)
 
-> "Реализуй distributed lock через Redis: Acquire(key, ttl), Release(key). Несколько pod'ов одновременно вызывают Acquire — должен пройти только один."
-
-Use cases:
-- **Leader election** — один pod из 5 делает scheduled task
-- **Exclusive job** — только один воркер обрабатывает batch
-- **Idempotency lock** — предотвратить параллельную обработку одного `idempotency_key`
-- **Cache stampede protection** — один пересчитывает, остальные ждут
-
----
-
-## Уточняющие вопросы
-
-1. **Какой store — Redis, etcd, ZooKeeper?**
-   "Redis — простой, быстрый, чаще всего. Etcd — гарантирует consistency, для critical."
-
-2. **TTL обязателен?**
-   "Да. Защита от падения holder'а — без TTL lock висит навсегда."
-
-3. **Что если lock истёк, а holder продолжает работать?**
-   "Это **fencing problem** — нужен fencing token. См. ниже."
-
-4. **Auto-renewal (lease extension)?**
-   "Опционально. Если работа > TTL — нужен renewal. Иначе достаточно big TTL."
-
-5. **Blocking или non-blocking?**
-   "Обычно non-blocking + retry в caller. Для blocking — нужна subscription (Redis Pub/Sub)."
-
-6. **Strong consistency или OK с edge cases?**
-   "Большинству OK с Redis (single instance). Для финансовых — Redlock или etcd."
+Distributed lock координирует процессы через общее хранилище. В отличие от
+`sync.Mutex`, владелец может исчезнуть, сеть — разделиться, а lease — истечь,
+пока код всё ещё выполняет критическую секцию. Поэтому «ключ существует» не
+равно «старый владелец физически остановлен».
 
 ---
 
-## Базовое решение: Redis SET NX
+## Когда lock действительно нужен
+
+Подходящие случаи: leader election, один rebuild cache на ключ, единственный
+scheduler для job и координация доступа к ресурсу без собственной транзакции.
+
+Сначала стоит проверить более сильные и простые варианты:
+
+- `UNIQUE` constraint или conditional `UPDATE` для данных в одной БД;
+- `SELECT ... FOR UPDATE` внутри короткой transaction;
+- идемпотентный consumer и transactional inbox для сообщений;
+- partition ownership в broker;
+- внешний API с idempotency key.
+
+Lock сериализует добровольно сотрудничающих клиентов, но сам по себе не делает
+несколько записей атомарными и не даёт exactly-once.
+
+---
+
+## Контракт Redis lease
+
+Перед реализацией нужно определить:
+
+1. `Acquire` blocking или try-lock?
+2. Как caller узнаёт, что renewal прекратился и lease потерян?
+3. Что означает повторный `Release`?
+4. Может ли защищаемый ресурс проверить fencing token?
+5. Какой отказ допустим при failover Redis?
+
+Один Redis подходит, когда редкое одновременное выполнение после failover
+приемлемо. Для correctness-critical операции одной взаимной блокировки мало:
+нужен fencing на стороне ресурса или транзакционный primitive этого ресурса.
+
+---
+
+## Acquire и безопасный Release
+
+Redis рекомендует acquire одной атомарной командой `SET key value NX PX ttl`,
+где value уникален для конкретной попытки захвата. Release должен атомарно
+сравнить value и удалить ключ.
 
 ```go
 package dlock
@@ -46,600 +68,278 @@ import (
     "crypto/rand"
     "encoding/hex"
     "errors"
+    "fmt"
     "time"
 
     "github.com/redis/go-redis/v9"
 )
 
-var ErrLockNotAcquired = errors.New("lock not acquired")
-var ErrLockNotHeld = errors.New("lock not held by this client")
+var (
+    ErrNotAcquired = errors.New("lock not acquired")
+    ErrNotOwner    = errors.New("lock is not owned by this lease")
+)
 
-type Lock struct {
-    client *redis.Client
-    key    string
-    value  string  // уникальный для данного holder'а
-}
+var releaseScript = redis.NewScript(`
+    if redis.call("GET", KEYS[1]) == ARGV[1] then
+        return redis.call("DEL", KEYS[1])
+    end
+    return 0
+`)
 
 type Locker struct {
-    client *redis.Client
+    client redis.UniversalClient
+    prefix string
 }
 
-func New(client *redis.Client) *Locker {
-    return &Locker{client: client}
+type Lease struct {
+    client redis.UniversalClient
+    key    string
+    owner  string
 }
 
-// Acquire пытается взять lock. Non-blocking.
-// Возвращает Lock с уникальным token'ом для последующего Release.
-func (l *Locker) Acquire(ctx context.Context, key string, ttl time.Duration) (*Lock, error) {
-    // Уникальный value — чтобы только наш Release разлочил
-    val, err := randomToken()
-    if err != nil {
-        return nil, err
+func New(client redis.UniversalClient, prefix string) (*Locker, error) {
+    if client == nil {
+        return nil, fmt.Errorf("redis client is nil")
+    }
+    return &Locker{client: client, prefix: prefix}, nil
+}
+
+func (l *Locker) TryAcquire(
+    ctx context.Context,
+    resource string,
+    ttl time.Duration,
+) (*Lease, error) {
+    if resource == "" {
+        return nil, fmt.Errorf("resource is empty")
+    }
+    if ttl <= 0 {
+        return nil, fmt.Errorf("ttl must be positive")
     }
 
-    // SET key value NX EX ttl — атомарно
-    ok, err := l.client.SetNX(ctx, key, val, ttl).Result()
+    owner, err := randomToken()
     if err != nil {
-        return nil, err
+        return nil, fmt.Errorf("generate owner token: %w", err)
+    }
+
+    key := l.prefix + resource
+    ok, err := l.client.SetNX(ctx, key, owner, ttl).Result()
+    if err != nil {
+        return nil, fmt.Errorf("acquire %q: %w", resource, err)
     }
     if !ok {
-        return nil, ErrLockNotAcquired
+        return nil, ErrNotAcquired
     }
 
-    return &Lock{client: l.client, key: key, value: val}, nil
+    return &Lease{client: l.client, key: key, owner: owner}, nil
 }
 
-// Release освобождает lock. Проверяет что мы — owner (через value).
-func (lock *Lock) Release(ctx context.Context) error {
-    // Lua script: атомарно "если value == ours, delete; иначе ничего"
-    script := redis.NewScript(`
-        if redis.call("GET", KEYS[1]) == ARGV[1] then
-            return redis.call("DEL", KEYS[1])
-        else
-            return 0
-        end
-    `)
-
-    result, err := script.Run(ctx, lock.client, []string{lock.key}, lock.value).Int()
+func (l *Lease) Release(ctx context.Context) error {
+    deleted, err := releaseScript.Run(
+        ctx,
+        l.client,
+        []string{l.key},
+        l.owner,
+    ).Int64()
     if err != nil {
-        return err
+        return fmt.Errorf("release lock: %w", err)
     }
-    if result == 0 {
-        return ErrLockNotHeld  // уже expired или кем-то другим перевзят
+    if deleted == 0 {
+        return ErrNotOwner
     }
     return nil
 }
 
 func randomToken() (string, error) {
-    b := make([]byte, 16)
-    if _, err := rand.Read(b); err != nil {
+    value := make([]byte, 16)
+    if _, err := rand.Read(value); err != nil {
         return "", err
     }
-    return hex.EncodeToString(b), nil
+    return hex.EncodeToString(value), nil
 }
 ```
 
-**Использование:**
+Отдельные `SETNX` и `EXPIRE` оставляют вечный ключ при crash между командами.
+Отдельные `GET` и `DEL` позволяют прежнему владельцу удалить lease нового.
 
-```go
-locker := dlock.New(redisClient)
-
-lock, err := locker.Acquire(ctx, "leader-election", 30*time.Second)
-if errors.Is(err, dlock.ErrLockNotAcquired) {
-    // Кто-то другой держит — нам не делать
-    return
-}
-if err != nil {
-    return err
-}
-defer lock.Release(ctx)
-
-// Critical section — только мы здесь
-doExclusiveWork()
-```
-
-**Ключевые моменты:**
-
-### Почему SET NX, а не отдельный SETNX + EXPIRE
-
-```redis
-# ❌ Не атомарно
-SETNX key value
-EXPIRE key 30  # ← если client crash'нется между ними, key без TTL
-```
-
-Атомарно через одну команду:
-```redis
-SET key value NX EX 30
-```
-
-### Почему уникальный value
-
-```redis
-# Без unique value
-SET lock-key "1" NX EX 30
-
-# A acquired
-# A is slow (GC pause, network), TTL expires
-# B acquires (SET NX succeeds)
-# A wakes up, calls DEL lock-key
-# B's lock released by A!
-```
-
-С unique value — Release проверяет "это мой lock?" через Lua. Кто-то другой — не трогаем.
-
-### Почему Lua
-
-```redis
-# Не атомарно — race condition
-val = GET key
-if val == "my-token":
-    DEL key  # ← в этот момент мог expire и другой acquire
-```
-
-Lua script выполняется атомарно на Redis side.
+Ошибку `Release` нельзя молча игнорировать. `ErrNotOwner` означает, что TTL уже
+истёк или ключ был заменён; side effect после этого нельзя считать защищённым.
 
 ---
 
-## Production-grade: с lease renewal
+## Renewal и потеря владения
 
-Если работа дольше TTL — нужно **продлевать** lock'у жизнь.
+Renewal выполняет compare-and-`PEXPIRE` одним Lua script. Но одной фоновой
+goroutine недостаточно: она обязана отменить работу владельца при первой
+неустранимой ошибке или несовпадении owner token.
+
+```lua
+if redis.call("GET", KEYS[1]) == ARGV[1] then
+    return redis.call("PEXPIRE", KEYS[1], ARGV[2])
+end
+return 0
+```
+
+Практичный API возвращает context критической секции и канал причины потери:
 
 ```go
-package dlock
-
-import (
-    "context"
-    "sync"
-    "time"
-)
-
-// LockWithRenew автоматически продлевает TTL в background.
-type LockWithRenew struct {
-    Lock
-
-    cancel   context.CancelFunc
-    done     chan struct{}
-    mu       sync.Mutex
-    released bool
-}
-
-func (l *Locker) AcquireWithRenew(
-    ctx context.Context,
-    key string,
-    ttl time.Duration,
-    renewInterval time.Duration,
-) (*LockWithRenew, error) {
-    base, err := l.Acquire(ctx, key, ttl)
-    if err != nil {
-        return nil, err
-    }
-
-    renewCtx, cancel := context.WithCancel(context.Background())
-    lwr := &LockWithRenew{
-        Lock:   *base,
-        cancel: cancel,
-        done:   make(chan struct{}),
-    }
-
-    go lwr.renewLoop(renewCtx, ttl, renewInterval)
-    return lwr, nil
-}
-
-func (l *LockWithRenew) renewLoop(ctx context.Context, ttl, interval time.Duration) {
-    defer close(l.done)
-
-    ticker := time.NewTicker(interval)
-    defer ticker.Stop()
-
-    for {
-        select {
-        case <-ctx.Done():
-            return
-        case <-ticker.C:
-            if err := l.renew(context.Background(), ttl); err != nil {
-                // Не смогли renew — lock потерян
-                return
-            }
-        }
-    }
-}
-
-func (l *LockWithRenew) renew(ctx context.Context, ttl time.Duration) error {
-    script := redis.NewScript(`
-        if redis.call("GET", KEYS[1]) == ARGV[1] then
-            return redis.call("PEXPIRE", KEYS[1], ARGV[2])
-        else
-            return 0
-        end
-    `)
-
-    result, err := script.Run(ctx, l.client,
-        []string{l.key}, l.value, ttl.Milliseconds()).Int()
-    if err != nil {
-        return err
-    }
-    if result == 0 {
-        return ErrLockNotHeld
-    }
-    return nil
-}
-
-func (l *LockWithRenew) Release(ctx context.Context) error {
-    l.mu.Lock()
-    if l.released {
-        l.mu.Unlock()
-        return nil
-    }
-    l.released = true
-    l.mu.Unlock()
-
-    l.cancel()  // остановить renewLoop
-    <-l.done    // подождать пока renewLoop вышел
-
-    return l.Lock.Release(ctx)
+type RenewableLease interface {
+    WorkContext() context.Context
+    Lost() <-chan error
+    Release(context.Context) error
 }
 ```
 
-**Использование:**
+Инварианты renewal loop:
 
-```go
-lock, err := locker.AcquireWithRenew(ctx, "long-job",
-    30*time.Second,   // TTL
-    10*time.Second,   // renew interval — < TTL/2 для надёжности
-)
-if err != nil { ... }
-defer lock.Release(context.Background())
+- interval, TTL и timeout одного Redis-вызова валидируются;
+- `Release` сначала останавливает loop и ждёт его завершения, затем делает
+  compare-and-delete;
+- потеря lease вызывает cancel `WorkContext` и один раз публикует причину;
+- callback проверяет context до необратимого side effect;
+- repeated `Release` имеет документированный результат;
+- нет `context.Background()` без deadline для сетевого renew.
 
-// Long-running work — TTL продляется автоматом каждые 10s
-longRunningJob()
-```
-
-**Правило:** `renewInterval < TTL / 2` — если один renew пропустится (network blip), следующий ещё успеет до expiry.
+Формула `interval < TTL/2` лишь оставляет запас и не является доказательством
+владения: process pause или network partition могут быть длиннее TTL. Даже
+успешный renewal не отменяет уже начавшийся side effect прежнего владельца.
 
 ---
 
-## Fencing tokens — защита от false ownership
+## Fencing tokens
 
-Сценарий "GC pause" — известная проблема distributed locks:
-
-```
-1. Client A acquires lock (TTL=30s)
-2. Client A: GC pause 35 секунд
-3. TTL expires, lock released
-4. Client B acquires same lock
-5. Client A wakes up, продолжает критическую секцию
-6. Оба клиента работают одновременно — BAD
-```
-
-Решение — **fencing token**: монотонно растущее число, которое **shared resource** (БД, файл) **проверяет**.
-
-```
-1. A acquires lock → token=42
-2. A doing work, sends update to DB with token=42
-3. A pauses (GC)
-4. TTL expires
-5. B acquires → token=43
-6. B updates DB with token=43 → DB accepts
-7. A wakes up, sends update with token=42 → DB rejects (43 > 42)
-```
-
-```go
-// Lock с fencing token
-type FencedLock struct {
-    Lock
-    Token int64
-}
-
-func (l *Locker) AcquireWithFencing(ctx context.Context, key string, ttl time.Duration) (*FencedLock, error) {
-    // Atomic incr counter для token
-    token, err := l.client.Incr(ctx, key+":fence").Result()
-    if err != nil {
-        return nil, err
-    }
-
-    // Acquire с token как value
-    val := fmt.Sprintf("token-%d", token)
-    ok, err := l.client.SetNX(ctx, key, val, ttl).Result()
-    if err != nil {
-        return nil, err
-    }
-    if !ok {
-        return nil, ErrLockNotAcquired
-    }
-
-    return &FencedLock{
-        Lock:  Lock{client: l.client, key: key, value: val},
-        Token: token,
-    }, nil
-}
-
-// Использование
-lock, _ := locker.AcquireWithFencing(ctx, "db-write", 30*time.Second)
-defer lock.Release(ctx)
-
-err := db.UpdateWithFence(ctx, data, lock.Token)
-if errors.Is(err, ErrStaleFencingToken) {
-    // Кто-то другой уже взял lock — мы устарели
-}
-```
-
-**В БД:**
-```sql
-UPDATE rows SET ..., fence_token = $1 WHERE id = $2 AND fence_token < $1
-```
-
-Если update affected 0 rows — наш token устарел.
-
-См. знаменитый пост Martin Kleppmann: ["How to do distributed locking"](https://martin.kleppmann.com/2016/02/08/how-to-do-distributed-locking.html).
-
----
-
-## Redlock — Redis cluster
-
-Если Redis = single instance, его падение = потеря всех locks. **Redlock** — алгоритм для distributed Redis (N независимых instances).
-
-Принцип:
-1. Acquire на **большинстве** instances (e.g., 3 из 5)
-2. Если acquire'нул >= N/2 + 1 — lock наш
-3. Release на всех (даже где не acquire'нул)
-
-Реализация — [go-redsync/redsync](https://github.com/go-redsync/redsync).
-
-```go
-import "github.com/go-redsync/redsync/v4"
-
-rs := redsync.New(pools...)
-mutex := rs.NewMutex("my-lock", redsync.WithExpiry(30*time.Second))
-
-if err := mutex.LockContext(ctx); err != nil {
-    return err
-}
-defer mutex.UnlockContext(ctx)
-```
-
-**Споры:** Kleppmann критикует Redlock как "недостаточно safe". Для **critical** operations (платежи, deletions) — лучше etcd или PostgreSQL advisory lock.
-
----
-
-## Альтернативы Redis
-
-### PostgreSQL advisory locks
+Fencing token — монотонно растущий номер lease. Защищаемый ресурс хранит
+наибольший принятый номер и отклоняет меньшие:
 
 ```sql
-SELECT pg_try_advisory_lock(hashtext('my-lock'));  -- non-blocking
-SELECT pg_advisory_lock(hashtext('my-lock'));      -- blocking
-
--- Когда закончил
-SELECT pg_advisory_unlock(hashtext('my-lock'));
+UPDATE account_projection
+SET payload = $1, fence_token = $2
+WHERE id = $3 AND fence_token < $2;
 ```
 
-Плюсы:
-- Strong consistency через Postgres
-- Не нужен Redis
-- Auto-release при disconnect
+Если изменено ноль строк, владелец устарел. Проверять token должен именно ресурс,
+где выполняется запись; сравнение только внутри lock service ничего не защищает.
 
-Минусы:
-- Привязан к Postgres
-- Не отличный API для long-held locks
+Для одного Redis acquire token и lock создаются одним script:
 
-### etcd
-
-```go
-import "go.etcd.io/etcd/client/v3/concurrency"
-
-s, _ := concurrency.NewSession(etcdClient)
-defer s.Close()
-
-m := concurrency.NewMutex(s, "/my-lock")
-if err := m.Lock(ctx); err != nil { ... }
-defer m.Unlock(ctx)
+```lua
+if redis.call("EXISTS", KEYS[1]) == 0 then
+    local token = redis.call("INCR", KEYS[2])
+    redis.call("SET", KEYS[1], ARGV[2] .. ":" .. token, "PX", ARGV[1])
+    return token
+end
+return 0
 ```
 
-Plюс: strong consistency, lease-based (auto-release при disconnect).
-Минус: операционная сложность etcd кластера.
+В Redis Cluster оба ключа должны передаваться через `KEYS` и попадать в один
+hash slot, например `{invoice:42}:lock` и `{invoice:42}:fence`.
 
-### ZooKeeper
-
-Старая школа, ephemeral nodes как locks. Сложно operate.
+Такой счётчик монотонен в рамках доступной истории Redis. Если failover может
+потерять подтверждённый `INCR`, старое значение способно повториться. Для
+строгого fencing token нужен источник с подходящими durability/consistency
+гарантиями и атомарная проверка токена целевым resource.
 
 ---
 
-## Тесты
+## Redis Cluster и Redlock
 
-```go
-func TestLock_Acquire(t *testing.T) {
-    redis := setupRedis(t)
-    locker := New(redis)
-    ctx := context.Background()
+Redlock пытается получить lease на большинстве независимых Redis masters и
+учитывает время, потраченное на acquire. Официальное описание Redis приводит
+алгоритм и его assumptions. При этом вокруг гарантий Redlock есть известная
+дискуссия: time-based lease не останавливает paused client и зависит от модели
+отказов.
 
-    lock, err := locker.Acquire(ctx, "test-key", 5*time.Second)
-    if err != nil {
-        t.Fatal(err)
-    }
-    defer lock.Release(ctx)
+Выбор формулируют через цену нарушения:
 
-    // Второй acquire должен fail
-    _, err = locker.Acquire(ctx, "test-key", 5*time.Second)
-    if !errors.Is(err, ErrLockNotAcquired) {
-        t.Errorf("got %v, want ErrLockNotAcquired", err)
-    }
-}
+- для cache regeneration редкий двойной расчёт обычно допустим;
+- для платежа или необратимого удаления «обычно один владелец» недостаточно;
+- Redlock не отменяет необходимость fencing, если stale writer опасен;
+- библиотеку нужно настраивать по документации конкретной версии, а не
+  воспроизводить алгоритм по памяти.
 
-func TestLock_ReleaseOnlyByOwner(t *testing.T) {
-    redis := setupRedis(t)
-    locker := New(redis)
-    ctx := context.Background()
-
-    lock1, _ := locker.Acquire(ctx, "key", 10*time.Second)
-
-    // Fake — другой клиент
-    lock2 := &Lock{
-        client: redis,
-        key:    "key",
-        value:  "different-token",
-    }
-
-    // lock2 не должен разлочить
-    err := lock2.Release(ctx)
-    if !errors.Is(err, ErrLockNotHeld) {
-        t.Errorf("got %v, want ErrLockNotHeld", err)
-    }
-
-    // lock1 всё ещё держит
-    val, _ := redis.Get(ctx, "key").Result()
-    if val == "" {
-        t.Error("lock1 was released")
-    }
-
-    lock1.Release(ctx)
-}
-
-func TestLock_TTLExpires(t *testing.T) {
-    redis := setupRedis(t)
-    locker := New(redis)
-    ctx := context.Background()
-
-    _, err := locker.Acquire(ctx, "k", 100*time.Millisecond)
-    if err != nil {
-        t.Fatal(err)
-    }
-
-    time.Sleep(150 * time.Millisecond)
-
-    // После TTL — новый acquire должен пройти
-    _, err = locker.Acquire(ctx, "k", time.Second)
-    if err != nil {
-        t.Errorf("after TTL expected acquire OK, got %v", err)
-    }
-}
-```
-
-Нужна реальная Redis. Используй testcontainers-go.
+Не следует утверждать, что Redlock автоматически «строже single Redis» для
+любой системы: результат зависит от assumptions и защищаемого ресурса.
 
 ---
 
-## Подводные камни
+## PostgreSQL и etcd
 
-### 1. Lock без TTL
+| Вариант | Сильная сторона | Главная ловушка |
+|---|---|---|
+| PostgreSQL row/unique constraint | атомарность рядом с business data | держать transaction короткой |
+| `pg_advisory_xact_lock` | освобождается вместе с transaction | advisory: все writers обязаны соблюдать protocol |
+| session advisory lock | живёт до unlock/disconnect | при pool нужен тот же `*sql.Conn`, не случайный session |
+| etcd lease + mutex | coordination на linearizable KV | отдельный cluster и всё ещё нужен fencing для stale side effect |
+| Redis lease | простой и быстрый | TTL/failover допускают потерю исключительности |
 
-```go
-SET lock-key "1" NX  // ← нет TTL → лежит навсегда
-```
-
-Если client crash — lock висит навсегда. **Всегда EX/PX**.
-
-### 2. TTL слишком короткий
-
-```go
-locker.Acquire(ctx, "k", 1*time.Second)
-// Работа занимает 5 секунд → lock expires → другой acquire → race
-```
-
-TTL > worst-case duration. Или renewal.
-
-### 3. Lock без unique value
-
-```redis
-SET lock-key "1" NX EX 30
-```
-
-Любой `DEL lock-key` released. После TTL и захвата другим — наш DEL released его lock. Используй token.
-
-### 4. Release без Lua
-
-```python
-# Не атомарно
-val = GET key
-if val == my_token: DEL key  # ← race condition
-```
-
-Lua script атомарен.
-
-### 5. Polling instead of subscription
-
-```go
-for {
-    lock, err := acquire(ctx, key)
-    if err == nil { break }
-    time.Sleep(100 * time.Millisecond)  // ← busy loop
-}
-```
-
-Лучше — exponential backoff, или Redis subscription к event "lock released" (etcd watch).
-
-### 6. Long-held lock без renewal
-
-```go
-lock.Acquire(ctx, "k", 30*time.Second)
-longJob()  // 60 секунд работает
-// Lock истёк на 30-й секунде! Другой клиент мог acquire.
-```
-
-Renewal goroutine или fencing token.
-
-### 7. GC pause проблема
-
-Уже обсуждалось. Защита — fencing tokens.
-
-### 8. Clock skew между Redis серверами
-
-Redlock полагается на time-based reasoning. Если часы рассинхрон — алгоритм небезопасен. Kleppmann's критика.
-
-### 9. Использовать lock для consistency, а не consistency для lock
-
-Lock защищает от **concurrent modifications**, но БД transaction уже это делает. Если данные в одной БД — обычная transaction сильнее distributed lock.
-
-### 10. Не закрывать renewal goroutine
-
-```go
-go lock.renewLoop(...)
-// Defer Release вызывается, но renewLoop никогда не выходит
-```
-
-Cancel renewal context при Release.
+Если данные уже находятся в PostgreSQL, conditional write или transaction lock
+часто проще отдельного Redis. Session-level advisory lock нельзя брать через
+один вызов `*sql.DB`, а освобождать через другой: pool может выбрать разные
+соединения.
 
 ---
 
-## Возможные расширения
+## Тестирование и метрики
 
-### 1. Read-Write distributed lock
+Проверить нужно не только второй неуспешный acquire:
 
-Multiple readers OR one writer. Redis: shared counter для readers + exclusive flag для writer.
+1. чужой owner не удаляет lock;
+2. прежний owner после expiry не удаляет новый lease;
+3. cancel останавливает blocking retry и renewal;
+4. renewal loss отменяет `WorkContext`;
+5. concurrent `Release` не гоняется с renewal;
+6. fencing token возрастает для успешных acquisitions;
+7. Redis Cluster script использует один hash slot;
+8. интеграционный тест проходит с реальным Redis или testcontainer.
 
-### 2. Reentrant lock
+TTL boundary лучше проверять управляемым серверным временем, где это возможно,
+или с достаточным допуском в отдельном integration test, а не миллисекундным
+`Sleep` в unit test.
 
-Same holder может Acquire дважды. Store recursion depth в value.
-
-### 3. Lock с queue
-
-Несколько waiter'ов — fair ordering. Использовать sorted set с timestamp.
-
-### 4. Distributed semaphore
-
-Не 1 holder, а N. Counter в Redis с atomic increment/decrement.
-
-### 5. Leader election (specific case of lock)
-
-Один из N pod'ов берёт lock с long TTL + auto-renewal. Если падает → другой возьмёт.
+Полезные метрики: acquire outcome/latency, contention, lease lost, renew errors,
+critical-section duration относительно TTL и stale fencing rejection.
 
 ---
 
-## Что важно показать на собеседовании
+## Типичные ошибки
 
-1. **SET NX EX** атомарно — один command, не SETNX + EXPIRE
-2. **Unique value (token)** — защита от чужого Release
-3. **Lua script для Release** — атомарный check + DEL
-4. **TTL обязателен** — защита от висящих locks
-5. **Lease renewal** — для long-running locks
-6. **Fencing tokens** — защита от GC pause
-7. **Trade-offs Redis vs etcd vs Postgres** — Redis fast но not strict; etcd safe но complex
-8. **Kleppmann's critique** Redlock — знать что есть споры
+- `SETNX`, затем отдельный `EXPIRE`.
+- `DEL` без сравнения owner token.
+- Считать TTL доказательством, что прежний holder остановлен.
+- Продолжать работу после ошибки renewal, оставив только log entry.
+- Генерировать fencing token отдельно от успешного acquire.
+- Использовать polling с постоянным коротким interval без backoff и jitter.
+- Делать долгий внешний вызов внутри DB transaction ради lock.
+- Использовать session advisory lock через `*sql.DB` без закреплённого
+  соединения.
+- Обещать exactly-once благодаря lock.
 
-## Связки
+---
 
-- [Redis caching](../../../06-databases/caching/01-redis-as-cache.md) — другие Redis primitives
-- [Idempotency handler](./05-idempotency-handler.md) — lock для предотвращения concurrent одинаковых запросов
-- [Saga и Outbox](../../../04-architecture-and-patterns/patterns/09-saga-and-outbox.md) — distributed coordination
-- [Kleppmann: How to do distributed locking](https://martin.kleppmann.com/2016/02/08/how-to-do-distributed-locking.html) — must read
-- [go-redsync/redsync](https://github.com/go-redsync/redsync) — Redlock for Go
+## Interview-ready answer
+
+1. **Как корректно взять и отпустить Redis lock?**
+   - **Acquire —** `SET key random-token NX PX ttl` одной командой.
+   - **Release —** Lua atomically сравнивает token и удаляет ключ.
+   - **TTL —** освобождает lease после crash, но может истечь во время работы.
+
+2. **Почему renewal недостаточно?**
+   - **Lease loss —** pause или partition может быть длиннее TTL.
+   - **Cancellation —** владелец должен узнать о потере и остановить работу.
+   - **Fencing —** target resource отклоняет операции устаревшего владельца.
+
+3. **Когда лучше не использовать Redis lock?**
+   - **Одна БД —** constraint, conditional update или transaction lock обычно
+     дают более прямую гарантию.
+   - **Critical correctness —** выбирают primitive и fencing под формальную
+     модель отказов.
+   - **Идемпотентность —** lock не заменяет deduplication результата операции.
+
+---
+
+## Связанные материалы
+
+- [Redis: Distributed Locks](https://redis.io/docs/latest/develop/clients/patterns/distributed-locks/)
+- [PostgreSQL: Advisory Locks](https://www.postgresql.org/docs/current/explicit-locking.html#ADVISORY-LOCKS)
+- [Idempotency handler](./05-idempotency-handler.md)
+- [Saga и Outbox](../../../04-architecture-and-patterns/patterns/09-saga-and-outbox.md)
+- [Martin Kleppmann: How to do distributed locking](https://martin.kleppmann.com/2016/02/08/how-to-do-distributed-locking.html)
