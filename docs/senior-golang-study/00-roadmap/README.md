@@ -23,7 +23,7 @@
 | [11 Security](../11-security/README.md) | secrets, TLS/mTLS, CORS, DDoS protection | ✅ 8 файлов |
 | [12 Interview Practice](../12-interview-practice/README.md) | behavioral кейсы, system design drills | темы + ссылки |
 | [15 Go Version Differences](../15-go-version-differences/README.md) | Go 1.24, 1.25, 1.26 — что изменилось | ✅ 3 файла |
-| [16 Algorithms And Data Structures](../16-algorithms-and-data-structures/README.md) | O-нотация, two pointers, binary search, DP, graphs, heap, backtracking | ✅ 8 файлов |
+| [16 Algorithms And Data Structures](../16-algorithms-and-data-structures/README.md) | O-нотация, linear patterns, intervals, DP, weighted graphs, heap, backtracking | ✅ 13 файлов |
 
 > **Разделы "темы + ссылки"** — содержат только README с темами и внешними ссылками; конспекты для них еще не написаны.
 
@@ -283,13 +283,13 @@
 |------|-----------|-----------|
 | [01-metric-types-and-design.md](../10-devops-and-observability/prometheus-and-metrics/01-metric-types-and-design.md) | counter, gauge, histogram, summary — когда что | ★★★ |
 | [05-promql-cheatsheet.md](../10-devops-and-observability/prometheus-and-metrics/05-promql-cheatsheet.md) | rate(), histogram_quantile(), aggregations | ★★★ |
-| [http-request-rate-counters.md](../10-devops-and-observability/prometheus-and-metrics/practical-metric-patterns/http-request-rate-counters.md) | как считать RPS через counter | ★★★ |
-| [latency-histograms.md](../10-devops-and-observability/prometheus-and-metrics/practical-metric-patterns/latency-histograms.md) | p50/p95/p99, правильные bucket boundaries | ★★★ |
-| [http-error-rate.md](../10-devops-and-observability/prometheus-and-metrics/practical-metric-patterns/http-error-rate.md) | error rate по статус-кодам | ★★★ |
-| [gauges-inflight-queue-depth.md](../10-devops-and-observability/prometheus-and-metrics/practical-metric-patterns/gauges-inflight-queue-depth.md) | in-flight requests, queue depth | ★★ |
-| [storage-operation-metrics.md](../10-devops-and-observability/prometheus-and-metrics/practical-metric-patterns/storage-operation-metrics.md) | метрики DB и cache операций | ★★ |
+| [01-http-request-rate-counters.md](../10-devops-and-observability/prometheus-and-metrics/practical-metric-patterns/01-http-request-rate-counters.md) | как считать RPS через counter | ★★★ |
+| [02-http-error-rate.md](../10-devops-and-observability/prometheus-and-metrics/practical-metric-patterns/02-http-error-rate.md) | error rate по статус-кодам | ★★★ |
+| [03-latency-histograms.md](../10-devops-and-observability/prometheus-and-metrics/practical-metric-patterns/03-latency-histograms.md) | p50/p95/p99, правильные bucket boundaries | ★★★ |
+| [04-gauges-inflight-queue-depth.md](../10-devops-and-observability/prometheus-and-metrics/practical-metric-patterns/04-gauges-inflight-queue-depth.md) | in-flight requests, queue depth | ★★ |
+| [05-storage-operation-metrics.md](../10-devops-and-observability/prometheus-and-metrics/practical-metric-patterns/05-storage-operation-metrics.md) | метрики DB и cache операций | ★★ |
 | [02-prometheus-metrics-flow.md](../10-devops-and-observability/prometheus-and-metrics/02-prometheus-metrics-flow.md) | scrape flow, pull model, alertmanager | ★★ |
-| [how-prometheus-discovers-and-scrapes-multiple-pods.md](../10-devops-and-observability/prometheus-and-metrics/how-prometheus-discovers-and-scrapes-multiple-pods.md) | service discovery в Kubernetes | ★★ |
+| [06-how-prometheus-discovers-and-scrapes-multiple-pods.md](../10-devops-and-observability/prometheus-and-metrics/06-how-prometheus-discovers-and-scrapes-multiple-pods.md) | service discovery в Kubernetes | ★★ |
 | [04-prometheus-ui-and-grafana.md](../10-devops-and-observability/prometheus-and-metrics/04-prometheus-ui-and-grafana.md) | dashboards, alerts | ★★ |
 | [03-prometheus-relabeling-and-target-labels.md](../10-devops-and-observability/prometheus-and-metrics/03-prometheus-relabeling-and-target-labels.md) | relabeling, label management | ★ |
 
@@ -298,9 +298,10 @@
 | Файл | Что внутри | Приоритет |
 |------|-----------|-----------|
 | [01-opentelemetry-and-tracing-flow.md](../10-devops-and-observability/tracing-and-opentelemetry/01-opentelemetry-and-tracing-flow.md) | spans, trace context propagation, sampling | ★★★ |
-| [02-opentelemetry-in-go-services.md](../10-devops-and-observability/tracing-and-opentelemetry/02-opentelemetry-in-go-services.md) | instrumentation в Go, SDK setup | ★★★ |
-| [04-push-model-traceid-and-spans-example.md](../10-devops-and-observability/tracing-and-opentelemetry/04-push-model-traceid-and-spans-example.md) | TraceID, SpanID, push vs pull model | ★★ |
-| [03-tempo-and-trace-investigation.md](../10-devops-and-observability/tracing-and-opentelemetry/03-tempo-and-trace-investigation.md) | Grafana Tempo, расследование по трейсам | ★★ |
+| [02-opentelemetry-in-go-services.md](../10-devops-and-observability/tracing-and-opentelemetry/02-opentelemetry-in-go-services.md) | instrumentation HTTP/gRPC в Go, SDK setup | ★★★ |
+| [03-end-to-end-trace-example.md](../10-devops-and-observability/tracing-and-opentelemetry/03-end-to-end-trace-example.md) | `trace_id`, `span_id`, async links и сквозной пример | ★★ |
+| [04-tempo-and-trace-investigation.md](../10-devops-and-observability/tracing-and-opentelemetry/04-tempo-and-trace-investigation.md) | Grafana Tempo, TraceQL и расследование по traces | ★★ |
+| [05-ai-agents-for-telemetry-analysis.md](../10-devops-and-observability/tracing-and-opentelemetry/05-ai-agents-for-telemetry-analysis.md) | RCA-agents, LangGraph, Langfuse и agent observability | ★ |
 
 #### 10 Logging
 
@@ -360,14 +361,19 @@
 
 | Файл | Что внутри | Приоритет |
 |------|-----------|-----------|
+| [00-patterns-overview.md](../16-algorithms-and-data-structures/00-patterns-overview.md) | таблица распознавания паттернов, фреймворк для интервью | ★★★ |
 | [01-time-and-space-complexity.md](../16-algorithms-and-data-structures/01-time-and-space-complexity.md) | O-нотация, таблица классов, диаграммы роста, амортизированная сложность | ★★★ |
-| [02-patterns-overview.md](../16-algorithms-and-data-structures/02-patterns-overview.md) | таблица распознавания паттернов, фреймворк для интервью | ★★★ |
-| [03-two-pointers-and-sliding-window.md](../16-algorithms-and-data-structures/03-two-pointers-and-sliding-window.md) | opposite ends, fast/slow, variable window с 9 задачами | ★★★ |
-| [04-binary-search.md](../16-algorithms-and-data-structures/04-binary-search.md) | classic, lower/upper bound, rotated array, binary search on answer | ★★★ |
-| [05-trees-and-graphs.md](../16-algorithms-and-data-structures/05-trees-and-graphs.md) | обходы дерева, BFS/DFS, топосортировка, Union-Find | ★★★ |
-| [06-dynamic-programming.md](../16-algorithms-and-data-structures/06-dynamic-programming.md) | memoization vs tabulation, 1D/2D DP, knapsack | ★★ |
-| [07-sorting-and-heap.md](../16-algorithms-and-data-structures/07-sorting-and-heap.md) | merge/quick sort, container/heap, top-K задачи | ★★ |
-| [08-backtracking-and-linked-list.md](../16-algorithms-and-data-structures/08-backtracking-and-linked-list.md) | backtracking шаблон, permutations, операции со списками | ★★ |
+| [02-two-pointers-and-sliding-window.md](../16-algorithms-and-data-structures/02-two-pointers-and-sliding-window.md) | opposite ends, fast/slow, variable window с 9 задачами | ★★★ |
+| [03-binary-search.md](../16-algorithms-and-data-structures/03-binary-search.md) | classic, lower/upper bound, rotated array, binary search on answer | ★★★ |
+| [04-trees-and-graphs.md](../16-algorithms-and-data-structures/04-trees-and-graphs.md) | обходы дерева, BFS/DFS, топосортировка, Union-Find | ★★★ |
+| [05-dynamic-programming.md](../16-algorithms-and-data-structures/05-dynamic-programming.md) | memoization vs tabulation, 1D/2D DP, knapsack | ★★ |
+| [06-sorting-and-heap.md](../16-algorithms-and-data-structures/06-sorting-and-heap.md) | merge/quick sort, container/heap, top-K задачи | ★★ |
+| [07-backtracking.md](../16-algorithms-and-data-structures/07-backtracking.md) | backtracking, permutations, subsets, pruning | ★★ |
+| [08-linked-lists.md](../16-algorithms-and-data-structures/08-linked-lists.md) | разворот списка, fast/slow, цикл, dummy head | ★★ |
+| [09-prefix-sums-and-difference-arrays.md](../16-algorithms-and-data-structures/09-prefix-sums-and-difference-arrays.md) | range sum, prefix hash, 2D prefix, offline range updates | ★★★ |
+| [10-monotonic-stack-and-deque.md](../16-algorithms-and-data-structures/10-monotonic-stack-and-deque.md) | next greater, histogram, sliding window maximum | ★★★ |
+| [11-intervals-and-sweep-line.md](../16-algorithms-and-data-structures/11-intervals-and-sweep-line.md) | merge/intersection, half-open bounds, sweep line | ★★★ |
+| [12-weighted-graphs-and-shortest-paths.md](../16-algorithms-and-data-structures/12-weighted-graphs-and-shortest-paths.md) | BFS vs 0-1 BFS vs Dijkstra vs Bellman-Ford | ★★★ |
 
 #### 12 Interview Practice
 
