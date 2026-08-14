@@ -300,7 +300,7 @@ flowchart LR
     BrokerA <-->|publish / subscribe| Redis
     BrokerB <-->|publish / subscribe| Redis
 
-    style Redis fill:#fef3c7,stroke:#a16207
+    style Redis fill:#fef3c7,stroke:#a16207,color:#0f172a
 ```
 
 <details>
