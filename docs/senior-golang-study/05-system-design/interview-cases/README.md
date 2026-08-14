@@ -16,6 +16,7 @@
 - [02. Notification Service](./02-notification-service.md) — fan-out, Kafka per channel, retry + DLQ, transactional vs marketing
 - [03. Rate Limiter](./03-rate-limiter.md) — алгоритмы (fixed/sliding/token bucket), Redis Lua, fail-open
 - [04. Chat / Messaging](./04-chat-messaging.md) — WebSocket, Kafka-first запись и seq из порядка партиции, Cassandra, fan-out для групп, presence, watermark-статусы
+- [04.1 WebSocket Chat at Scale](./04.1-websocket-chat-capacity.md) — capacity drill на 1M соединений: reconnect blast radius, hot-group fan-out, route cache, backpressure и tiered history
 - [05. Task Queue](./05-task-queue.md) — Redis Streams, priority queues, delayed tasks, at-least-once, retry backoff
 
 ### Сложные кейсы
@@ -33,6 +34,8 @@
 - [16. Gmail / Email Service](./16-gmail-email-service.md) — тонкий SMTP-приём + durable-лог (250 OK = Kafka ack), immutable blob + mutable metadata, дедуп рассылок по body_hash, labels вместо папок, wide-column шард по user_id (ящик = один range-scan), per-user поисковый индекс, threading по RFC-заголовкам, outbound-ретраи с backoff до 24ч
 - [17. Music Playlist Service](./17-music-playlist-service.md) — versioned playlist, materialized shuffle queue, Fisher–Yates, стабильная playback session и handoff между устройствами через epoch
 - [18. Marketplace Messenger](./18-marketplace-messenger.md) — durable-first сообщения, строгий per-chat seq, WebSocket + push, listing snapshot, outbox fan-out и бессрочная hot/cold история
+- [19. Twitch / Live Streaming](./19-live-streaming-platform.md) — контент, которого нет до запроса: транскодирование быстрее реального времени как главная статья расходов, лесенка качеств только популярным каналам (160 серверов вместо 3100), LL-HLS и цена низкой задержки в запросах к CDN, двухуровневая сеть доставки против длинного хвоста, приблизительный счётчик зрителей по сердцебиениям
+- [20. Банковские реквизиты поставщиков](./20-vendor-bank-details.md) — задача без нагрузки (0,002 записи/с): три канала обновления с правами на поля вместо «последний прав», изменение счёта как предложение с выдержкой против подмены, битемпоральные версии, витрины департаментов с разной временнóй семантикой, заморозка отчётности через курсор системного времени вместо запрета записи
 
 ## Структура каждого кейса
 

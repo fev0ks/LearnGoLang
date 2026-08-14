@@ -201,36 +201,59 @@ Playback state:
 
 ## Фаза 3: высокоуровневый дизайн
 
+Чтобы схема оставалась читаемой после рендеринга, разделим её на две части:
+backend плейлистов и интеграцию с уже готовой media-платформой.
+
+### Playlist backend
+
 ```mermaid
 flowchart LR
-    subgraph Clients["Клиенты"]
-        Mobile["iOS / Android"]
-        Desktop["Web / Desktop"]
-    end
-
-    Edge["Cloudflare / Edge<br/>WAF + rate limits"]
-    Gateway["Load Balancer<br/>API Gateway"]
+    Client["Web / Mobile"]
+    Gateway["Cloudflare / Edge<br/>WAF, rate limits, API Gateway"]
 
     subgraph PlaylistDomain["Playlist backend"]
         PlaylistAPI["Playlist API<br/>create / add / get"]
-        PlaybackAPI["Playback Session API<br/>shuffle / queue / checkpoint / handoff"]
-        Sync["Device Sync Gateway<br/>session takeover events"]
+        SessionAPI["Session API<br/>shuffle / queue / handoff"]
+        CheckpointAPI["Checkpoint API<br/>до 250K updates/с"]
     end
 
     TrackCatalog["Track Catalog API<br/>проверка track_id"]
-    PlaylistDB[("Playlist + Queue Store<br/>PostgreSQL, owner_id routing")]
-    StateKV[("Durable Playback State KV<br/>key = user_id")]
+    PlaylistDB[("PostgreSQL<br/>playlists + immutable queues")]
+    StateKV[("Playback State Store<br/>user_id, epoch, client_seq")]
 
-    Mobile --> Edge
-    Desktop --> Edge
-    Edge --> Gateway
+    Client --> Gateway
     Gateway --> PlaylistAPI
-    Gateway --> PlaybackAPI
-    PlaylistAPI --> TrackCatalog
-    PlaylistAPI --> PlaylistDB
-    PlaybackAPI --> PlaylistDB
-    PlaybackAPI --> StateKV
-    PlaybackAPI --> Sync
+    Gateway --> SessionAPI
+    Gateway --> CheckpointAPI
+
+    PlaylistAPI -->|"validate track_id"| TrackCatalog
+    PlaylistAPI -->|"playlist transaction"| PlaylistDB
+    SessionAPI -->|"playlist snapshot + queue"| PlaylistDB
+    SessionAPI -->|"activate / increase epoch"| StateKV
+    CheckpointAPI -->|"index + position"| StateKV
+```
+
+### Интеграция с готовой media-платформой
+
+Загрузка, кодирование, хранение и стриминг аудио уже реализованы и находятся
+вне scope. Playlist backend хранит только ссылки `track_id` и порядок
+воспроизведения: сами аудиофайлы через него не проходят.
+
+```mermaid
+flowchart LR
+    Client["Web / Mobile"]
+    SessionAPI["Playlist Session API"]
+    StreamingAPI["Playback / Streaming API"]
+    TrackCatalog["Track Catalog<br/>метаданные и права"]
+    CDN["CDN"]
+    ObjectStorage[("Object Storage<br/>аудиосегменты")]
+
+    Client -->|"1. получить очередь track_id"| SessionAPI
+    Client -->|"2. запросить track_id"| StreamingAPI
+    StreamingAPI -->|"3. проверить права"| TrackCatalog
+    StreamingAPI -->|"4. manifest / signed URL"| Client
+    Client -->|"5. запросить аудиосегменты"| CDN
+    CDN -->|"cache miss"| ObjectStorage
 ```
 
 ### Роль компонентов
@@ -240,10 +263,12 @@ flowchart LR
 | Cloudflare / Edge + API Gateway | Защищает публичный API, проверяет auth и распределяет запросы | Публичный периметр не смешивается с бизнес-логикой плейлистов |
 | Playlist API | Создаёт плейлист, добавляет и читает элементы | Низкочастотные транзакционные операции отделены от progress-потока |
 | Track Catalog API | Проверяет существование и доступность `track_id` | Каталог треков уже принадлежит другому домену; межсервисный foreign key невозможен |
-| Playback Session API | Создаёт очередь, отдаёт её и принимает checkpoints | Здесь живут правила снимка, shuffle и handoff |
+| Session API | Создаёт очередь, отдаёт её и выполняет handoff | Здесь живут правила снимка playlist version, shuffle и смены активного устройства |
+| Checkpoint API | Принимает позицию и состояние воспроизведения | Горячий поток до 250K updates/с можно масштабировать независимо от остальных API |
 | Playlist + Queue Store | Хранит версии плейлистов и materialized queues | Нужны транзакции, cursor pagination и долговечность очереди |
 | Playback State KV | Хранит активную session, индекс, позицию, epoch и client sequence | До 250K условных updates/с по независимым ключам пользователей |
-| Device Sync Gateway | Сообщает старому устройству, что session перехвачена | Доставка события не должна блокировать успешный handoff |
+| Playback / Streaming API | Проверяет права и выдаёт manifest или подписанный URL | Воспроизведение уже реализовано отдельно от механики плейлистов |
+| CDN + Object Storage | Хранит и раздаёт аудиосегменты | Большой media-трафик не проходит через Playlist backend |
 
 Один кластер PostgreSQL с leader и replica подходит только если benchmark полного
 пика, включая около 116K queue item inserts/с, оставляет нужный запас. Иначе
@@ -265,24 +290,28 @@ POST /v1/playlists/{playlist_id}/items
 Idempotency-Key: add-item-781
 {"track_id":"track-42"}
 
-GET /v1/playlists/{playlist_id}/items?after=item-100&limit=100
+GET /v1/playlists/{playlist_id}/items?after=<opaque_cursor>&limit=100
 
 POST /v1/playback-sessions
 Idempotency-Key: shuffle-click-991
-{"playlist_id":"playlist-7","mode":"SHUFFLE","device_id":"phone-1"}
+{"playlist_id":"playlist-7","mode":"SHUFFLE","device_id":"phone-1",
+ "expected_epoch":6}
 
-GET /v1/playback-sessions/{session_id}/queue?after=200&limit=100
+GET /v1/playback-sessions/{session_id}/queue?after=<opaque_cursor>&limit=100
 
 PUT /v1/playback-sessions/{session_id}/checkpoint
 {"device_id":"phone-1","epoch":7,"client_seq":81,
  "queue_index":12,"position_ms":43200,"state":"PAUSED"}
 
 POST /v1/playback-sessions/{session_id}/activate
-{"device_id":"laptop-2"}
+Idempotency-Key: handoff-laptop-2-551
+{"device_id":"laptop-2","expected_epoch":7}
 ```
 
 `Idempotency-Key` у добавления нельзя заменять уникальностью
 `(playlist_id, track_id)`: одинаковый трек разрешено добавить несколько раз.
+Cursor списка — непрозрачный для клиента токен, который кодирует как минимум
+`(ordinal, item_id)`, а не произвольный `item_id` и не номер страницы.
 
 ### 4.2 Минимальная модель данных
 
@@ -295,17 +324,19 @@ playlist_items:
 
 playback_sessions:
   session_id, owner_id, source_playlist_id, source_version,
-  status, created_at, expires_at
+  queue_size, status, created_at, expires_at
 
 playback_queue_items:
-  session_id, queue_ordinal, playlist_item_id, track_id
+  session_id, queue_ordinal, playlist_item_id, track_id,
+  PRIMARY KEY (session_id, queue_ordinal)
 
 idempotency_keys:
-  owner_id, operation, idempotency_key → request_hash, result_id, expires_at
+  owner_id, operation, idempotency_key → request_hash, result_payload, expires_at
 
 active_playback_state (durable KV):
   user_id → session_id, queue_index, position_ms, state,
-            active_device_id, playback_epoch, client_seq, updated_at
+            active_device_id, playback_epoch, client_seq,
+            last_activation_id, updated_at
 ```
 
 При добавлении элемента транзакция сначала создаёт idempotency guard, затем
@@ -313,11 +344,21 @@ active_playback_state (durable KV):
 Так два параллельных `add` получают разные позиции, а два retry одной команды —
 один item.
 
-Очередь можно писать batch-вставкой и читать cursor-пагинацией по
-`(session_id, queue_ordinal)`. Для плейлиста в 10 000 элементов создание может
-иметь отдельный SLA: сервис перемешивает ограниченный массив и пишет очередь
-частями через batch-операции. Если benchmark не укладывается в допустимое время, это основание
-добавить асинхронную генерацию с `202 GENERATING`, но не исходное допущение.
+Очередь можно писать batch-вставками и читать cursor-пагинацией по
+`(session_id, queue_ordinal)`. В исходном синхронном пути все batch-вставки
+выполняются внутри одной PostgreSQL-транзакции: при сбое частичная очередь
+откатывается целиком.
+
+Для плейлиста в 10 000 элементов создание может иметь отдельный SLA. Если одна
+длинная транзакция не проходит benchmark, добавляется асинхронный путь: session
+остаётся в `GENERATING`, worker идемпотентно дописывает элементы по первичному
+ключу, а `READY` выставляется только после записи всех `queue_size` позиций.
+Клиент не получает частично сгенерированную очередь.
+
+Для расчёта storage фиксируем продуктовое допущение: активная очередь хранится,
+пока session активна, а завершённые и брошенные sessions — ещё 30 дней. Затем
+очереди удаляет фоновая retention-задача по `expires_at`. Если продукт требует
+показывать старые очереди дольше, storage нужно пересчитать под новый срок.
 
 ### 4.3 Равномерный shuffle
 
@@ -355,22 +396,28 @@ batch-вставкой сохраняет итоговый порядок.
 `source_version`.
 
 Инициализация active state происходит в другом хранилище, поэтому это не одна
-распределённая транзакция:
+распределённая транзакция. Для активации сервер использует стабильный
+`activation_id`, связанный с `Idempotency-Key`, и полученный от клиента
+`expected_epoch`:
 
 ```text
 1. PostgreSQL transaction:
-   idempotency result + session + materialized queue → COMMIT.
+   idempotency result + activation_id + session + materialized queue → COMMIT.
 2. State KV:
-   CAS user_id:
-     ключа нет → session, epoch=1, index=0, position=0;
-     другая session активна → заменить её и увеличить epoch;
-     уже записана эта session → вернуть прежнее состояние.
-3. Только после обоих шагов вернуть READY клиенту.
+   atomic Activate(user_id, activation_id, expected_epoch):
+     last_activation_id совпал → вернуть прежний результат без новой записи;
+     current_epoch != expected_epoch → вернуть SUPERSEDED;
+     epoch совпал → записать session и увеличить epoch на 1.
+3. Только если Activate применён, вернуть READY клиенту.
 ```
 
 Если процесс падает после первого шага, retry находит тот же `session_id` и
-идемпотентно завершает второй. Клиент не получает успешный ответ, пока active
-state не создан. Reconciler удаляет или доинициализирует давно зависшие sessions.
+повторяет Activate с теми же `activation_id` и `expected_epoch`. Если за время
+сбоя пользователь уже активировал другую session, старый retry получает
+`SUPERSEDED` и не перезаписывает новое состояние. Клиент не получает успешный
+ответ, пока active state не создан. Reconciler может повторить ту же условную
+операцию или удалить зависшую session после retention-периода, но не имеет права
+безусловно делать её активной.
 
 Параллельное добавление получает следующую версию плейлиста, но не меняет уже
 созданную queue. Повтор `start shuffle` с тем же idempotency key возвращает тот
@@ -378,20 +425,30 @@ state не создан. Reconciler удаляет или доинициализ
 
 ### 4.5 Handoff между устройствами
 
-`playback_epoch` защищает состояние от старого устройства:
+Так как state адресуется по `user_id`, дизайн намеренно разрешает только одну
+активную session на аккаунт. `playback_epoch` защищает её состояние от старого
+устройства, а `activation_id` делает retry handoff идемпотентным:
 
 ```text
 До handoff:
   phone-1, epoch=7, client_seq=81
 
 laptop-2 вызывает activate:
+  activation_id = handoff-laptop-2-551
+  expected_epoch = 7
   State KV делает conditional update epoch 7 → 8
   active_device_id = laptop-2
 
 После handoff:
   laptop-2 пишет checkpoints с epoch=8
   поздний checkpoint phone-1 с epoch=7 отклоняется
+  retry того же activation_id возвращает epoch=8 и не увеличивает его снова
 ```
+
+Если два устройства одновременно отправили разные команды с
+`expected_epoch=7`, применится только одна. Вторая получит `SUPERSEDED`, обновит
+состояние и сможет повторить действие уже как новую осознанную команду. Это
+безопаснее, чем позволить запоздавшему retry перехватить session обратно.
 
 Внутри одной epoch принимается только больший `client_seq`. Сравнивать только
 `position_ms` нельзя: пользователь может вручную перемотать трек назад, поэтому
@@ -416,16 +473,19 @@ Playlist API проверяет владельца → Track Catalog подтв�
 
 ### 2. Shuffle
 
-Playback API читает снимок playlist version 42 → Fisher–Yates → сохраняет session
-и materialized queue → создаёт active state с epoch 1 → возвращает первую страницу.
+Session API читает снимок playlist version 42 → Fisher–Yates → сохраняет session
+и materialized queue → условно активирует её по `expected_epoch` → возвращает
+первую страницу и новую epoch.
 
 Итог: все устройства видят один и тот же порядок; последующие edits его не меняют.
 
 ### 3. Pause на телефоне, продолжение на ноутбуке
 
-Телефон durable-сохраняет `PAUSED`, index и position → ноутбук вызывает
-`activate` → conditional update увеличивает epoch → получает session, queue и
-checkpoint → старый телефон получает takeover event и больше не может писать.
+Телефон через Checkpoint API durable-сохраняет `PAUSED`, index и position →
+ноутбук вызывает идемпотентный `activate` в Session API с текущей epoch →
+conditional update увеличивает epoch → ноутбук получает session, queue и
+checkpoint → сервер может best-effort отправить старому телефону takeover
+notification, но запрет дальнейших записей обеспечивает именно проверка epoch.
 
 Итог: очередь не генерируется заново, а старая вкладка не откатывает прогресс.
 
@@ -435,14 +495,16 @@ checkpoint → старый телефон получает takeover event и б
 
 | Сбой | Поведение |
 | --- | --- |
-| Ответ `start shuffle` потерялся | Retry с тем же idempotency key возвращает ту же session и queue |
-| Queue сохранена, State KV не инициализирован | Session остаётся неактивной; retry или reconciler завершает `PUT IF ABSENT` |
-| Трек удалён из каталога после генерации | Queue сохраняет item, при воспроизведении Track Catalog возвращает unavailable; клиент пропускает его |
+| Ответ `start shuffle` потерялся | Retry с тем же idempotency key и activation ID не создаёт новую queue и не увеличивает epoch повторно |
+| Queue сохранена, State KV не инициализирован | Retry повторяет conditional Activate; если появилась более новая session, старая получает `SUPERSEDED`, а не перехватывает воспроизведение |
+| Две активации пришли с одной expected epoch | Одна применится, вторая получит `SUPERSEDED` и перечитает актуальное состояние |
+| Трек удалён из каталога после генерации | Queue сохраняет item; при воспроизведении Streaming API после проверки каталога возвращает `TRACK_UNAVAILABLE`, и клиент пропускает трек |
 | Устройство прислало старый checkpoint | Несовпавшая epoch или меньший `client_seq` отклоняются |
-| Device Sync Gateway недоступен | Handoff успешен; старое устройство остановится после следующего rejected checkpoint |
-| Playback State KV недоступен | Новые pause/handoff не подтверждаются; очередь и плейлисты остаются доступны |
+| Best-effort уведомление старого устройства не доставлено | Handoff успешен; следующий checkpoint со старой epoch будет отклонён |
+| Playback State KV недоступен | Новые pause, handoff и `start shuffle` не подтверждаются; уже сохранённые плейлисты и очереди можно читать |
 | Плейлист пуст | `start shuffle` возвращает `EMPTY_PLAYLIST`, session не создаётся |
-| Плейлист содержит 10 000 элементов | Работает отдельный SLA и пакетная запись частями; async path добавляется только после benchmark |
+| Сбой внутри синхронной batch-записи queue | PostgreSQL откатывает всю транзакцию; частичная queue клиенту не видна |
+| Плейлист содержит 10 000 элементов | Работает отдельный SLA; при async-генерации session остаётся `GENERATING` до записи всех `queue_size` элементов |
 
 ---
 
@@ -454,7 +516,7 @@ checkpoint → старый телефон получает takeover event и б
 | Снимок playlist version | Живая ссылка на текущий плейлист | Очередь не меняется посреди сессии ценой копирования ссылок |
 | Fisher–Yates в приложении | `ORDER BY random()` | Линейная работа без DB-sort, но API временно держит массив в памяти |
 | Durable State KV | Redis cache + периодический flush | Подтверждённая pause не теряется ценой более дорогих записей |
-| Epoch + conditional update | Последняя запись побеждает | Старое устройство не откатывает состояние; нужен handoff-протокол |
+| Epoch + activation ID + conditional update | Последняя запись побеждает | Старое устройство и запоздавший retry не откатывают состояние; конкурентная команда может получить `SUPERSEDED` |
 | Checkpoint каждые 10 секунд | Запись каждую секунду | В 10 раз меньше write-load ценой до 10 секунд прогресса при crash |
 | Routing по owner_id | Routing по playlist_id | Данные пользователя локальны; публичный hot playlist потребует отдельного read-cache |
 
@@ -472,22 +534,25 @@ checkpoint → старый телефон получает takeover event и б
 > Плейлисты и очереди храню в PostgreSQL. Один кластер допустим, только если
 > benchmark полного queue-write пика оставляет запас; иначе использую routing по
 > owner_id через virtual buckets. Количество шардов заранее не угадываю. Главная
-> нагрузка находится не
-> здесь: при 10 млн условных DAU, двух часах прослушивания и checkpoint каждые
-> 10 секунд получается около 83 тысяч updates/с в среднем и 250 тысяч в
-> согласованный пик. Поэтому активный playback state лежит в durable distributed
-> KV и обновляется условно по одному user key.
+> нагрузка находится в другом месте: при 10 млн условных DAU, двух часах
+> прослушивания и checkpoint каждые 10 секунд получается около 83 тысяч
+> updates/с в среднем и 250 тысяч в согласованный пик. Поэтому активный playback
+> state лежит в durable distributed KV и обновляется условно по одному user key.
 >
-> Для handoff новое устройство атомарно увеличивает playback epoch. Старое
-> устройство продолжает иметь queue, но его checkpoints с прежней epoch
-> отклоняются. Внутри epoch порядок задаёт client sequence, а не position:
-> пользователь имеет право перемотать назад. Pause подтверждается только после
-> durable update; внезапный обрыв ограничен последним 10-секундным checkpoint.
+> Для handoff новое устройство передаёт ожидаемую epoch, а State KV атомарно
+> проверяет её и увеличивает. Стабильный activation ID делает retry
+> идемпотентным, а устаревшая команда получает `SUPERSEDED` и не может воскресить
+> старую session. Checkpoints прежнего устройства отклоняются. Внутри epoch
+> порядок задаёт client sequence, а не position: пользователь имеет право
+> перемотать назад. Pause подтверждается только после durable update; внезапный
+> обрыв ограничен последним 10-секундным checkpoint.
 >
 > Retry `start shuffle` использует idempotency key и возвращает ту же случайную
-> очередь. При росте в 10 раз сначала отдельно benchmark'аю queue generation,
-> PostgreSQL и State KV; прогресс масштабируется по user_id, а генерацию очень
-> больших очередей перевожу в асинхронные workers.
+> очередь, но не активирует её снова, если она уже получила `SUPERSEDED`. При
+> десятикратном росте трафика отдельно провожу benchmark PostgreSQL и State KV:
+> progress-path масштабируется по user_id, а DB-шарды добавляются по измеренной
+> capacity. Асинхронная генерация нужна по другой причине — если плейлисты
+> увеличатся настолько, что синхронный queue-write перестанет укладываться в SLA.
 
 ### За пределами scope и следующий шаг
 
@@ -511,7 +576,8 @@ checkpoint → старый телефон получает takeover event и б
 
 - Генерация — Fisher–Yates выполняется один раз при старте session.
 - Хранение — итоговый порядок материализуется и читается по `session_id`.
-- Retry — один idempotency key возвращает прежнюю session, а не новый shuffle.
+- Retry — один idempotency key возвращает прежнюю session и тот же порядок.
+- Вытесненная session — retry видит `SUPERSEDED`, но не создаёт и не активирует очередь заново.
 
 **3. Что происходит при редактировании плейлиста во время прослушивания?**
 
@@ -520,7 +586,9 @@ checkpoint → старый телефон получает takeover event и б
 
 **4. Как не дать старому устройству откатить прогресс?**
 
-- Handoff — условно увеличивает `playback_epoch`.
+- Handoff — проверяет `expected_epoch` и условно увеличивает `playback_epoch`.
+- Retry — тот же `activation_id` возвращает уже полученную epoch, не увеличивая её снова.
+- Старая активация — получает `SUPERSEDED` и не может перезаписать более новую session.
 - Отсечение старого устройства — checkpoints со старой epoch отклоняются.
 - Порядок — внутри epoch используется `client_seq`, потому что position может уменьшаться.
 
@@ -532,8 +600,9 @@ checkpoint → старый телефон получает takeover event и б
 
 **6. Почему не хранить progress только в Redis?**
 
-- Гарантия — подтверждённая pause-позиция не должна зависеть от потери cache state.
-- Альтернатива — Redis допустим как ускоритель перед durable store, но не как единственная подтверждённая копия.
+- Требование — подтверждённая pause-позиция должна пережить допустимые отказы с согласованным RPO.
+- Ограничение — обычный cache с асинхронной репликацией или `AOF everysec` может потерять уже подтверждённое обновление.
+- Выбор — Redis допустим и как primary store, если конкретная конфигурация обеспечивает нужные durability, failover и conditional updates; решение подтверждается failure-тестами и benchmark.
 
 ---
 

@@ -13,6 +13,10 @@
 
 Разбор задачи "Спроектируй мессенджер (chat system)". Сложная задача, проверяет знание WebSocket/long-polling, fan-out в реальном времени, storage для истории и online-presence.
 
+Отдельная прикидка для миллиона одновременных соединений, reconnect storm и
+группового fan-out находится в
+[WebSocket Chat at Scale: capacity drill](./04.1-websocket-chat-capacity.md).
+
 ---
 
 ## Фаза 1: Уточнение требований
@@ -119,7 +123,7 @@ flowchart TB
     S1 <--> Presence
     S2 <--> Presence
 
-    style Cluster fill:#dbeafe,stroke:#1e40af
+    style Cluster fill:#dbeafe,stroke:#1e40af,color:#0f172a
 ```
 
 ### Роль каждого компонента
