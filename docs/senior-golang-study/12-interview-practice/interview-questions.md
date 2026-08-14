@@ -230,7 +230,7 @@
 - Отличие от бинарного дерева: у бинарного максимум 2 ребёнка и один ключ на узел → дерево высокое; у B-tree — широкий узел и много ключей → меньше уровней и меньше дисковых I/O.
 - Поиск: с корня выбираем интервал между разделителями (бинарный поиск внутри страницы) → спускаемся к нужному ребёнку → так до листа за O(log n) с большим основанием логарифма (мало обращений к диску).
 - Балансировка держит все листья на одной глубине (одинаковая стоимость поиска любого ключа) и узлы заполненными: при переполнении страницы — split (расщепление и подъём ключа вверх), при опустошении — слияние. Поэтому дерево не вырождается в список, как несбалансированное BST.
-- См. [postgresql/02-indexes.md](../06-databases/database-systems-catalog/postgresql/02-indexes.md) и [16-algorithms-and-data-structures/05-trees-and-graphs.md](../16-algorithms-and-data-structures/05-trees-and-graphs.md).
+- См. [postgresql/02-indexes.md](../06-databases/database-systems-catalog/postgresql/02-indexes.md) и [16-algorithms-and-data-structures/04-trees-and-graphs.md](../16-algorithms-and-data-structures/04-trees-and-graphs.md).
 
 **За счёт чего B-tree хорошо работает с `>`/`<` и диапазонами?**
 
@@ -268,7 +268,7 @@
 - Почему B-tree лучше для БД — узел совпадает по размеру со страницей диска (обычно 8 КБ), и за одну дисковую I/O-операцию читаются сразу сотни ключей.
 - Узкое место БД — именно random-I/O к диску, а не сравнения в памяти; AVL с одним ключом на узел и большой высотой потребовал бы на порядки больше дисковых обращений.
 - Где что применимо — AVL хорош в RAM (например, in-memory индекс), B-tree — когда данные на диске (индексы БД, файловые системы).
-- См. [postgresql/02-indexes.md](../06-databases/database-systems-catalog/postgresql/02-indexes.md) и [16-algorithms-and-data-structures/05-trees-and-graphs.md](../16-algorithms-and-data-structures/05-trees-and-graphs.md).
+- См. [postgresql/02-indexes.md](../06-databases/database-systems-catalog/postgresql/02-indexes.md) и [16-algorithms-and-data-structures/04-trees-and-graphs.md](../16-algorithms-and-data-structures/04-trees-and-graphs.md).
 
 **Что такое ACID?**
 
@@ -1410,7 +1410,7 @@
 - O(2ⁿ), экспоненциальная — перебор всех подмножеств, наивная рекурсия для чисел Фибоначчи без мемоизации, динамика Хелда — Карпа для коммивояжёра.
 - O(n!), факториальная — перебор всех перестановок, полный брутфорс задачи коммивояжёра.
 - Отдельный случай — графы: их сложность выражают через число вершин V и рёбер E, а не через одно `n`. BFS и DFS дают O(V + E), Дейкстра на бинарной куче — O(E log V).
-- См. [16-algorithms-and-data-structures/01-time-and-space-complexity.md](../16-algorithms-and-data-structures/01-time-and-space-complexity.md) и [16-algorithms-and-data-structures/07-sorting-and-heap.md](../16-algorithms-and-data-structures/07-sorting-and-heap.md).
+- См. [16-algorithms-and-data-structures/01-time-and-space-complexity.md](../16-algorithms-and-data-structures/01-time-and-space-complexity.md) и [16-algorithms-and-data-structures/06-sorting-and-heap.md](../16-algorithms-and-data-structures/06-sorting-and-heap.md).
 
 **Что такое хеш-таблицы, назначение и ограничения?**
 
@@ -1435,4 +1435,4 @@
 
 **Что такое куча (heap) и где применяется?**
 
-- Бинарная куча — дерево с heap-свойством (родитель ≤/≥ детей), даёт минимум/максимум за O(1) и вставку/извлечение за O(log n). Применяется в приоритетных очередях, heapsort, поиске top-K, алгоритмах на графах (Дейкстра). В Go — `container/heap`. (Не путать с heap как областью памяти для аллокаций.) См. [16-algorithms-and-data-structures/07-sorting-and-heap.md](../16-algorithms-and-data-structures/07-sorting-and-heap.md).
+- Бинарная куча — дерево с heap-свойством (родитель ≤/≥ детей), даёт минимум/максимум за O(1) и вставку/извлечение за O(log n). Применяется в приоритетных очередях, heapsort, поиске top-K, алгоритмах на графах (Дейкстра). В Go — `container/heap`. (Не путать с heap как областью памяти для аллокаций.) См. [16-algorithms-and-data-structures/06-sorting-and-heap.md](../16-algorithms-and-data-structures/06-sorting-and-heap.md).
