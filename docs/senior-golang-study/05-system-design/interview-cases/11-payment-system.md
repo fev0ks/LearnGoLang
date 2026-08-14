@@ -153,7 +153,7 @@ flowchart TB
     Processor --> Audit
     Processor --> Kafka
 
-    style PS fill:#dbeafe,stroke:#1e40af
+    style PS fill:#dbeafe,stroke:#1e40af,color:#0f172a
 ```
 
 ### Роль каждого компонента

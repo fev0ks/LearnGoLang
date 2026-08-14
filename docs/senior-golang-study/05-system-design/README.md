@@ -13,33 +13,14 @@
 - observability как часть дизайна, а не постфактум.
 
 Подпакеты:
-- [Reliability Patterns](./reliability-patterns/README.md) — timeouts, retries, circuit breaker, rate limiting, backpressure, idempotency, bulkhead
-- [External Request Flows](./external-request-flows/README.md)
-- [Experimentation And Feature Rollouts](./experimentation-and-feature-rollouts/README.md)
-- [Interview Cases](./interview-cases/README.md) — разборы популярных задач по фазам интервью
-
-## Interview Cases
-
-Полные разборы с уточнением требований, оценкой нагрузки, архитектурой и трейдоффами:
-
-- [00. Как проходить System Design Interview](./interview-cases/00-how-to-approach.md) — фреймворк, тайминг, что оценивает интервьюер
-- [01. URL Shortener](./interview-cases/01-url-shortener.md)
-- [02. Notification Service](./interview-cases/02-notification-service.md)
-- [03. Rate Limiter](./interview-cases/03-rate-limiter.md)
-- [04. Chat / Messaging](./interview-cases/04-chat-messaging.md)
-- [05. Task Queue](./interview-cases/05-task-queue.md)
-- [06. Uber / Ride-Sharing](./interview-cases/06-uber-ride-sharing.md) — H3, matching, geo at scale
-- [07. YouTube / Video Platform](./interview-cases/07-youtube-video-platform.md) — transcode pipeline, HLS, CDN
-- [08. Twitter / Social Feed](./interview-cases/08-twitter-social-feed.md) — hybrid fan-out, celebrity problem
-- [09. Netflix / Streaming](./interview-cases/09-netflix-streaming.md) — Open Connect CDN, per-title encoding
-- [10. Google Drive](./interview-cases/10-google-drive.md) — content-addressed chunking, sync, conflict resolution
-- [11. Payment System](./interview-cases/11-payment-system.md) — double-entry, idempotency, Saga + Outbox
-- [12. Marketplace Vendor Notifications](./interview-cases/12-marketplace-vendor-notifications.md) — webhook delivery, outbox + Kafka, per-vendor circuit breaker, HMAC signing
-- [13. Avito / Classifieds](./interview-cases/13-avito-classifieds.md) — фасетный поиск (Elasticsearch), category-specific атрибуты, медиа-пайплайн, view counter, модерация
+- [Reliability Patterns](./reliability-patterns/README.md) — как сервис переживает нагрузку и не превращает чужую поломку в свою. Семь механизмов в коде, выстроенных по уровням защиты: таймаут ограничивает одно ожидание, повтор компенсирует кратковременный сбой, предохранитель прекращает бессмысленные попытки, ограничение частоты и отбрасывание защищают ёмкость, идемпотентность делает повторы безопасными, переборка не даёт одной зависимости занять все ресурсы. Плюс три практики вокруг кода — SLO и бюджет ошибок, постмортемы, chaos engineering
+- [External Request Flows](./external-request-flows/README.md) — путь одного внешнего запроса через слои системы: edge, gateway, аутентификация, сервисы, кэш, БД, очереди, объектное хранилище. Отдельно разобраны read-heavy путь через CDN, асинхронная запись через очередь, загрузка файла и место, где появляются задержки и отказы. Нужен, чтобы отвечать на «что происходит после того, как клиент нажал кнопку» не общими словами, а по слоям
+- [Experimentation And Feature Rollouts](./experimentation-and-feature-rollouts/README.md) — как менять продукт без релиза вслепую: feature flags, постепенная раскатка, canary, dark launch и A/B-тесты. Тема попадает в system design интервью потому, что задевает сразу несколько слоёв — сервис назначения вариантов, кэш флагов на клиенте, метрики, аналитику и откат. Есть разбор реализации клиента флагов на Go
+- [Interview Cases](./interview-cases/README.md) — два десятка разборов конкретных задач (сокращатель ссылок, чат, платежи, маркетплейс, живые трансляции) в формате симуляции интервью. Каждый проходит все фазы — уточнение требований, оценка нагрузки, архитектура, deep dive, финальное резюме — и обосновывает решения числами, а не общими словами. Нужен, чтобы отрабатывать порядок рассуждения под таймер, а не заучивать готовые ответы; там же общий фреймворк и тайминг интервью
 
 ## Highload как отдельная тема
 
-- [Highload Design Patterns](./highload-design-patterns.md) — walls на каждом уровне нагрузки (CPU/memory/DB/network/coordination/operational/cost), sharding strategies, hot keys, fan-out patterns, реальные истории Twitter / Discord / WhatsApp / Stripe / Cloudflare, конкретный design example 1M concurrent WS chat
+- [Highload Design Patterns](./highload-design-patterns.md) — стены на каждом уровне нагрузки (процессор, память, БД, сеть, координация, эксплуатация, стоимость), стратегии шардирования, горячие ключи, fan-out, backpressure, разбор реальных историй Twitter, Discord, WhatsApp, Stripe и Cloudflare
 
 ## Подборка
 

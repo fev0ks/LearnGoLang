@@ -135,7 +135,7 @@ flowchart LR
     Producer -->|enqueue task| QueueAPI
     Producer -->|task_status id| QueueAPI
 
-    style TQ fill:#dbeafe,stroke:#1e40af
+    style TQ fill:#dbeafe,stroke:#1e40af,color:#0f172a
 ```
 
 ### Роль каждого компонента

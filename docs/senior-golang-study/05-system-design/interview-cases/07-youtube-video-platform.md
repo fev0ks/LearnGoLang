@@ -143,7 +143,7 @@ flowchart LR
     ProcS3 --> CDN
     CDN --> Viewer
 
-    style Upload fill:#dbeafe,stroke:#1e40af
+    style Upload fill:#dbeafe,stroke:#1e40af,color:#0f172a
 ```
 
 ### Роль каждого компонента

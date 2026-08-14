@@ -198,7 +198,7 @@ flowchart TB
     RL <-->|allowed / denied| Redis
     RL -.->|load limits| Config
 
-    style GW fill:#dbeafe,stroke:#1e40af
+    style GW fill:#dbeafe,stroke:#1e40af,color:#0f172a
 ```
 
 ### Роль каждого компонента

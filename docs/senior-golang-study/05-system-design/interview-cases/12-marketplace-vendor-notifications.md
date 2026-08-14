@@ -299,8 +299,8 @@ flowchart TB
     Kafka -->|consume| Consumer
     Dispatcher -->|HTTPS POST<br/>HMAC signed| Vendor
 
-    style OB fill:#dbeafe,stroke:#1e40af
-    style NS fill:#fef3c7,stroke:#a16207
+    style OB fill:#dbeafe,stroke:#1e40af,color:#0f172a
+    style NS fill:#fef3c7,stroke:#a16207,color:#0f172a
 ```
 
 ### Роль каждого компонента
@@ -348,8 +348,8 @@ sequenceDiagram
     C->>API: POST /order
     API->>OB: CreateOrder
 
-    rect rgb(219, 234, 254)
-        Note over OB,DB: ОДНА транзакция
+    rect rgba(59, 130, 246, 0.12)
+        Note over OB,DB: Одна транзакция
         OB->>DB: INSERT orders
         OB->>DB: INSERT outbox(event)
         OB->>DB: COMMIT

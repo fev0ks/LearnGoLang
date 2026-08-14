@@ -204,8 +204,8 @@ flowchart TB
     Client --> Send --> Meta
     Send --> OMTA -->|SMTP| Ext
 
-    style In fill:#dbeafe,stroke:#1e40af
-    style Out fill:#fef3c7,stroke:#a16207
+    style In fill:#dbeafe,stroke:#1e40af,color:#0f172a
+    style Out fill:#fef3c7,stroke:#a16207,color:#0f172a
 ```
 
 ### Роль каждого компонента

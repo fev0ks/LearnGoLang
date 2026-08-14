@@ -118,7 +118,7 @@ flowchart LR
     Workers --> SG
     Workers --> TW
 
-    style NS fill:#dbeafe,stroke:#1e40af
+    style NS fill:#dbeafe,stroke:#1e40af,color:#0f172a
 ```
 
 ### Роль каждого компонента
