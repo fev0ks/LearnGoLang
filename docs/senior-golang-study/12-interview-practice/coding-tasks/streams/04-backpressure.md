@@ -1,190 +1,103 @@
 # Задача 4: Backpressure Handling
 
-Что делать когда **producer быстрее consumer'а**? Это фундаментальный вопрос всех streaming систем. Без правильного backpressure → OOM, dropped events, cascade failure.
+## Содержание
+
+- [Формулировка](#формулировка)
+- [Уточняющие вопросы](#уточняющие-вопросы)
+- [Стратегии](#стратегии)
+- [Bounded buffer](#bounded-buffer-с-атомарным-drop-oldest)
+- [Priority и adaptive shedding](#priority-и-adaptive-load-shedding)
+- [Sampling](#sampling-и-reservoir-sampling)
+- [Capacity planning](#как-оценить-capacity)
+- [Тесты](#тесты)
+- [Типичные ошибки](#подводные-камни)
+- [Возможные расширения](#возможные-расширения)
+- [Interview-ready answer](#interview-ready-answer)
+- [Связанные материалы](#связанные-материалы)
+
+Backpressure — это реакция системы на ситуацию, когда входной поток временно или
+постоянно быстрее обработки. Неограниченная очередь маскирует проблему до OOM;
+bounded queue заставляет заранее выбрать: замедлить, отклонить, отбросить,
+сэмплировать или надёжно вынести backlog во внешнее хранилище.
+
+---
 
 ## Формулировка
 
-> "Producer генерирует события быстрее, чем consumer может обработать. Реализуй компонент-mediator, который безопасно обрабатывает overflow."
+> Producer создаёт события быстрее consumer. Реализуй bounded mediator с
+> context-aware `Add`, явной overflow policy, безопасным concurrent lifecycle и
+> метриками потерь.
 
-Use cases:
-- Slow downstream (БД, API) — нельзя терять events
-- Bursty traffic — peak в 10x от стабильного
-- Multi-tenant — один tenant заваливает других
-- Real-time analytics — events приходят с разной скоростью
+Типичные случаи:
+
+- медленная БД или внешний API;
+- кратковременный traffic burst;
+- noisy tenant, влияющий на соседей;
+- telemetry, где часть данных разрешено sampling/drop;
+- worker pool с фиксированной параллельностью.
 
 ---
 
 ## Уточняющие вопросы
 
-1. **Можно ли терять события?**
-   "Metrics — OK. Платежи — нет."
-
-2. **Priority — все события equal или разные?**
-   "Если разные — high-priority должны проходить first."
-
-3. **Backpressure до producer'а?**
-   "Можем ли мы замедлить producer'а или он external?"
-
-4. **Persistent или volatile buffer?**
-   "Restart → потеря — OK?"
-
-5. **Throughput?**
-   "1k/sec — простой буфер. 1M/sec — нужны sharding и lock-free."
-
-6. **SLA — какой max latency приемлем?**
-   "Чем больше buffer — тем больше latency."
+1. **Разрешена ли потеря?**
+   Для telemetry — иногда да, для payment command — обычно нет.
+2. **Может ли producer замедлиться?**
+   Внутренняя goroutine может ждать; внешний webhook-клиент может только получить
+   `429/503` и решить, повторять ли запрос.
+3. **Нужно ли пережить process crash?**
+   In-memory buffer этого не умеет — нужен broker/WAL/durable queue.
+4. **Что важнее при потере: свежесть или полнота?**
+   От этого зависит `drop oldest` против `drop newest`.
+5. **Есть ли priorities/tenants?**
+   Один общий FIFO позволяет noisy neighbor занять всю capacity.
+6. **Какой допустим queueing delay?**
+   Большой buffer уменьшает кратковременные rejects, но увеличивает stale work и
+   latency.
 
 ---
 
-## Стратегии (подробно)
+## Стратегии
 
-### 1. Block producer (backpressure propagation)
+| Стратегия | Что происходит при full | Где уместна | Главный риск |
+|---|---|---|---|
+| Block | producer ждёт место | контролируемый pipeline без потерь | timeout/deadlock/cascade |
+| Reject / drop newest | новый item не принимается | admission control, свежий backlog не нужен | потеря новых данных |
+| Drop oldest | старый waiting item заменяется новым | gauges, latest-state telemetry | потеря уже принятого item |
+| Sample | принимается подмножество | traces/analytics | sampling bias |
+| Spill to durable queue | overflow пишется на disk/broker | данные должны пережить сбой | operational complexity |
+| Scale consumers | растёт service rate | параллелизуемая обработка | ordering, downstream limit |
 
-Producer ждёт когда буфер освободится.
+Ни одна policy не исправляет постоянное неравенство `arrival rate > service
+rate`. Она лишь определяет поведение до масштабирования, снижения входа или
+деградации качества.
 
-```go
-ch := make(chan Event, 100)
-ch <- event  // блокирует если буфер полон
-```
+### Block
 
-**Плюсы:**
-- ✅ Не теряем события
-- ✅ Естественная backpressure до источника
+Block сохраняет данные только пока жив процесс и caller не отменил ожидание. Он
+распространяет давление upstream, но это не означает автоматическую end-to-end
+гарантию: protocol/client должны уметь замедляться или retry.
 
-**Минусы:**
-- ❌ Producer может deadlock'нуть caller'а
-- ❌ Один slow consumer тормозит весь pipeline
-- ❌ Source может не справляться с backpressure (например, network packet drops)
+### Drop newest и drop oldest
 
-**Когда:** internal pipelines, producer контролируем.
+`drop newest` сохраняет уже накопленную FIFO-очередь. `drop oldest` сохраняет
+самые свежие waiting items. Для command/event log оба обычно неприемлемы без
+явного business contract.
 
-### 2. Drop newest (reject)
+### Durable queue
 
-При full буфере — отказывать новым.
-
-```go
-select {
-case ch <- event:
-default:
-    droppedNewest.Add(1)
-}
-```
-
-**Плюсы:**
-- ✅ Не блокирует producer'а
-- ✅ Defends consumer от backlog
-
-**Минусы:**
-- ❌ Теряем **свежие** события (часто более важные)
-
-**Когда:** real-time metrics where "first observation" важнее последующих.
-
-### 3. Drop oldest
-
-Удаляем старейшее, оставляем новое.
-
-```go
-select {
-case ch <- event:
-default:
-    <-ch       // drop oldest
-    ch <- event  // try again
-}
-```
-
-**Плюсы:**
-- ✅ Сохраняем недавнее (актуальное)
-
-**Минусы:**
-- ❌ Теряем старое
-- ❌ Race condition (другой может проснуться между <-ch и ch<-)
-
-**Когда:** sensor data, real-time updates где новое value заменяет старое.
-
-### 4. Random drop
-
-Drop какой-то random event при overflow.
-
-**Плюсы:**
-- ✅ Распределённая loss — каждый класс events теряет одинаково
-- ✅ Хорошо для sampling (statistical correctness)
-
-**Минусы:**
-- ❌ Менее предсказуемо
-
-### 5. Sampling
-
-Брать только каждое N-е событие, остальные drop.
-
-```go
-if atomic.AddInt64(&counter, 1) % sampleRate != 0 {
-    return
-}
-ch <- event
-```
-
-**Плюсы:**
-- ✅ Throughput не растёт неограниченно
-- ✅ Statistical sampling корректный
-
-**Минусы:**
-- ❌ Теряем 99% событий — для metrics OK, для events critical — нет
-
-**Когда:** distributed tracing (sample only 1%).
-
-### 6. Reservoir Sampling
-
-Сохранить N **random samples** из stream. Если приходит больше — replace с probability `N/total`.
-
-```go
-type Reservoir struct {
-    items []Event
-    n     int
-    count int  // total seen
-}
-
-func (r *Reservoir) Add(item Event) {
-    r.count++
-    if len(r.items) < r.n {
-        r.items = append(r.items, item)
-        return
-    }
-    j := rand.Intn(r.count)
-    if j < r.n {
-        r.items[j] = item
-    }
-}
-```
-
-**Плюсы:**
-- ✅ Constant memory
-- ✅ Uniform random sample (mathematical guarantee)
-
-**Когда:** post-hoc analysis, не need real-time processing.
-
-### 7. Adaptive load shedding
-
-Динамически меняем стратегию по нагрузке:
-- Buffer < 50% → process all
-- 50-90% → drop low-priority
-- > 90% → drop all but critical
-
-Используется Netflix Hystrix, Linkerd.
-
-### 8. Push back to producer with rate limit
-
-Producer'у возвращаем сигнал "медленнее":
-```go
-if isOverloaded() {
-    rateLimiter.SetLimit(rateLimiter.Limit() * 0.9)  // reduce 10%
-}
-```
-
-Используется gRPC backpressure.
+Если успешный приём должен пережить crash, acknowledgement дают только после
+durable write. Redis/Kafka/локальный WAL — не взаимозаменяемые слова: нужно
+отдельно определить replication, fsync, retention, replay и deduplication.
 
 ---
 
-## Базовое решение: Bounded buffer + policy
+## Bounded buffer с атомарным `drop oldest`
+
+Два channel operations — «прочитать старое, затем записать новое» — не являются
+одной атомарной заменой. Между ними другой consumer может изменить channel.
+Кольцевой buffer под одним mutex делает eviction и insertion одной critical
+section.
 
 ```go
 package backpressure
@@ -193,7 +106,12 @@ import (
     "context"
     "errors"
     "sync"
-    "sync/atomic"
+)
+
+var (
+    ErrClosed        = errors.New("buffer: closed")
+    ErrBufferFull    = errors.New("buffer: full")
+    ErrInvalidConfig = errors.New("buffer: invalid configuration")
 )
 
 type Policy int
@@ -204,527 +122,539 @@ const (
     PolicyDropOldest
 )
 
-var ErrBufferFull = errors.New("buffer full")
-
 type Buffer[T any] struct {
-    ch     chan T
-    policy Policy
+    mu      sync.Mutex
+    storage []T
+    head    int
+    size    int
+    policy  Policy
+    closed  bool
 
-    // Metrics
-    accepted atomic.Int64
-    dropped  atomic.Int64
+    cond *sync.Cond
+
+    accepted int64
+    taken    int64
+    rejected int64 // новый item не был принят
+    evicted  int64 // ранее принятый waiting item был удалён
 }
 
-func New[T any](capacity int, policy Policy) *Buffer[T] {
-    return &Buffer[T]{
-        ch:     make(chan T, capacity),
-        policy: policy,
+func New[T any](capacity int, policy Policy) (*Buffer[T], error) {
+    validPolicy := policy >= PolicyBlock && policy <= PolicyDropOldest
+    if capacity <= 0 || !validPolicy {
+        return nil, ErrInvalidConfig
     }
+    b := &Buffer[T]{
+        storage: make([]T, capacity),
+        policy:  policy,
+    }
+    b.cond = sync.NewCond(&b.mu)
+    return b, nil
 }
 
-// Add — non-blocking (для DropNewest/DropOldest) или blocking (для Block).
 func (b *Buffer[T]) Add(ctx context.Context, item T) error {
-    switch b.policy {
-    case PolicyBlock:
-        select {
-        case b.ch <- item:
-            b.accepted.Add(1)
-            return nil
-        case <-ctx.Done():
-            return ctx.Err()
+    if ctx == nil {
+        return ErrInvalidConfig
+    }
+    if err := ctx.Err(); err != nil {
+        return err
+    }
+
+    b.mu.Lock()
+    defer b.mu.Unlock()
+
+    for {
+        if b.closed {
+            return ErrClosed
+        }
+        if err := ctx.Err(); err != nil {
+            return err
         }
 
-    case PolicyDropNewest:
-        select {
-        case b.ch <- item:
-            b.accepted.Add(1)
+        if b.size < len(b.storage) {
+            b.pushLocked(item)
+            b.accepted++
+            b.cond.Broadcast()
             return nil
-        default:
-            b.dropped.Add(1)
+        }
+
+        switch b.policy {
+        case PolicyDropNewest:
+            b.rejected++
             return ErrBufferFull
-        }
 
-    case PolicyDropOldest:
-        for {
-            select {
-            case b.ch <- item:
-                b.accepted.Add(1)
-                return nil
-            default:
-                // Drop oldest, try again
-                select {
-                case <-b.ch:
-                    b.dropped.Add(1)
-                default:
-                    // Race — someone took oldest. Retry.
-                }
-            }
+        case PolicyDropOldest:
+            _, _ = b.popLocked()
+            b.evicted++
+            b.pushLocked(item)
+            b.accepted++
+            b.cond.Broadcast()
+            return nil
+
+        case PolicyBlock:
+            stopWakeup := context.AfterFunc(ctx, func() {
+                b.mu.Lock()
+                b.cond.Broadcast()
+                b.mu.Unlock()
+            })
+            b.cond.Wait()
+            stopWakeup()
         }
     }
-    return nil
 }
 
-// Receive возвращает channel для consumer'а.
-func (b *Buffer[T]) Receive() <-chan T {
-    return b.ch
+// Take возвращает ok=false после Close, когда уже drained весь buffer.
+func (b *Buffer[T]) Take(ctx context.Context) (item T, ok bool, err error) {
+    if ctx == nil {
+        return item, false, ErrInvalidConfig
+    }
+    if err := ctx.Err(); err != nil {
+        return item, false, err
+    }
+
+    b.mu.Lock()
+    defer b.mu.Unlock()
+
+    for {
+        if err := ctx.Err(); err != nil {
+            return item, false, err
+        }
+        if b.size > 0 {
+            item, _ = b.popLocked()
+            b.taken++
+            b.cond.Broadcast()
+            return item, true, nil
+        }
+        if b.closed {
+            return item, false, nil
+        }
+
+        stopWakeup := context.AfterFunc(ctx, func() {
+            b.mu.Lock()
+            b.cond.Broadcast()
+            b.mu.Unlock()
+        })
+        b.cond.Wait()
+        stopWakeup()
+    }
+}
+
+func (b *Buffer[T]) TryTake() (item T, ok bool) {
+    b.mu.Lock()
+    defer b.mu.Unlock()
+
+    if b.size == 0 {
+        return item, false
+    }
+    item, _ = b.popLocked()
+    b.taken++
+    b.cond.Broadcast()
+    return item, true
+}
+
+func (b *Buffer[T]) Close() {
+    b.mu.Lock()
+    defer b.mu.Unlock()
+
+    if b.closed {
+        return
+    }
+    b.closed = true
+    b.cond.Broadcast() // разбудить всех blocked Add/Take
+}
+
+func (b *Buffer[T]) pushLocked(item T) {
+    tail := (b.head + b.size) % len(b.storage)
+    b.storage[tail] = item
+    b.size++
+}
+
+func (b *Buffer[T]) popLocked() (item T, ok bool) {
+    if b.size == 0 {
+        return item, false
+    }
+    item = b.storage[b.head]
+    var zero T
+    b.storage[b.head] = zero // не удерживать ссылку после dequeue
+    b.head = (b.head + 1) % len(b.storage)
+    b.size--
+    return item, true
 }
 
 type Stats struct {
     Accepted int64
-    Dropped  int64
+    Taken    int64
+    Rejected int64
+    Evicted  int64
     Buffered int
+    Capacity int
+    Closed   bool
 }
 
 func (b *Buffer[T]) Stats() Stats {
+    b.mu.Lock()
+    defer b.mu.Unlock()
     return Stats{
-        Accepted: b.accepted.Load(),
-        Dropped:  b.dropped.Load(),
-        Buffered: len(b.ch),
+        Accepted: b.accepted,
+        Taken:    b.taken,
+        Rejected: b.rejected,
+        Evicted:  b.evicted,
+        Buffered: b.size,
+        Capacity: len(b.storage),
+        Closed:   b.closed,
     }
 }
 ```
 
-**Использование:**
-
-```go
-buf := backpressure.New[Event](1000, backpressure.PolicyDropOldest)
-
-// Producer
-go func() {
-    for ev := range producerStream {
-        buf.Add(ctx, ev)
-    }
-}()
-
-// Consumer
-for ev := range buf.Receive() {
-    process(ev)
-}
-```
+`sync.Cond` не умеет ждать context напрямую, поэтому `context.AfterFunc`
+пробуждает waiters при cancellation. После каждого wake условие проверяется
+заново под mutex: пробуждение нескольких goroutines безопасно. Цена подхода —
+thundering herd при большом числе waiters; оптимизировать его стоит после profile.
 
 ---
 
-## Production-grade: Multi-level с priority
+## Priority и adaptive load shedding
 
-Real-world systems часто комбинируют стратегии:
+Три отдельных channel и «проверить high, затем `select` по всем» не дают strict
+priority: если несколько cases готовы, `select` выбирает одну из них
+псевдослучайно. Strict high-first, напротив, может навсегда оставить low queue без
+обработки.
+
+Практичный вариант:
+
+- отдельная capacity на priority/tenant, чтобы low не занял место critical;
+- weighted round-robin, например `high:normal:low = 8:4:1`;
+- aging: долго ожидающий item постепенно повышает эффективный priority;
+- reserve для critical и общий global limit;
+- admission policy проверяет как global pressure, так и заполнение конкретной
+  queue.
+
+Пример политики деградации:
+
+| Состояние | Low | Normal | High |
+|---|---:|---:|---:|
+| Healthy | accept | accept | accept |
+| Normal queue saturated | accept в своём лимите | reject | accept |
+| Global overload | drop/sample | reject | accept из reserve или block |
+
+Это именно policy, а не универсальные thresholds `50%/90%`. Thresholds выбирают
+по queueing delay, downstream latency и данным load test. Snapshot `len/cap` уже
+устаревает к моменту решения, поэтому его используют как приблизительный сигнал,
+а hard capacity остаётся окончательной защитой.
+
+---
+
+## Sampling и reservoir sampling
+
+«Каждое N-е событие» — systematic sampling. Оно может быть сильно biased, если
+у входа есть периодичность, совпадающая с `N`. Для независимого probabilistic
+sampling каждое событие принимают с заданной вероятностью, а решение и effective
+sample rate записывают в metadata.
+
+Reservoir sampling решает другую задачу: после потока неизвестной длины оставить
+равномерную выборку фиксированного размера. Algorithm R:
 
 ```go
 package backpressure
 
-type Priority int
-
-const (
-    PriorityLow Priority = iota
-    PriorityNormal
-    PriorityHigh
+import (
+    "errors"
+    "math"
+    "math/rand"
+    "sync"
 )
 
-type PrioritizedItem[T any] struct {
-    Priority Priority
-    Item     T
+type Reservoir[T any] struct {
+    mu    sync.Mutex
+    rng   *rand.Rand // принадлежит Reservoir и защищён тем же mutex
+    items []T
+    seen  int64
 }
 
-type PriorityBuffer[T any] struct {
-    cfg    Config
-
-    // 3 channel'а — по приоритетам
-    highCh   chan T
-    normalCh chan T
-    lowCh    chan T
-
-    // Backpressure thresholds
-    mu          sync.Mutex
-    pressure    Pressure
-
-    // Metrics
-    accepted [3]atomic.Int64  // [low, normal, high]
-    dropped  [3]atomic.Int64
-}
-
-type Pressure int
-
-const (
-    PressureLow Pressure = iota  // < 50%
-    PressureMed                   // 50-90%
-    PressureHigh                  // > 90%
-)
-
-type Config struct {
-    HighCapacity   int
-    NormalCapacity int
-    LowCapacity    int
-}
-
-func NewPrioritized[T any](cfg Config) *PriorityBuffer[T] {
-    return &PriorityBuffer[T]{
-        cfg:      cfg,
-        highCh:   make(chan T, cfg.HighCapacity),
-        normalCh: make(chan T, cfg.NormalCapacity),
-        lowCh:    make(chan T, cfg.LowCapacity),
+func NewReservoir[T any](size int, rng *rand.Rand) (*Reservoir[T], error) {
+    if size <= 0 || rng == nil {
+        return nil, ErrInvalidConfig
     }
+    return &Reservoir[T]{
+        rng:   rng,
+        items: make([]T, 0, size),
+    }, nil
 }
 
-func (b *PriorityBuffer[T]) Add(ctx context.Context, p Priority, item T) error {
-    var ch chan T
-    var capacity int
+func (r *Reservoir[T]) Add(item T) error {
+    r.mu.Lock()
+    defer r.mu.Unlock()
 
-    switch p {
-    case PriorityHigh:
-        ch = b.highCh
-        capacity = b.cfg.HighCapacity
-    case PriorityNormal:
-        ch = b.normalCh
-        capacity = b.cfg.NormalCapacity
-    case PriorityLow:
-        ch = b.lowCh
-        capacity = b.cfg.LowCapacity
+    if r.seen == math.MaxInt64 {
+        return errors.New("reservoir: sample counter overflow")
+    }
+    r.seen++
+    if len(r.items) < cap(r.items) {
+        r.items = append(r.items, item)
+        return nil
     }
 
-    // Compute pressure
-    pressure := b.computePressure()
-
-    // Adaptive policy based on pressure
-    switch pressure {
-    case PressureLow:
-        // Accept всё — block если full
-        select {
-        case ch <- item:
-            b.accepted[p].Add(1)
-            return nil
-        case <-ctx.Done():
-            return ctx.Err()
-        }
-
-    case PressureMed:
-        // Drop low-priority при full, остальные block
-        if p == PriorityLow {
-            select {
-            case ch <- item:
-                b.accepted[p].Add(1)
-                return nil
-            default:
-                b.dropped[p].Add(1)
-                return ErrBufferFull
-            }
-        }
-        select {
-        case ch <- item:
-            b.accepted[p].Add(1)
-            return nil
-        case <-ctx.Done():
-            return ctx.Err()
-        }
-
-    case PressureHigh:
-        // Drop low + normal, only high blocks
-        if p != PriorityHigh {
-            select {
-            case ch <- item:
-                b.accepted[p].Add(1)
-                return nil
-            default:
-                b.dropped[p].Add(1)
-                return ErrBufferFull
-            }
-        }
-        // High priority — block even на high pressure
-        select {
-        case ch <- item:
-            b.accepted[p].Add(1)
-            return nil
-        case <-ctx.Done():
-            return ctx.Err()
-        }
+    index := r.rng.Int63n(r.seen)
+    if index < int64(len(r.items)) {
+        r.items[index] = item
     }
-    _ = capacity  // unused warning
     return nil
 }
 
-func (b *PriorityBuffer[T]) computePressure() Pressure {
-    total := len(b.highCh) + len(b.normalCh) + len(b.lowCh)
-    capacity := b.cfg.HighCapacity + b.cfg.NormalCapacity + b.cfg.LowCapacity
-    ratio := float64(total) / float64(capacity)
-
-    if ratio < 0.5 {
-        return PressureLow
-    }
-    if ratio < 0.9 {
-        return PressureMed
-    }
-    return PressureHigh
-}
-
-// Receive возвращает items по приоритету — high first.
-func (b *PriorityBuffer[T]) Receive(ctx context.Context) (T, bool) {
-    var zero T
-
-    // High priority — попробовать non-blocking first
-    select {
-    case item := <-b.highCh:
-        return item, true
-    default:
-    }
-
-    select {
-    case item := <-b.highCh:
-        return item, true
-    case item := <-b.normalCh:
-        return item, true
-    case item := <-b.lowCh:
-        return item, true
-    case <-ctx.Done():
-        return zero, false
-    }
+func (r *Reservoir[T]) Snapshot() []T {
+    r.mu.Lock()
+    defer r.mu.Unlock()
+    return append([]T(nil), r.items...)
 }
 ```
 
-**Использование:**
+Reservoir не является очередью для последующей обработки: он намеренно забывает
+большинство событий и нужен для анализа выборки.
 
-```go
-buf := backpressure.NewPrioritized[Event](Config{
-    HighCapacity:   100,
-    NormalCapacity: 1000,
-    LowCapacity:    10000,
-})
+---
 
-// Producer
-buf.Add(ctx, PriorityHigh, payment_event)
-buf.Add(ctx, PriorityLow, metrics_event)
+## Как оценить capacity
 
-// Consumer
-for {
-    ev, ok := buf.Receive(ctx)
-    if !ok {
-        return
-    }
-    process(ev)
-}
+Для краткого burst backlog растёт примерно так:
+
+```text
+backlog = max(0, arrival_rate - service_rate) × burst_duration
 ```
 
-**Что важно:**
-- **3 channel'а** для priorities
-- **`computePressure`** — какой режим сейчас
-- **Adaptive policy** — при low всё OK, при high — только critical events
-- **Receive с priority** — high checked first
+Допущение: burst даёт `5_000 events/s`, consumer обрабатывает `3_000 events/s`,
+burst длится `2s`. Тогда нужно место примерно для
+`(5_000 - 3_000) × 2 = 4_000` events. Если средний payload равен `2 KB`, только
+payload займёт около `8 MB`; сверху будут Go objects, pointers и allocator
+overhead, которые измеряют heap profile.
+
+Queueing delay можно приблизить законом Литтла:
+
+```text
+queued_items ≈ throughput × average_queueing_time
+```
+
+Например, backlog `4_000` при service rate `3_000/s` добавляет примерно `1.33s`
+ожидания последнему item, если новый вход прекратился. Если вход продолжает
+стабильно превышать обработку, никакая конечная capacity не решает проблему.
 
 ---
 
 ## Тесты
 
 ```go
+func mustBuffer[T any](t *testing.T, capacity int, policy Policy) *Buffer[T] {
+    t.Helper()
+    b, err := New[T](capacity, policy)
+    if err != nil {
+        t.Fatal(err)
+    }
+    return b
+}
+
 func TestBuffer_DropNewest(t *testing.T) {
-    b := New[int](2, PolicyDropNewest)
-
-    b.Add(context.Background(), 1)
-    b.Add(context.Background(), 2)
-    err := b.Add(context.Background(), 3)  // full
-
-    if err != ErrBufferFull {
-        t.Errorf("expected ErrBufferFull, got %v", err)
+    b := mustBuffer[int](t, 2, PolicyDropNewest)
+    if err := b.Add(context.Background(), 1); err != nil {
+        t.Fatal(err)
+    }
+    if err := b.Add(context.Background(), 2); err != nil {
+        t.Fatal(err)
+    }
+    if err := b.Add(context.Background(), 3); !errors.Is(err, ErrBufferFull) {
+        t.Fatalf("third Add error = %v", err)
     }
 
-    // First two should still be there
-    if v := <-b.Receive(); v != 1 {
-        t.Errorf("got %d, want 1", v)
-    }
-    if v := <-b.Receive(); v != 2 {
-        t.Errorf("got %d, want 2", v)
+    first, _, _ := b.Take(context.Background())
+    second, _, _ := b.Take(context.Background())
+    if first != 1 || second != 2 {
+        t.Fatalf("got %d, %d", first, second)
     }
 }
 
 func TestBuffer_DropOldest(t *testing.T) {
-    b := New[int](2, PolicyDropOldest)
-
-    b.Add(context.Background(), 1)
-    b.Add(context.Background(), 2)
-    b.Add(context.Background(), 3)  // drops 1
-
-    if v := <-b.Receive(); v != 2 {
-        t.Errorf("expected 2 (oldest dropped), got %d", v)
+    b := mustBuffer[int](t, 2, PolicyDropOldest)
+    for _, item := range []int{1, 2, 3} {
+        if err := b.Add(context.Background(), item); err != nil {
+            t.Fatal(err)
+        }
     }
-    if v := <-b.Receive(); v != 3 {
-        t.Errorf("got %d, want 3", v)
+
+    first, _, _ := b.Take(context.Background())
+    second, _, _ := b.Take(context.Background())
+    if first != 2 || second != 3 {
+        t.Fatalf("got %d, %d", first, second)
     }
-}
-
-func TestBuffer_Block(t *testing.T) {
-    b := New[int](1, PolicyBlock)
-
-    b.Add(context.Background(), 1)
-
-    ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
-    defer cancel()
-
-    start := time.Now()
-    err := b.Add(ctx, 2)
-    elapsed := time.Since(start)
-
-    if !errors.Is(err, context.DeadlineExceeded) {
-        t.Errorf("expected DeadlineExceeded, got %v", err)
-    }
-    if elapsed < 40*time.Millisecond {
-        t.Errorf("Add returned too fast: %v", elapsed)
+    if got := b.Stats().Evicted; got != 1 {
+        t.Fatalf("Evicted = %d", got)
     }
 }
 
-func TestPriorityBuffer_HighFirst(t *testing.T) {
-    b := NewPrioritized[string](Config{
-        HighCapacity: 10,
-        NormalCapacity: 10,
-        LowCapacity: 10,
-    })
+func TestBuffer_BlockHonorsCancellation(t *testing.T) {
+    b := mustBuffer[int](t, 1, PolicyBlock)
+    if err := b.Add(context.Background(), 1); err != nil {
+        t.Fatal(err)
+    }
 
-    b.Add(context.Background(), PriorityLow, "low-1")
-    b.Add(context.Background(), PriorityHigh, "high-1")
-    b.Add(context.Background(), PriorityNormal, "normal-1")
+    ctx, cancel := context.WithCancel(context.Background())
+    cancel()
+    if err := b.Add(ctx, 2); !errors.Is(err, context.Canceled) {
+        t.Fatalf("Add error = %v", err)
+    }
+}
 
-    ctx := context.Background()
-    if v, _ := b.Receive(ctx); v != "high-1" {
-        t.Errorf("first should be high, got %s", v)
+func TestBuffer_BlockedAddWakesAfterTake(t *testing.T) {
+    b := mustBuffer[int](t, 1, PolicyBlock)
+    if err := b.Add(context.Background(), 1); err != nil {
+        t.Fatal(err)
+    }
+
+    result := make(chan error, 1)
+    go func() { result <- b.Add(context.Background(), 2) }()
+
+    first, ok, err := b.Take(context.Background())
+    if err != nil || !ok || first != 1 {
+        t.Fatalf("Take = %d, %v, %v", first, ok, err)
+    }
+    if err := <-result; err != nil {
+        t.Fatal(err)
+    }
+}
+
+func TestBuffer_CloseDrainsAndWakesWaiters(t *testing.T) {
+    b := mustBuffer[int](t, 1, PolicyBlock)
+    if err := b.Add(context.Background(), 1); err != nil {
+        t.Fatal(err)
+    }
+    b.Close()
+    b.Close() // idempotent
+
+    item, ok, err := b.Take(context.Background())
+    if err != nil || !ok || item != 1 {
+        t.Fatalf("first Take = %d, %v, %v", item, ok, err)
+    }
+    _, ok, err = b.Take(context.Background())
+    if err != nil || ok {
+        t.Fatalf("drained Take = ok:%v err:%v", ok, err)
+    }
+    if err := b.Add(context.Background(), 2); !errors.Is(err, ErrClosed) {
+        t.Fatalf("Add after Close error = %v", err)
     }
 }
 ```
+
+Concurrent stress-test нужно запускать с `go test -race` и проверять invariant:
+`Accepted - Evicted = Taken + Buffered` после остановки producers.
 
 ---
 
 ## Подводные камни
 
-### 1. Drop oldest race
+### 1. Неатомарный `drop oldest` на channel
+
+`<-ch`, затем `ch <- item` — две операции. При нескольких producers/consumers
+результат зависит от interleaving, а при capacity `0` retry loop может стать
+бесконечным.
+
+### 2. Goroutine на каждый blocked `Add`
 
 ```go
-default:
-    <-ch       // одна горутина drop'нула
-    ch <- item // другая горутина уже добавила
-}
+go buffer.Add(ctx, item)
 ```
 
-Между `<-ch` и `ch <- item` может пройти время → может быть race. Решение: lock или accept что race возможен.
+Это превращает goroutines в неограниченную скрытую очередь и уничтожает смысл
+backpressure.
 
-### 2. Buffer слишком большой
+### 3. Считать большой buffer решением
 
-```go
-make(chan T, 1_000_000)
-```
+Большая очередь добавляет latency и память. Она полезна только для измеренного
+burst, после которого service rate способен догнать вход.
 
-OOM. Buffer должен быть **bounded по реальным потребностям**. 1k-10k обычно.
+### 4. Смешивать loss и rejection
 
-### 3. Buffer слишком маленький
+При `drop newest` caller получает ошибку и ещё может retry. При `drop oldest`
+успешный `Add` одновременно означает потерю ранее принятого item. Эти outcomes
+нужно отражать разными метриками и API-контрактом.
 
-```go
-make(chan T, 1)  // unbuffered-like
-```
+### 5. Не учитывать shutdown
 
-Любой micro-burst → drops. Buffer = ~2-10x от RPS × max acceptable latency.
+Consumer, ожидающий пустую очередь, должен проснуться после `Close`; buffered
+items при этом обычно сначала дренируются. Producer после `Close` получает
+`ErrClosed`, а не panic.
 
-### 4. Backpressure cascade up
+### 6. Strict priority без fairness
 
-Block в local buffer → upstream block → его upstream block → cascade to user → timeout user'у.
+Постоянный high traffic вызывает starvation lower priorities. Weighted scheduling
+и aging должны быть частью контракта, а не случайным поведением `select`.
 
-Это **естественно**, но нужно понимать что блокировка propagate'ит.
+### 7. Global occupancy вместо per-queue saturation
 
-### 5. Memory leak через goroutines
+Пустой high reserve может скрыть полностью заполненную normal queue. Проверяют и
+общую нагрузку, и конкретный partition/priority/tenant.
 
-```go
-for ev := range producerStream {
-    go func() {
-        buf.Add(ctx, ev)  // ← если block, goroutine утечёт
-    }()
-}
-```
+### 8. Sampling без metadata
 
-Не делай spawn горутин для add — это invalidates backpressure целиком. Используй direct call.
+Без effective sample rate downstream не сможет восстановить оценки. Для adaptive
+sampling вероятность может меняться во времени, поэтому её записывают рядом с
+sample.
 
-### 6. Slow consumer = backed up everything
+### 9. Retry storm после reject
 
-```go
-for ev := range buf.Receive() {
-    time.Sleep(time.Second)  // ← consumer медленный
-    process(ev)
-}
-```
+Если все producers сразу повторяют запрос, overload усиливается. Нужны bounded
+retries, exponential backoff с jitter и серверный `Retry-After`, где protocol это
+поддерживает.
 
-Buffer fills up immediately. Стратегия должна знать "consumer медленный" → drop low-priority.
+### 10. Нет overload-метрик
 
-### 7. Priority starvation
-
-```go
-// Receive — high first, иногда normal/low не доходят
-```
-
-Если high всегда есть — normal и low никогда не обрабатываются. **Fair scheduling**: round-robin между priorities с weights.
-
-### 8. Pressure based на len(ch) — точка во времени
-
-```go
-ratio := len(ch) / cap(ch)  // snapshot
-```
-
-Между computePressure и Add channel может опустошиться → mismatch. Acceptable для adaptive — не need to be perfect.
-
-### 9. Drop в metrics counter без context
-
-```go
-dropped.Add(1)
-// Что именно drop'нули — info lost
-```
-
-Лог first/last drop с context для debug.
-
-### 10. Не учитывать ctx в Add
-
-```go
-ch <- item  // блокирует forever
-```
-
-С context — caller'а может отменить:
-```go
-select {
-case ch <- item:
-case <-ctx.Done():
-    return ctx.Err()
-}
-```
+Минимум нужны queue depth/capacity, queueing time, accepted/rejected/dropped по
+причине и priority, processing latency и service rate. Только occupancy без
+скорости роста backlog запаздывает.
 
 ---
 
 ## Возможные расширения
 
-### 1. Multi-tier buffer
-
-L1 (in-memory) → L2 (Redis) → L3 (Kafka). При overflow перетекает дальше.
-
-### 2. Persistent backpressure
-
-При overflow — события записываются на disk вместо drop. Resume после восстановления.
-
-### 3. Token bucket для producer
-
-Producer ограничивается через rate.Limiter — не позволять fill'ить buffer быстрее consumer'а.
-
-### 4. Reactive feedback
-
-Consumer публикует "current rate" через метрику → producer auto-throttle через token bucket с этим rate.
-
-### 5. Push-pull conversion
-
-Если producer не controllable (push) — конвертировать в pull (consumer dictates rate).
+- Per-tenant queues с fair scheduling и отдельными quotas.
+- Coalescing по business key: хранить только последнее состояние устройства,
+  вместо drop произвольного события.
+- Spillover в durable queue с отдельным replay rate limit.
+- Feedback controller, который меняет admission rate по latency/error budget, с
+  защитой от oscillation.
+- Circuit breaker перед заведомо failing downstream, чтобы не накапливать работу,
+  которую сейчас невозможно выполнить.
 
 ---
 
-## Что важно показать на собеседовании
+## Interview-ready answer
 
-1. **Знать все стратегии**: block, drop newest/oldest, sampling, reservoir
-2. **Trade-offs каждой** — когда что подходит
-3. **Priority + adaptive** — нетривиальный case
-4. **Estuary эффект** — backpressure propagate'ит upstream
-5. **Buffer sizing** — не too big (OOM), не too small (drops)
-6. **Metrics для observability** — accepted, dropped, buffered, pressure
-7. **Context propagation** — context cancellation
-8. **Reservoir sampling** для analytics — math correct
+**1. Что делать, если producer быстрее consumer?**
 
-## Связки
+- Диагностика — понять, burst это или постоянный overload.
+- Policy — выбрать block, reject/drop, sample, durable spill или scale.
+- Защита — ограничить память и наблюдать queueing delay/service rate.
 
-- [Pipeline](../concurrency/04-pipeline.md) — backpressure в stages
-- [Reliability: backpressure-and-shedding](../../../05-system-design/reliability-patterns/05-backpressure-and-shedding.md)
-- [Worker Pool](../concurrency/01-worker-pool.md) — bounded parallelism
-- [Pub/Sub In-Memory](../concurrency/05-pubsub.md) — slow subscriber handling
+**2. Когда использовать block, а когда drop?**
+
+- Block — контролируемый upstream и запрет потерь, но с context/deadline.
+- Drop — только когда потеря входит в контракт; newest/oldest выбирают по
+  ценности свежести.
+- Durable queue — если успешный приём обязан пережить crash.
+
+**3. Как корректно реализовать `drop oldest`?**
+
+- Атомарность — eviction и insertion входят в одну critical section.
+- Структура — ring buffer под mutex проще двух channel operations.
+- Метрики — нужны отдельные counters для accepted и evicted.
+
+**4. Как оценить buffer?**
+
+- Burst — `(arrival - service) × duration`.
+- Latency — сверить `depth/service rate` с допустимым queueing delay.
+- Память — bytes per item и runtime overhead измерить, а sustained overload устранять не
+  увеличением очереди.
+
+---
+
+## Связанные материалы
+
+- [Pipeline](../concurrency/04-pipeline.md)
+- [Reliability: backpressure and shedding](../../../05-system-design/reliability-patterns/05-backpressure-and-shedding.md)
+- [Worker Pool](../concurrency/01-worker-pool.md)
+- [Pub/Sub In-Memory](../concurrency/05-pubsub.md)

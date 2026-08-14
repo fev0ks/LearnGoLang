@@ -1,42 +1,84 @@
 # Задача 2: Batching Writer
 
-Накапливать события из потока и flush'ить **пачками** — либо при достижении size, либо по timeout, либо при graceful shutdown. Стандартный паттерн: DB bulk insert, S3 multipart upload, Datadog/Sentry batch send, Kafka producer batching.
+## Содержание
+
+- [Формулировка](#формулировка)
+- [Уточняющие вопросы](#уточняющие-вопросы)
+- [Контракт](#контракт-компонента)
+- [Реализация](#реализация)
+- [Как работает реализация](#как-работает-реализация)
+- [Тесты](#тесты)
+- [Надёжность](#надёжность-и-delivery-semantics)
+- [Типичные ошибки](#подводные-камни)
+- [Interview-ready answer](#interview-ready-answer)
+- [Связанные материалы](#связанные-материалы)
+
+Batching writer объединяет отдельные элементы в более крупные запросы. Он
+уменьшает число network round trips и транзакций, но добавляет задержку,
+состояние в памяти и отдельный failure path при shutdown.
+
+---
 
 ## Формулировка
 
-> "Дан непрерывный поток событий. Реализуй компонент, который накапливает их и flush'ит batch'ами: либо при достижении `batchSize`, либо каждые `flushInterval`. При shutdown — flush'ить pending без потерь."
+> Дан непрерывный поток событий. Реализуй компонент, который отправляет batch
+> при достижении `MaxBatchSize` или по `FlushInterval`. Ограничь память, задай
+> backpressure policy и дренируй принятые элементы при graceful shutdown.
 
-Use cases:
-- Bulk INSERT в БД (1 транзакция на 1000 events vs 1000 транзакций)
-- S3 multipart upload — отправить chunks по 5MB
-- Metrics batching — отправить statsd packet раз в секунду
-- Audit log shipping — пачка в Kafka producer
+Типичные применения:
+
+- bulk insert в БД;
+- отправка telemetry и audit events;
+- запись пачек в object storage;
+- объединение запросов к внешнему API, если API поддерживает bulk operation.
+
+S3 multipart upload — не просто «batching любых chunks»: у него есть собственные
+ограничения на part size, число parts и завершение upload. Их нужно учитывать
+отдельно от общей механики batcher.
 
 ---
 
 ## Уточняющие вопросы
 
-1. **Triggers — size, time, или оба?**
-   "Обычно оба: flush при `size >= N` ИЛИ `now - lastFlush > interval`."
-
-2. **При flush — sync или async?**
-   "Sync — flush блокирует Add. Async — отдельная goroutine. Зависит от throughput."
-
-3. **Что при shutdown — drain или drop?**
-   "Critical workloads — drain. Metrics — drop OK."
-
-4. **Backpressure — что если flush медленный, а Add быстрый?**
-   "Block, drop oldest, drop newest — три варианта. Зависит от criticality."
-
-5. **Failure handling при flush?**
-   "Retry, dead letter, drop? Persistent buffer?"
-
-6. **Concurrent Add'ы?**
-   "Обязательно safe — несколько producers."
+1. **Что важнее: throughput или максимальная latency?**
+   Маленький интервал снижает latency, но создаёт больше неполных batches.
+2. **Можно ли терять данные?**
+   Для metrics иногда допустим drop, для billing/audit чаще нужны block и
+   durable queue.
+3. **Что означает успешный `Add`?**
+   Только приём в RAM или уже durable acceptance? В примере ниже — только RAM.
+4. **Нужен ли порядок?**
+   Один flusher сохраняет порядок принятых элементов; несколько flushers могут
+   его нарушить.
+5. **Какие ошибки retryable?**
+   Timeout/temporary overload часто retryable, validation error — обычно нет.
+6. **Как ограничить shutdown?**
+   `Close(ctx)` должен позволять вызывающему коду прекратить ожидание, даже если
+   downstream завис.
 
 ---
 
-## Базовое решение
+## Контракт компонента
+
+Реализация ниже использует такие правила:
+
+- `Add(ctx, item)` безопасен для concurrent вызовов;
+- одновременно выполняется не более одного `flush`, поэтому порядок batches
+  сохраняется;
+- waiting buffer ограничен `MaxBufferSize`; ещё до `MaxBatchSize` элементов
+  может находиться в выполняющемся flush;
+- partial batch уходит по timer, полный — сразу;
+- `Close(ctx)` запрещает новые `Add`, дренирует принятые элементы и идемпотентен;
+- если context в `Close` завершился, drain продолжает выполняться в фоне, а
+  повторный `Close` может дождаться результата;
+- terminal flush error возвращается из `Close` и учитывается в метриках.
+
+Это lifecycle-гарантии, а не durability-гарантии: crash процесса уничтожит
+буфер в памяти.
+
+---
+
+## Реализация
 
 ```go
 package batcher
@@ -44,149 +86,19 @@ package batcher
 import (
     "context"
     "errors"
-    "sync"
-    "time"
-)
-
-type Item interface{}  // или generic с Go 1.18+
-
-type FlushFunc[T any] func(ctx context.Context, items []T) error
-
-type Batcher[T any] struct {
-    flush       FlushFunc[T]
-    maxSize     int
-    flushInterval time.Duration
-
-    mu      sync.Mutex
-    buffer  []T
-
-    done       chan struct{}
-    flushSignal chan struct{}
-    closed     bool
-}
-
-func New[T any](maxSize int, interval time.Duration, flush FlushFunc[T]) *Batcher[T] {
-    b := &Batcher[T]{
-        flush:         flush,
-        maxSize:       maxSize,
-        flushInterval: interval,
-        buffer:        make([]T, 0, maxSize),
-        done:          make(chan struct{}),
-        flushSignal:   make(chan struct{}, 1),
-    }
-    go b.loop()
-    return b
-}
-
-// Add добавляет item. Если buffer заполнен — флашит.
-func (b *Batcher[T]) Add(item T) error {
-    b.mu.Lock()
-    if b.closed {
-        b.mu.Unlock()
-        return errors.New("batcher closed")
-    }
-
-    b.buffer = append(b.buffer, item)
-    shouldFlush := len(b.buffer) >= b.maxSize
-    b.mu.Unlock()
-
-    if shouldFlush {
-        // Non-blocking signal — если flusher уже знает, не дублируем
-        select {
-        case b.flushSignal <- struct{}{}:
-        default:
-        }
-    }
-    return nil
-}
-
-func (b *Batcher[T]) loop() {
-    ticker := time.NewTicker(b.flushInterval)
-    defer ticker.Stop()
-
-    for {
-        select {
-        case <-b.done:
-            b.flushNow(context.Background())
-            return
-        case <-ticker.C:
-            b.flushNow(context.Background())
-        case <-b.flushSignal:
-            b.flushNow(context.Background())
-        }
-    }
-}
-
-func (b *Batcher[T]) flushNow(ctx context.Context) {
-    b.mu.Lock()
-    if len(b.buffer) == 0 {
-        b.mu.Unlock()
-        return
-    }
-    batch := b.buffer
-    b.buffer = make([]T, 0, b.maxSize)
-    b.mu.Unlock()
-
-    // Flush вне lock — Add'ы могут продолжаться
-    if err := b.flush(ctx, batch); err != nil {
-        // TODO: retry, dead letter
-    }
-}
-
-// Close gracefully shutdown — flush pending и выйти.
-func (b *Batcher[T]) Close() {
-    b.mu.Lock()
-    b.closed = true
-    b.mu.Unlock()
-
-    close(b.done)
-}
-```
-
-**Использование:**
-
-```go
-batcher := batcher.New(1000, time.Second, func(ctx context.Context, items []Event) error {
-    return db.BulkInsert(ctx, items)
-})
-
-for event := range stream {
-    batcher.Add(event)
-}
-
-batcher.Close()
-```
-
-**Ключевые моменты:**
-- **Triple trigger:** size limit, time interval, manual signal (через `flushSignal`)
-- **`flushSignal` buffered 1** — drop duplicate signals (no-op если flusher already знает)
-- **Flush вне lock** — Add'ы могут продолжаться пока flush'имся
-- **Close → done channel → final flush** — graceful shutdown
-
----
-
-## Production-grade: с retry, async, backpressure
-
-```go
-package batcher
-
-import (
-    "context"
-    "errors"
-    "log/slog"
+    "fmt"
     "sync"
     "sync/atomic"
     "time"
 )
 
-type Config struct {
-    MaxBatchSize  int
-    FlushInterval time.Duration
-    MaxBufferSize int           // hard cap, после — block или drop
-    OnFullPolicy  FullPolicy
-    FlushTimeout  time.Duration
-    MaxRetries    int
-}
+var (
+    ErrClosed      = errors.New("batcher: closed")
+    ErrBufferFull  = errors.New("batcher: buffer full")
+    ErrInvalidConfig = errors.New("batcher: invalid configuration")
+)
+
+type FlushFunc[T any] func(ctx context.Context, items []T) error
 
 type FullPolicy int
 
@@ -196,118 +108,167 @@ const (
     DropNewest
 )
 
-type Batcher[T any] struct {
-    cfg      Config
-    flush    FlushFunc[T]
-    onError  func(items []T, err error)  // dead letter callback
-    log      *slog.Logger
-
-    mu       sync.Mutex
-    cond     *sync.Cond
-    buffer   []T
-    flushing bool
-
-    flushCh  chan []T
-    done     chan struct{}
-    wg       sync.WaitGroup
-    closed   atomic.Bool
-
-    // Metrics
-    accepted  atomic.Int64
-    flushed   atomic.Int64
-    failed    atomic.Int64
-    dropped   atomic.Int64
+type Config struct {
+    MaxBatchSize  int
+    FlushInterval time.Duration
+    MaxBufferSize int
+    OnFullPolicy  FullPolicy
+    FlushTimeout  time.Duration
+    MaxRetries    int // retry после первой попытки
+    RetryBackoff  time.Duration
 }
 
-func New[T any](cfg Config, flush FlushFunc[T], onError func([]T, error), log *slog.Logger) *Batcher[T] {
-    if log == nil {
-        log = slog.Default()
+type Batcher[T any] struct {
+    cfg     Config
+    flush   FlushFunc[T]
+    onError func(items []T, err error) // notification, не durable DLQ
+
+    mu             sync.Mutex
+    cond           *sync.Cond
+    buffer         []T
+    flushing       bool
+    inFlight       int
+    flushRequested bool
+    closed         bool
+
+    flushCh    chan []T
+    timerStop  chan struct{}
+    timerDone  chan struct{}
+    flusherDone chan struct{}
+
+    closeOnce sync.Once
+    closeDone chan struct{}
+    errMu     sync.Mutex
+    closeErr  error
+
+    accepted atomic.Int64
+    flushed  atomic.Int64
+    failed   atomic.Int64
+    dropped  atomic.Int64
+}
+
+func New[T any](
+    cfg Config,
+    flush FlushFunc[T],
+    onError func([]T, error),
+) (*Batcher[T], error) {
+    validPolicy := cfg.OnFullPolicy >= BlockOnFull && cfg.OnFullPolicy <= DropNewest
+    if flush == nil || cfg.MaxBatchSize <= 0 ||
+        cfg.MaxBufferSize < cfg.MaxBatchSize ||
+        cfg.FlushInterval <= 0 || cfg.FlushTimeout <= 0 ||
+        cfg.MaxRetries < 0 || (cfg.MaxRetries > 0 && cfg.RetryBackoff <= 0) ||
+        !validPolicy {
+        return nil, ErrInvalidConfig
     }
+
     b := &Batcher[T]{
-        cfg:     cfg,
-        flush:   flush,
-        onError: onError,
-        log:     log,
-        buffer:  make([]T, 0, cfg.MaxBatchSize),
-        flushCh: make(chan []T, 4),  // small buffer для async pipeline
-        done:    make(chan struct{}),
+        cfg:         cfg,
+        flush:       flush,
+        onError:     onError,
+        buffer:      make([]T, 0, cfg.MaxBatchSize),
+        flushCh:     make(chan []T, 1),
+        timerStop:   make(chan struct{}),
+        timerDone:   make(chan struct{}),
+        flusherDone: make(chan struct{}),
+        closeDone:   make(chan struct{}),
     }
     b.cond = sync.NewCond(&b.mu)
 
-    b.wg.Add(2)
     go b.timerLoop()
     go b.flusherLoop()
-    return b
+    return b, nil
 }
 
-// Add вставляет item. Может block, drop, или return error в зависимости от config.
-func (b *Batcher[T]) Add(item T) error {
-    if b.closed.Load() {
-        return errors.New("batcher closed")
+func (b *Batcher[T]) Add(ctx context.Context, item T) error {
+    if ctx == nil {
+        return ErrInvalidConfig
     }
 
     b.mu.Lock()
     defer b.mu.Unlock()
 
-    // Проверить hard cap
-    if len(b.buffer) >= b.cfg.MaxBufferSize {
+    for len(b.buffer) >= b.cfg.MaxBufferSize {
+        if b.closed {
+            return ErrClosed
+        }
+
         switch b.cfg.OnFullPolicy {
-        case BlockOnFull:
-            for len(b.buffer) >= b.cfg.MaxBufferSize && !b.closed.Load() {
-                b.cond.Wait()
-            }
-        case DropOldest:
-            // Удалить первый
-            b.buffer = b.buffer[1:]
-            b.dropped.Add(1)
         case DropNewest:
             b.dropped.Add(1)
-            return errors.New("buffer full")
+            return ErrBufferFull
+
+        case DropOldest:
+            var zero T
+            copy(b.buffer, b.buffer[1:])
+            b.buffer[len(b.buffer)-1] = zero
+            b.buffer = b.buffer[:len(b.buffer)-1]
+            b.dropped.Add(1)
+
+        case BlockOnFull:
+            if err := ctx.Err(); err != nil {
+                return err
+            }
+            stopWakeup := context.AfterFunc(ctx, func() {
+                b.mu.Lock()
+                b.cond.Broadcast()
+                b.mu.Unlock()
+            })
+            b.cond.Wait()
+            stopWakeup()
         }
+    }
+
+    if b.closed {
+        return ErrClosed
+    }
+    if err := ctx.Err(); err != nil {
+        return err
     }
 
     b.buffer = append(b.buffer, item)
     b.accepted.Add(1)
-
-    // Sync trigger когда полный batch готов
-    if len(b.buffer) >= b.cfg.MaxBatchSize && !b.flushing {
-        b.kickFlush()
+    if len(b.buffer) >= b.cfg.MaxBatchSize {
+        b.flushRequested = true
+        b.kickLocked()
     }
     return nil
 }
 
-func (b *Batcher[T]) kickFlush() {
-    // Called under lock
-    if len(b.buffer) == 0 {
+// kickLocked передаёт не более MaxBatchSize элементов единственному flusher.
+// Метод вызывается только под b.mu.
+func (b *Batcher[T]) kickLocked() {
+    if b.flushing || len(b.buffer) == 0 {
         return
     }
-    batch := b.buffer
-    b.buffer = make([]T, 0, b.cfg.MaxBatchSize)
-    b.flushing = true
 
-    select {
-    case b.flushCh <- batch:
-    default:
-        // Channel full → revert (rare with small buffer)
-        b.buffer = append(batch, b.buffer...)
-        b.flushing = false
-    }
-    b.cond.Broadcast()  // разбудить блокированных Add'ы
+    n := min(len(b.buffer), b.cfg.MaxBatchSize)
+    batch := append([]T(nil), b.buffer[:n]...)
+
+    copy(b.buffer, b.buffer[n:])
+    clear(b.buffer[len(b.buffer)-n:])
+    b.buffer = b.buffer[:len(b.buffer)-n]
+
+    b.flushing = true
+    b.inFlight = len(batch)
+    b.flushRequested = false
+    b.flushCh <- batch // capacity=1 и invariant !flushing делают send неблокирующим
+    b.cond.Broadcast()
 }
 
 func (b *Batcher[T]) timerLoop() {
-    defer b.wg.Done()
     ticker := time.NewTicker(b.cfg.FlushInterval)
     defer ticker.Stop()
+    defer close(b.timerDone)
 
     for {
         select {
-        case <-b.done:
+        case <-b.timerStop:
             return
         case <-ticker.C:
             b.mu.Lock()
-            if !b.flushing {
-                b.kickFlush()
+            if !b.closed && len(b.buffer) > 0 {
+                b.flushRequested = true
+                b.kickLocked()
             }
             b.mu.Unlock()
         }
@@ -315,77 +276,120 @@ func (b *Batcher[T]) timerLoop() {
 }
 
 func (b *Batcher[T]) flusherLoop() {
-    defer b.wg.Done()
+    defer close(b.flusherDone)
 
     for batch := range b.flushCh {
-        b.flushBatchWithRetry(batch)
+        if err := b.flushWithRetry(batch); err != nil {
+            b.recordTerminalError(err)
+            b.notifyFailure(batch, err)
+        }
 
         b.mu.Lock()
         b.flushing = false
-        // Если за время flush'а накопилось ещё — повторить
-        if len(b.buffer) >= b.cfg.MaxBatchSize {
-            b.kickFlush()
+        b.inFlight = 0
+        if len(b.buffer) > 0 &&
+            (b.closed || b.flushRequested || len(b.buffer) >= b.cfg.MaxBatchSize) {
+            b.kickLocked()
         }
+        b.cond.Broadcast()
         b.mu.Unlock()
     }
 }
 
-func (b *Batcher[T]) flushBatchWithRetry(batch []T) {
-    ctx, cancel := context.WithTimeout(context.Background(), b.cfg.FlushTimeout)
-    defer cancel()
+func (b *Batcher[T]) flushWithRetry(batch []T) error {
+    var lastErr error
+    for attempt := 0; attempt <= b.cfg.MaxRetries; attempt++ {
+        ctx, cancel := context.WithTimeout(context.Background(), b.cfg.FlushTimeout)
+        lastErr = callFlush(ctx, b.flush, batch)
+        cancel()
 
-    var err error
-    for attempt := 1; attempt <= b.cfg.MaxRetries+1; attempt++ {
-        err = b.flush(ctx, batch)
-        if err == nil {
+        if lastErr == nil {
             b.flushed.Add(int64(len(batch)))
-            return
+            return nil
         }
-        b.log.Warn("flush failed",
-            "attempt", attempt,
-            "batch_size", len(batch),
-            "err", err,
-        )
-        if attempt < b.cfg.MaxRetries+1 {
-            backoff := time.Duration(attempt*attempt) * 100 * time.Millisecond
-            time.Sleep(backoff)
+        if attempt < b.cfg.MaxRetries {
+            // В production обычно добавляют jitter и классификацию retryable errors.
+            time.Sleep(b.cfg.RetryBackoff * time.Duration(attempt+1))
         }
     }
 
-    // Все retry истощены — dead letter
     b.failed.Add(int64(len(batch)))
-    if b.onError != nil {
-        b.onError(batch, err)
-    } else {
-        b.log.Error("batch dropped after all retries",
-            "batch_size", len(batch),
-            "err", err,
-        )
+    return fmt.Errorf("flush %d items after retries: %w", len(batch), lastErr)
+}
+
+func callFlush[T any](
+    ctx context.Context,
+    flush FlushFunc[T],
+    batch []T,
+) (err error) {
+    defer func() {
+        if recovered := recover(); recovered != nil {
+            err = fmt.Errorf("flush panic: %v", recovered)
+        }
+    }()
+    return flush(ctx, batch)
+}
+
+func (b *Batcher[T]) notifyFailure(batch []T, flushErr error) {
+    if b.onError == nil {
+        return
+    }
+    // Callback не должен завершить служебную goroutine своим panic.
+    defer func() {
+        if recovered := recover(); recovered != nil {
+            b.recordTerminalError(fmt.Errorf("onError panic: %v", recovered))
+        }
+    }()
+    b.onError(batch, flushErr)
+}
+
+func (b *Batcher[T]) recordTerminalError(err error) {
+    b.errMu.Lock()
+    b.closeErr = errors.Join(b.closeErr, err)
+    b.errMu.Unlock()
+}
+
+func (b *Batcher[T]) Close(ctx context.Context) error {
+    if ctx == nil {
+        return ErrInvalidConfig
+    }
+    b.closeOnce.Do(func() { go b.shutdown() })
+
+    select {
+    case <-b.closeDone:
+        b.errMu.Lock()
+        defer b.errMu.Unlock()
+        return b.closeErr
+    case <-ctx.Done():
+        return ctx.Err()
     }
 }
 
-// Close дренирует buffer и закрывает batcher.
-func (b *Batcher[T]) Close() error {
-    if !b.closed.CompareAndSwap(false, true) {
-        return errors.New("already closed")
-    }
+func (b *Batcher[T]) shutdown() {
+    b.mu.Lock()
+    b.closed = true
+    b.cond.Broadcast()
+    b.mu.Unlock()
 
-    close(b.done)
+    close(b.timerStop)
+    <-b.timerDone
 
-    // Final flush из buffer
     b.mu.Lock()
     if len(b.buffer) > 0 {
-        batch := b.buffer
-        b.buffer = nil
-        b.mu.Unlock()
-        b.flushCh <- batch
-    } else {
-        b.mu.Unlock()
+        b.flushRequested = true
+        b.kickLocked()
     }
+    for b.flushing || len(b.buffer) > 0 {
+        if !b.flushing {
+            b.kickLocked()
+        }
+        b.cond.Wait()
+    }
+    b.mu.Unlock()
 
     close(b.flushCh)
-    b.wg.Wait()
-    return nil
+    <-b.flusherDone
+    close(b.closeDone)
 }
 
 type Stats struct {
@@ -393,349 +397,298 @@ type Stats struct {
     Flushed  int64
     Failed   int64
     Dropped  int64
+    Buffered int
+    InFlight int
 }
 
 func (b *Batcher[T]) Stats() Stats {
+    b.mu.Lock()
+    defer b.mu.Unlock()
     return Stats{
         Accepted: b.accepted.Load(),
         Flushed:  b.flushed.Load(),
         Failed:   b.failed.Load(),
         Dropped:  b.dropped.Load(),
+        Buffered: len(b.buffer),
+        InFlight: b.inFlight,
     }
 }
 ```
 
-**Что улучшено:**
+---
 
-### A. Separate flusher goroutine
+## Как работает реализация
 
-Add → buffer (быстро). Flusher → реальный flush с retry. Add не блокирует пока flush идёт.
+### Один batch в полёте
 
-### B. Buffer hard cap + policy
+`flushing` означает, что batch уже лежит в `flushCh` или выполняется. Следующий
+batch не запускается параллельно. Это упрощает ordering и не позволяет медленному
+downstream породить неограниченное число goroutines.
 
-```go
-MaxBufferSize: 10000  // если 10x batch size накопилось — backpressure
-```
+### Size и time triggers
 
-Когда producer быстрее flusher'а — три варианта:
-- **BlockOnFull** — Add блокирует. Хороший backpressure, но может deadlock'нуть caller.
-- **DropOldest** — losing oldest events. Для metrics OK.
-- **DropNewest** — return error. Caller сам решает что делать.
+Полный batch отправляется из `Add`. Timer отправляет partial batch. Если timer
+срабатывает во время долгого flush, `flushRequested` запоминает trigger и
+partial batch уходит сразу после текущего, а не ждёт ещё один интервал.
 
-### C. Retry with backoff
+### Backpressure
 
-Failed flush retry'ится. После max attempts — dead letter callback.
+- `BlockOnFull` ждёт свободное место и реагирует на cancellation context;
+- `DropNewest` отклоняет новый элемент;
+- `DropOldest` принимает новый элемент ценой самого старого waiting item.
 
-### D. Per-flush timeout
+Удаление первого элемента из slice стоит `O(n)`. Если `DropOldest` — основной
+режим под высокой нагрузкой, waiting buffer лучше реализовать кольцом.
 
-```go
-ctx, cancel := context.WithTimeout(..., b.cfg.FlushTimeout)
-```
+### Shutdown
 
-Slow downstream не залипает flusher навсегда.
-
-### E. Re-flush после long flush
-
-Пока flush идёт, накапливаются новые items. После flush — проверить и снова flush если набралось.
-
-### F. Метрики
-
-Accepted, flushed, failed, dropped — для observability.
+Сначала `closed=true` под тем же mutex, который использует `Add`. Затем
+останавливается timer, остаток делится на batches не больше `MaxBatchSize`, и
+канал закрывается только после drain. Поэтому concurrent `Add`/`Close` не может
+привести к `send on closed channel`.
 
 ---
 
 ## Тесты
 
+Вместо `Sleep` для size/retry/shutdown тесты ждут явный сигнал. Только timer-тест
+зависит от реального времени и имеет большой запас по deadline.
+
 ```go
-func TestBatcher_FlushOnSize(t *testing.T) {
-    var flushed [][]int
-    var mu sync.Mutex
-
-    flush := func(ctx context.Context, items []int) error {
-        mu.Lock()
-        flushed = append(flushed, append([]int{}, items...))
-        mu.Unlock()
-        return nil
-    }
-
-    b := New(Config{
+func testConfig() Config {
+    return Config{
         MaxBatchSize:  3,
-        FlushInterval: time.Second,
-        MaxBufferSize: 100,
+        FlushInterval: time.Hour,
+        MaxBufferSize: 9,
+        OnFullPolicy:  BlockOnFull,
         FlushTimeout:  time.Second,
         MaxRetries:    0,
-    }, flush, nil, nil)
-    defer b.Close()
+    }
+}
 
-    for i := 1; i <= 6; i++ {
-        b.Add(i)
+func TestBatcher_FlushOnSize(t *testing.T) {
+    got := make(chan []int, 1)
+    b, err := New(testConfig(), func(_ context.Context, items []int) error {
+        got <- append([]int(nil), items...)
+        return nil
+    }, nil)
+    if err != nil {
+        t.Fatal(err)
     }
 
-    time.Sleep(100 * time.Millisecond)
-
-    mu.Lock()
-    defer mu.Unlock()
-    if len(flushed) != 2 {
-        t.Errorf("got %d batches, want 2", len(flushed))
+    for _, item := range []int{1, 2, 3} {
+        if err := b.Add(context.Background(), item); err != nil {
+            t.Fatal(err)
+        }
     }
-    if len(flushed[0]) != 3 || len(flushed[1]) != 3 {
-        t.Errorf("batches sizes wrong: %v", flushed)
+
+    select {
+    case batch := <-got:
+        if !slices.Equal(batch, []int{1, 2, 3}) {
+            t.Fatalf("batch = %v", batch)
+        }
+    case <-time.After(time.Second):
+        t.Fatal("size flush did not happen")
+    }
+
+    if err := b.Close(context.Background()); err != nil {
+        t.Fatal(err)
     }
 }
 
 func TestBatcher_FlushOnTimer(t *testing.T) {
-    var flushed atomic.Int32
-    flush := func(ctx context.Context, items []int) error {
-        flushed.Add(int32(len(items)))
+    cfg := testConfig()
+    cfg.FlushInterval = 20 * time.Millisecond
+    got := make(chan []int, 1)
+
+    b, err := New(cfg, func(_ context.Context, items []int) error {
+        got <- append([]int(nil), items...)
         return nil
+    }, nil)
+    if err != nil {
+        t.Fatal(err)
+    }
+    if err := b.Add(context.Background(), 1); err != nil {
+        t.Fatal(err)
     }
 
-    b := New(Config{
-        MaxBatchSize:  100,
-        FlushInterval: 50 * time.Millisecond,
-        MaxBufferSize: 1000,
-        FlushTimeout:  time.Second,
-    }, flush, nil, nil)
-    defer b.Close()
-
-    for i := 0; i < 5; i++ {
-        b.Add(i)
+    select {
+    case batch := <-got:
+        if !slices.Equal(batch, []int{1}) {
+            t.Fatalf("batch = %v", batch)
+        }
+    case <-time.After(time.Second):
+        t.Fatal("timer flush did not happen")
     }
-
-    time.Sleep(100 * time.Millisecond)
-
-    if flushed.Load() != 5 {
-        t.Errorf("flushed %d, want 5 (timer should flush partial)", flushed.Load())
+    if err := b.Close(context.Background()); err != nil {
+        t.Fatal(err)
     }
 }
 
-func TestBatcher_FlushOnClose(t *testing.T) {
-    var flushed atomic.Int32
-    flush := func(ctx context.Context, items []int) error {
-        flushed.Add(int32(len(items)))
+func TestBatcher_CloseDrainsPartialBatch(t *testing.T) {
+    var flushed atomic.Int64
+    b, err := New(testConfig(), func(_ context.Context, items []int) error {
+        flushed.Add(int64(len(items)))
         return nil
+    }, nil)
+    if err != nil {
+        t.Fatal(err)
     }
 
-    b := New(Config{
-        MaxBatchSize:  100,
-        FlushInterval: 10 * time.Second,  // long interval
-        MaxBufferSize: 1000,
-        FlushTimeout:  time.Second,
-    }, flush, nil, nil)
-
-    for i := 0; i < 5; i++ {
-        b.Add(i)
+    for _, item := range []int{1, 2} {
+        if err := b.Add(context.Background(), item); err != nil {
+            t.Fatal(err)
+        }
     }
-
-    b.Close()
-
-    if flushed.Load() != 5 {
-        t.Errorf("after Close flushed %d, want 5", flushed.Load())
+    if err := b.Close(context.Background()); err != nil {
+        t.Fatal(err)
+    }
+    if got := flushed.Load(); got != 2 {
+        t.Fatalf("flushed = %d, want 2", got)
+    }
+    if err := b.Add(context.Background(), 3); !errors.Is(err, ErrClosed) {
+        t.Fatalf("Add after Close error = %v", err)
     }
 }
 
-func TestBatcher_Retry(t *testing.T) {
-    var attempts atomic.Int32
-    flush := func(ctx context.Context, items []int) error {
-        n := attempts.Add(1)
-        if n < 3 {
-            return errors.New("transient")
+func TestBatcher_RetryAndCloseError(t *testing.T) {
+    cfg := testConfig()
+    cfg.MaxRetries = 2
+    cfg.RetryBackoff = time.Millisecond
+
+    var attempts atomic.Int64
+    b, err := New(cfg, func(_ context.Context, _ []int) error {
+        if attempts.Add(1) < 3 {
+            return errors.New("temporary")
         }
         return nil
+    }, nil)
+    if err != nil {
+        t.Fatal(err)
     }
-
-    b := New(Config{
-        MaxBatchSize:  10,
-        FlushInterval: time.Hour,
-        MaxBufferSize: 100,
-        FlushTimeout:  time.Second,
-        MaxRetries:    5,
-    }, flush, nil, nil)
-    defer b.Close()
-
-    for i := 0; i < 10; i++ {
-        b.Add(i)
+    for _, item := range []int{1, 2, 3} {
+        if err := b.Add(context.Background(), item); err != nil {
+            t.Fatal(err)
+        }
     }
-
-    time.Sleep(500 * time.Millisecond)
-
-    stats := b.Stats()
-    if stats.Flushed != 10 {
-        t.Errorf("flushed %d, want 10 (eventual success)", stats.Flushed)
+    if err := b.Close(context.Background()); err != nil {
+        t.Fatal(err)
     }
-}
-
-func TestBatcher_DeadLetterAfterRetries(t *testing.T) {
-    var deadLettered atomic.Int32
-
-    flush := func(ctx context.Context, items []int) error {
-        return errors.New("permanent")
-    }
-    onError := func(items []int, err error) {
-        deadLettered.Add(int32(len(items)))
-    }
-
-    b := New(Config{
-        MaxBatchSize:  3,
-        FlushInterval: time.Hour,
-        MaxBufferSize: 100,
-        FlushTimeout:  time.Second,
-        MaxRetries:    2,
-    }, flush, onError, nil)
-    defer b.Close()
-
-    for i := 0; i < 3; i++ {
-        b.Add(i)
-    }
-
-    time.Sleep(500 * time.Millisecond)
-
-    if deadLettered.Load() != 3 {
-        t.Errorf("dead lettered %d, want 3", deadLettered.Load())
+    if attempts.Load() != 3 || b.Stats().Flushed != 3 {
+        t.Fatalf("attempts=%d stats=%+v", attempts.Load(), b.Stats())
     }
 }
 ```
+
+В реальном пакете дополнительно нужен stress-test concurrent `Add`/`Close` под
+`go test -race`, а также тесты всех трёх full policies и terminal error.
+
+---
+
+## Надёжность и delivery semantics
+
+Успешный `Add` означает только «элемент принят в память». Возможны такие исходы:
+
+| Событие | Результат |
+|---|---|
+| Graceful `Close` и успешный downstream | pending элементы отправлены |
+| Terminal flush error | `Close` возвращает ошибку, `onError` получает batch |
+| `Close` timeout | caller перестаёт ждать, drain продолжается |
+| Process crash / OOM / `SIGKILL` | элементы в RAM теряются |
+| Неидемпотентный retry | downstream может получить дубль |
+
+Если требуется at-least-once после crash, перед подтверждением producer нужен
+durable log/queue. Если retry может повторить уже применённый запрос, downstream
+должен принимать idempotency key либо выполнять idempotent upsert. Callback
+`onError` в примере — observability hook, а не durable dead-letter queue.
 
 ---
 
 ## Подводные камни
 
-### 1. Flush блокирует Add (нет separate flusher)
+### 1. Flush под mutex
 
-```go
-func (b *Batcher) Add(x int) {
-    b.mu.Lock()
-    b.buffer = append(b.buffer, x)
-    if len(b.buffer) >= max {
-        b.flushNow()  // ← блокирует под lock'ом → Add'ы ждут
-    }
-    b.mu.Unlock()
-}
+Network/DB call под lock блокирует все `Add`. Под lock нужно только отделить
+batch, а I/O выполнять снаружи.
+
+### 2. Неограниченный async flush
+
+`go flush(batch)` на каждый trigger скрывает backpressure, нарушает ordering и
+может создать тысячи goroutines. Число параллельных flushers должно быть явно
+ограничено.
+
+### 3. Закрытие канала одновременно с `Add`
+
+Atomic `closed` check сам по себе не решает race: `Add` может пройти проверку, а
+`Close` успеет закрыть канал перед send. Переход в closed и приём элемента должны
+сериализоваться одним протоколом — здесь это общий mutex.
+
+### 4. Final flush без ожидания
+
+Если `Close` только посылает сигнал и возвращает, caller может завершить процесс
+раньше I/O. Нужен completion signal и результат drain.
+
+### 5. Один timeout на все retry
+
+Context, истёкший на первой попытке, делает все последующие попытки бесполезными.
+В примере каждая попытка получает отдельный timeout. Если нужен общий deadline,
+это должен быть отдельный явно описанный budget.
+
+### 6. Retry любой ошибки
+
+Retry validation/permission error увеличивает нагрузку без шанса на успех.
+Production-реализация классифицирует ошибки и добавляет exponential backoff с
+jitter.
+
+### 7. Удержание backing array
+
+После удаления элементов ссылки нужно обнулить, иначе GC может удерживать
+крупные объекты. Код использует `clear` перед уменьшением slice.
+
+### 8. Неверная оценка capacity
+
+Размер waiting buffer выбирают не как «10 batches на глаз». Приближённо:
+
+```text
+backlog ≈ max(0, arrival_rate - flush_rate) × tolerated_degradation_time
 ```
 
-Под нагрузкой Add'ы выстраиваются в очередь. Separate goroutine + buffered channel.
-
-### 2. Flush медленный → buffer растёт неограниченно
-
-Без `MaxBufferSize` — OOM при slow downstream.
-
-### 3. Close не дренирует
-
-```go
-func (b *Batcher) Close() {
-    close(b.done)  // ← но pending items в buffer!
-}
-```
-
-Final flush обязателен. Или return error если can't flush.
-
-### 4. Concurrent Close + Add
-
-```go
-go b.Close()
-b.Add(x)  // ← после Close → send on closed → panic
-```
-
-`atomic.Bool` для closed flag + check в Add.
-
-### 5. Timer Flush с пустым buffer
-
-```go
-case <-ticker.C:
-    flushNow()  // ← если buffer пуст, делаем no-op flush
-```
-
-В целом OK (idempotent), но если flush делает network call — лишняя нагрузка. Skip if empty.
-
-### 6. Lost items при panic в flush
-
-```go
-batch := b.buffer
-b.buffer = nil
-flush(batch)  // ← panic → items потеряны (уже не в buffer)
-```
-
-Recover в flusher или транзакционная семантика (revert при panic).
-
-### 7. Concurrent flush race
-
-```go
-go flush(batch1)
-// add'ы продолжают, buffer наполняется
-go flush(batch2)  // ← concurrent flush!
-```
-
-Если flush — DB write — concurrent OK. Если есть ordering или resource limits — sequential.
-
-### 8. Backpressure через block — deadlock risk
-
-```go
-// Caller блокирован на Add
-b.Add(x)  // ← waits forever если flusher upstream'е блокирован
-```
-
-Используй Add с context.
-
-### 9. Слишком маленький batch size
-
-```go
-MaxBatchSize: 10  // ← 10-item batch'и
-```
-
-Каждый batch — overhead (transaction, network round-trip). 100-1000 обычно лучше для DB inserts.
-
-### 10. Слишком большой batch size
-
-```go
-MaxBatchSize: 100000
-```
-
-Big batch = long transaction = lock holds = блок других writes. Также memory spike. Balance.
+Если средний arrival rate стабильно выше flush rate, конечный buffer только
+откладывает drop/block — систему нужно масштабировать или снижать входной поток.
 
 ---
 
-## Возможные расширения
+## Interview-ready answer
 
-### 1. Multi-destination batching
+**1. Какие triggers нужны batcher?**
 
-Один batcher → router → разные destinations (per-tenant, per-region).
+- Size — обеспечивает throughput при высокой нагрузке.
+- Time — ограничивает latency при редком потоке.
+- Shutdown — дренирует partial batch при штатном завершении.
 
-### 2. Adaptive batch size
+**2. Как не получить race между `Add` и `Close`?**
 
-Подстраивать размер под latency. Если flush медленный → меньше batches.
+- Сериализация — одним lock защищать closed state и приём в waiting buffer.
+- Timer — остановить до закрытия внутреннего канала.
+- Завершение — закрывать канал только после drain и ждать flusher completion.
 
-### 3. Persistent buffer
+**3. Как выбрать full policy?**
 
-Если падает pod — items в buffer теряются. Решение: persistent queue (BadgerDB, kafka, файл).
+- Block — когда потери запрещены и upstream умеет пережить backpressure.
+- Drop newest/oldest — только когда потеря явно входит в контракт.
+- Durable queue — когда принятые данные должны переживать process crash.
 
-### 4. Priority batching
+**4. Что проверить у retry?**
 
-Critical events flush'ятся сразу, обычные batch'ятся.
-
-### 5. Compression в batch
-
-Сжимать целый batch перед send (gzip, snappy). Bigger throughput.
-
-### 6. Async ack to producer
-
-Producer ждёт подтверждения что item обработан (batch flushed). Per-item Promise.
+- Идемпотентность — проверить downstream и классификацию ошибок.
+- Budget — задать timeout каждой попытки, общий предел, backoff и jitter.
+- Observability — считать attempts/failures/dropped и проверять dead-letter path.
 
 ---
 
-## Что важно показать на собеседовании
+## Связанные материалы
 
-1. **Triple trigger:** size + time + manual signal
-2. **Separate flusher goroutine** — Add не блокирует на flush
-3. **Buffer hard cap + policy** (block/drop)
-4. **Retry with backoff + dead letter**
-5. **Per-flush timeout** через ctx
-6. **Final flush в Close** — graceful drain
-7. **Concurrent Add safe** — atomic flag, condition variable для backpressure
-8. **Metrics** — accepted/flushed/failed/dropped
-
-## Связки
-
-- [Background Workers](../../../04-architecture-and-patterns/patterns/04-background-workers.md) — basis pattern
-- [Retry with Backoff](../system-primitives/02-retry-with-backoff.md) — flush retry
-- [Outbox pattern](../../../04-architecture-and-patterns/patterns/09-saga-and-outbox.md) — batching outbox events
-- [Kafka producer batching](../../../07-message-brokers-and-streaming/01-kafka.md)
+- [Background Workers](../../../04-architecture-and-patterns/patterns/04-background-workers.md)
+- [Retry with Backoff](../system-primitives/02-retry-with-backoff.md)
+- [Outbox pattern](../../../04-architecture-and-patterns/patterns/09-saga-and-outbox.md)
+- [Kafka](../../../07-message-brokers-and-streaming/01-kafka.md)
