@@ -1,6 +1,24 @@
 # Задача 5: Sliding Window Counter
 
-Структура для подсчёта событий за **скользящее окно** времени: "сколько запросов за последние 60 секунд", "сколько ошибок за час". Используется для rate limiting, real-time аналитики, anomaly detection.
+## Содержание
+
+- [Формулировка](#формулировка)
+- [Уточняющие вопросы](#уточняющие-вопросы)
+- [Точный журнал событий](#решение-1-точное--log-of-timestamps)
+- [Временные бакеты](#решение-2-bucket-based-approximate-fast)
+- [Взвешенное приближение](#решение-3-sliding-window-counter-weighted-approximation)
+- [Счётчики по ключам](#решение-4-per-key-sliding-window-rate-limit)
+- [Тесты](#тесты)
+- [Типичные ошибки](#подводные-камни)
+- [Расширения](#возможные-расширения)
+- [Interview-ready answer](#interview-ready-answer)
+- [Связанные материалы](#связки)
+
+Sliding window counter отвечает на вопрос «сколько событий произошло за
+последний интервал времени». Точный вариант хранит моменты событий, а
+приближённый объединяет их во временные бакеты и ограничивает память.
+
+---
 
 ## Формулировка
 
@@ -43,51 +61,70 @@
 package slidingwindow
 
 import (
+    "errors"
     "sync"
     "time"
 )
 
+var ErrInvalidWindow = errors.New("slidingwindow: window must be positive")
+
 // ExactCounter хранит точные timestamp'ы всех событий.
 // Memory: O(events in window). Подходит для малых rates.
 type ExactCounter struct {
-    mu       sync.Mutex
-    window   time.Duration
-    events   []time.Time
+    mu     sync.Mutex
+    window time.Duration
+    events []time.Time
+    now    func() time.Time
 }
 
-func NewExactCounter(window time.Duration) *ExactCounter {
-    return &ExactCounter{window: window}
+func NewExactCounter(window time.Duration) (*ExactCounter, error) {
+    return newExactCounter(window, time.Now)
+}
+
+func newExactCounter(window time.Duration, now func() time.Time) (*ExactCounter, error) {
+    if window <= 0 || now == nil {
+        return nil, ErrInvalidWindow
+    }
+    return &ExactCounter{window: window, now: now}, nil
 }
 
 func (c *ExactCounter) Inc() {
     c.mu.Lock()
     defer c.mu.Unlock()
-    c.events = append(c.events, time.Now())
-    c.evictExpired()
+    now := c.now()
+    c.events = append(c.events, now)
+    c.evictExpired(now)
 }
 
 func (c *ExactCounter) Count() int {
     c.mu.Lock()
     defer c.mu.Unlock()
-    c.evictExpired()
+    c.evictExpired(c.now())
     return len(c.events)
 }
 
-func (c *ExactCounter) evictExpired() {
-    cutoff := time.Now().Add(-c.window)
-    // Найти первый non-expired (binary search для скорости)
+func (c *ExactCounter) evictExpired(now time.Time) {
+    cutoff := now.Add(-c.window)
     i := 0
-    for i < len(c.events) && c.events[i].Before(cutoff) {
+    for i < len(c.events) && !c.events[i].After(cutoff) {
         i++
     }
     c.events = c.events[i:]
+
+    if cap(c.events) > 4*len(c.events) {
+        compact := append([]time.Time(nil), c.events...)
+        c.events = compact
+    }
 }
 ```
 
 **Использование:**
 
 ```go
-c := NewExactCounter(time.Minute)
+c, err := NewExactCounter(time.Minute)
+if err != nil {
+    log.Fatal(err)
+}
 
 for i := 0; i < 100; i++ {
     c.Inc()
@@ -98,7 +135,9 @@ fmt.Println(c.Count())  // 100 (если меньше минуты прошло)
 
 **Trade-offs:**
 - ✅ Точный — никакой approximation
-- ❌ Memory O(events in window) — для 1M req/min = 60M timestamps × 8 байт = 500 MB
+- ❌ Память `O(events in window)` — при одном миллионе событий в минутном окне
+  хранится один миллион `time.Time`; размер нужно измерять для конкретного типа и
+  учитывать capacity backing array
 - ❌ append → может cause copy → slow для high throughput
 
 Подходит для low-rate scenarios (logs, audit events).
@@ -122,73 +161,69 @@ Now 50s. Buckets b0-b4 = "older 50s". При Inc — добавляем в b5.
 package slidingwindow
 
 import (
+    "errors"
     "sync"
-    "sync/atomic"
     "time"
 )
 
+var ErrInvalidBucketConfig = errors.New("slidingwindow: window must be divisible by positive bucket size")
+
 type bucket struct {
-    timestamp int64        // unix timestamp начала bucket'а
-    count     atomic.Int64
+    timestamp int64
+    count     int64
 }
 
 // BucketCounter — sliding window через ring buffer bucket'ов.
 type BucketCounter struct {
-    mu          sync.RWMutex
+    mu          sync.Mutex
     window      time.Duration
     bucketSize  time.Duration
     bucketCount int
-    buckets     []*bucket
+    buckets     []bucket
 }
 
-func NewBucketCounter(window, bucketSize time.Duration) *BucketCounter {
-    n := int(window / bucketSize)
-    buckets := make([]*bucket, n)
-    for i := range buckets {
-        buckets[i] = &bucket{}
+func NewBucketCounter(window, bucketSize time.Duration) (*BucketCounter, error) {
+    if window <= 0 || bucketSize <= 0 || window%bucketSize != 0 {
+        return nil, ErrInvalidBucketConfig
     }
+    n := int(window / bucketSize)
     return &BucketCounter{
         window:      window,
         bucketSize:  bucketSize,
         bucketCount: n,
-        buckets:     buckets,
-    }
+        buckets:     make([]bucket, n),
+    }, nil
 }
 
 func (c *BucketCounter) Inc() {
     now := time.Now().UnixNano()
     bucketStart := now - (now % int64(c.bucketSize))
 
-    c.mu.RLock()
+    c.mu.Lock()
+    defer c.mu.Unlock()
+
     idx := (bucketStart / int64(c.bucketSize)) % int64(c.bucketCount)
-    b := c.buckets[idx]
-    c.mu.RUnlock()
+    b := &c.buckets[idx]
 
-    // Проверить bucket — если timestamp устарел, reset
     if b.timestamp != bucketStart {
-        c.mu.Lock()
-        if b.timestamp != bucketStart {
-            b.timestamp = bucketStart
-            b.count.Store(0)
-        }
-        c.mu.Unlock()
+        b.timestamp = bucketStart
+        b.count = 0
     }
-
-    b.count.Add(1)
+    b.count++
 }
 
 func (c *BucketCounter) Count() int64 {
     now := time.Now().UnixNano()
     cutoff := now - int64(c.window)
 
-    c.mu.RLock()
-    defer c.mu.RUnlock()
+    c.mu.Lock()
+    defer c.mu.Unlock()
 
     var total int64
     for _, b := range c.buckets {
         // Bucket считается только если timestamp в окне
         if b.timestamp >= cutoff {
-            total += b.count.Load()
+            total += b.count
         }
     }
     return total
@@ -198,7 +233,10 @@ func (c *BucketCounter) Count() int64 {
 **Использование:**
 
 ```go
-c := NewBucketCounter(time.Minute, time.Second)  // 60 buckets of 1 second
+c, err := NewBucketCounter(time.Minute, time.Second)
+if err != nil {
+    log.Fatal(err)
+}
 
 for i := 0; i < 1000; i++ {
     c.Inc()
@@ -208,12 +246,17 @@ fmt.Println(c.Count())  // 1000
 ```
 
 **Trade-offs:**
-- ✅ Constant memory O(N buckets) — обычно 10-60
-- ✅ Atomic operations — fast concurrent
-- ❌ Approximate — bucket boundaries создают +/- bucketSize error
-- ❌ Точность зависит от bucket size — мелкие более точные, но больше bucket'ов
 
-**Tip:** для rate limiter оптимально 10 bucket'ов на окно. Точность ±10%, memory minimal.
+- Память — `O(B)`, где `B = window / bucketSize`.
+- Синхронизация — один mutex делает reset и increment одной атомарной логической
+  операцией, но сериализует обращения.
+- Погрешность — реализация отбрасывает частично попадающий в окно старейший
+  бакет и может недосчитать события из интервала короче `bucketSize`.
+- Детализация — меньший бакет снижает временную погрешность, но увеличивает
+  память и стоимость суммирования.
+
+Число бакетов выбирается по допустимой погрешности, памяти и цене `Count`.
+Универсального оптимального значения нет.
 
 ---
 
@@ -222,58 +265,71 @@ fmt.Println(c.Count())  // 1000
 Гибрид: один counter per "current" + один per "previous" window. Вес `previous` зависит от позиции внутри текущего.
 
 ```
-Now: 75 секунд в текущей минуте (start = 60).
+Now: отметка 75 секунд, текущее фиксированное окно началось на 60-й секунде.
 previous window: 0-60s  (count_prev = 100)
 current window:  60-?   (count_curr = 50)
 
-Sliding count = count_curr + count_prev * (1 - 75/60) = 50 + 100 * 0.25 = 75
-                                                    ^
-                                                    fraction of prev still inside sliding window
+elapsed = 75 - 60 = 15s
+weight = 1 - 15/60 = 0.75
+Sliding count = 50 + 100 * 0.75 = 125
 ```
 
 ```go
 type SlidingWindowApprox struct {
-    mu             sync.Mutex
-    windowSize     time.Duration
-    currentCount   int64
-    previousCount  int64
-    windowStart    time.Time
+    mu            sync.Mutex
+    windowSize    time.Duration
+    currentCount  int64
+    previousCount int64
+    windowStart   time.Time
+    now           func() time.Time
 }
 
-func NewSlidingWindowApprox(window time.Duration) *SlidingWindowApprox {
+func NewSlidingWindowApprox(window time.Duration) (*SlidingWindowApprox, error) {
+    if window <= 0 {
+        return nil, ErrInvalidWindow
+    }
+    return newSlidingWindowApprox(window, time.Now), nil
+}
+
+func newSlidingWindowApprox(window time.Duration, now func() time.Time) *SlidingWindowApprox {
+    current := now()
     return &SlidingWindowApprox{
         windowSize:  window,
-        windowStart: time.Now().Truncate(window),
+        windowStart: current.Truncate(window),
+        now:         now,
     }
 }
 
 func (s *SlidingWindowApprox) Inc() {
     s.mu.Lock()
     defer s.mu.Unlock()
-    s.rotate()
+    s.rotate(s.now())
     s.currentCount++
 }
 
 func (s *SlidingWindowApprox) Count() float64 {
     s.mu.Lock()
     defer s.mu.Unlock()
-    s.rotate()
+    now := s.now()
+    s.rotate(now)
 
     // Сколько прошло в текущем окне
-    elapsed := time.Since(s.windowStart)
+    elapsed := now.Sub(s.windowStart)
     weight := float64(s.windowSize-elapsed) / float64(s.windowSize)
 
     return float64(s.currentCount) + float64(s.previousCount)*weight
 }
 
-func (s *SlidingWindowApprox) rotate() {
-    elapsed := time.Since(s.windowStart)
-    if elapsed >= 2*s.windowSize {
+func (s *SlidingWindowApprox) rotate(now time.Time) {
+    elapsed := now.Sub(s.windowStart)
+    windowsPassed := int64(elapsed / s.windowSize)
+
+    if windowsPassed >= 2 {
         // Прошло больше двух окон — оба обнулить
         s.previousCount = 0
         s.currentCount = 0
-        s.windowStart = time.Now().Truncate(s.windowSize)
-    } else if elapsed >= s.windowSize {
+        s.windowStart = s.windowStart.Add(time.Duration(windowsPassed) * s.windowSize)
+    } else if windowsPassed == 1 {
         // Прошло одно окно — current стал previous
         s.previousCount = s.currentCount
         s.currentCount = 0
@@ -286,9 +342,8 @@ func (s *SlidingWindowApprox) rotate() {
 - ✅ Constant memory — только 2 counter'а
 - ✅ Очень быстро
 - ❌ Менее точный — assume равномерное распределение в previous window
-- ⚠️ Для большинства rate limit'ов — достаточно точный (±5%)
-
-Используется в Cloudflare rate limiter, Stripe API rate limiting.
+- ⚠️ Погрешность зависит от распределения событий внутри предыдущего окна и не
+  имеет универсальной границы в несколько процентов
 
 ---
 
@@ -306,21 +361,24 @@ type PerKeyCounter struct {
     lastSeen  map[string]time.Time
 }
 
-func NewPerKeyCounter(window time.Duration) *PerKeyCounter {
+func NewPerKeyCounter(ctx context.Context, window time.Duration) (*PerKeyCounter, error) {
+    if window <= 0 {
+        return nil, ErrInvalidWindow
+    }
     c := &PerKeyCounter{
         window:   window,
         counters: make(map[string]*SlidingWindowApprox),
         lastSeen: make(map[string]time.Time),
     }
-    go c.cleanup()
-    return c
+    go c.cleanup(ctx)
+    return c, nil
 }
 
 func (c *PerKeyCounter) Inc(key string) {
     c.mu.Lock()
     cnt, ok := c.counters[key]
     if !ok {
-        cnt = NewSlidingWindowApprox(c.window)
+        cnt = newSlidingWindowApprox(c.window, time.Now)
         c.counters[key] = cnt
     }
     c.lastSeen[key] = time.Now()
@@ -339,20 +397,25 @@ func (c *PerKeyCounter) Count(key string) float64 {
     return cnt.Count()
 }
 
-func (c *PerKeyCounter) cleanup() {
+func (c *PerKeyCounter) cleanup(ctx context.Context) {
     ticker := time.NewTicker(time.Minute)
     defer ticker.Stop()
 
-    for range ticker.C {
-        c.mu.Lock()
-        cutoff := time.Now().Add(-10 * c.window)
-        for key, last := range c.lastSeen {
-            if last.Before(cutoff) {
-                delete(c.counters, key)
-                delete(c.lastSeen, key)
+    for {
+        select {
+        case <-ctx.Done():
+            return
+        case now := <-ticker.C:
+            c.mu.Lock()
+            cutoff := now.Add(-10 * c.window)
+            for key, last := range c.lastSeen {
+                if last.Before(cutoff) {
+                    delete(c.counters, key)
+                    delete(c.lastSeen, key)
+                }
             }
+            c.mu.Unlock()
         }
-        c.mu.Unlock()
     }
 }
 ```
@@ -365,7 +428,11 @@ func (c *PerKeyCounter) cleanup() {
 
 ```go
 func TestExactCounter(t *testing.T) {
-    c := NewExactCounter(100 * time.Millisecond)
+    now := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+    c, err := newExactCounter(time.Minute, func() time.Time { return now })
+    if err != nil {
+        t.Fatal(err)
+    }
 
     for i := 0; i < 10; i++ {
         c.Inc()
@@ -374,7 +441,7 @@ func TestExactCounter(t *testing.T) {
         t.Errorf("got %d, want 10", c.Count())
     }
 
-    time.Sleep(150 * time.Millisecond)
+    now = now.Add(time.Minute + time.Nanosecond)
 
     if c.Count() != 0 {
         t.Errorf("after expiry got %d, want 0", c.Count())
@@ -382,7 +449,10 @@ func TestExactCounter(t *testing.T) {
 }
 
 func TestBucketCounter_Concurrent(t *testing.T) {
-    c := NewBucketCounter(time.Second, 100*time.Millisecond)
+    c, err := NewBucketCounter(time.Second, 100*time.Millisecond)
+    if err != nil {
+        t.Fatal(err)
+    }
 
     var wg sync.WaitGroup
     for i := 0; i < 100; i++ {
@@ -403,7 +473,8 @@ func TestBucketCounter_Concurrent(t *testing.T) {
 }
 
 func TestSlidingWindowApprox(t *testing.T) {
-    c := NewSlidingWindowApprox(200 * time.Millisecond)
+    now := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+    c := newSlidingWindowApprox(time.Minute, func() time.Time { return now })
 
     for i := 0; i < 100; i++ {
         c.Inc()
@@ -414,18 +485,19 @@ func TestSlidingWindowApprox(t *testing.T) {
         t.Errorf("initial count %f, expected ~100", c.Count())
     }
 
-    // Через 200ms — previous стал 100, current=0
-    time.Sleep(220 * time.Millisecond)
-    count := c.Count()
-    // weight = 200/200 - elapsed/200, для первых ms после rotate ~ 0.9
-    if count < 80 || count > 100 {
-        t.Errorf("after rotate count %f, expected 80-100", count)
+    now = now.Add(time.Minute)
+    if count := c.Count(); count != 100 {
+        t.Fatalf("at next boundary count = %f, want 100", count)
     }
 
-    // Через ещё 200ms — оба нули
-    time.Sleep(220 * time.Millisecond)
-    if c.Count() > 5 {
-        t.Errorf("after both windows expired count %f", c.Count())
+    now = now.Add(30 * time.Second)
+    if count := c.Count(); count != 50 {
+        t.Fatalf("halfway through next window count = %f, want 50", count)
+    }
+
+    now = now.Add(31 * time.Second)
+    if count := c.Count(); count != 0 {
+        t.Fatalf("after previous window expired count = %f, want 0", count)
     }
 }
 ```
@@ -445,7 +517,9 @@ window = 1 second, limit = 100
 Total: 198 requests in 2 milliseconds
 ```
 
-Это "Boundary problem" — fixed window не точен на границах. Sliding window (любой подход выше) решает это.
+Fixed window допускает почти двойной лимит около границы. Точный sliding window
+устраняет этот скачок, а приближённые варианты сглаживают его с погрешностью,
+зависящей от своей модели.
 
 ### 2. Memory growth in ExactCounter
 
@@ -468,17 +542,16 @@ if cap(c.events) > 4*len(c.events) {
 
 ### 4. Race condition в bucket reset
 
-Между чтением bucket'а и reset'ом может прийти Inc другой goroutine. Атомарно:
+Между сменой timestamp и обнулением счётчика может прийти другая goroutine.
+Наивная последовательность из двух атомарных операций проблему не решает:
 ```go
-// Atomic CAS for reset
-oldTs := b.timestamp.Load()
-if oldTs != bucketStart {
-    if b.timestamp.CompareAndSwap(oldTs, bucketStart) {
-        b.count.Store(0)
-    }
+if b.timestamp.CompareAndSwap(oldTimestamp, bucketStart) {
+    b.count.Store(0) // чужой Add мог выполниться после CAS и будет потерян здесь
 }
-b.count.Add(1)
 ```
+
+Нужен mutex вокруг `timestamp + count`, упакованное состояние с CAS или другой
+алгоритм, который доказывает линейную точку операции.
 
 ### 5. Time skew
 
@@ -515,16 +588,19 @@ func (c *Counter) cleanup(ctx context.Context) {
 
 ### 7. Lock contention в hot key
 
-10k QPS на одном key через global mutex — bottleneck.
+При большом числе обращений к одному ключу общий mutex может стать bottleneck.
 
 Решения:
 - Sharded counter (один counter не разделять между ядрами)
-- Atomic operations в bucket-based (см. выше)
+- Отдельный mutex или упакованное атомарное состояние на shard
 - Per-goroutine counter с periodic flush в shared
 
 ### 8. Approximate ≠ wrong
 
-Sliding window approximation даёт ±5-10% точность. Для rate limit'а это **нормально** — никто не считает миллисекунды. Для биллинга — нужна точность, другой подход.
+Приближение является частью контракта, а не синонимом ошибки реализации. Его
+допустимость зависит от задачи: rate limiter может принять известный запас, а
+биллинг требует точной и воспроизводимой модели. Процент погрешности нельзя
+назвать без размера бакета и распределения событий.
 
 ---
 
@@ -539,7 +615,10 @@ ZREMRANGEBYSCORE requests:user-42 0 <cutoff>
 ZCARD requests:user-42  # текущий count
 ```
 
-Точный, но Redis нагружается. Альтернатива — Redis HyperLogLog (approximate cardinality).
+Точный вариант требует атомарно удалить старые элементы, добавить новое событие
+и проверить `ZCARD`, обычно через Lua script или server-side transaction.
+HyperLogLog здесь не замена: он оценивает число уникальных элементов, а не число
+событий в окне.
 
 ### 2. Multiple time scales
 
@@ -565,7 +644,8 @@ Sliding 1m + 5m + 15m + 1h одновременно — для multi-tier rate l
 count = count * exp(-elapsed/halflife) + 1
 ```
 
-Старые события постепенно теряют вес. Используется в Hacker News ranking, EWMA metrics.
+Старые события постепенно теряют вес. Это уже не строгое sliding window, а
+отдельная модель decay, подходящая для рейтингов и сглаженных метрик.
 
 ### 6. Per-shard counter
 
@@ -575,26 +655,44 @@ count = count * exp(-elapsed/halflife) + 1
 
 ## Реальные применения
 
-- **Rate limiting** — все основные web frameworks
-- **Real-time metrics** — Prometheus rate(), Grafana queries
-- **Anomaly detection** — "вдруг 10x больше запросов за минуту"
-- **Top-K analytics** — самые популярные URL'ы за last hour
-- **DDoS protection** — Cloudflare, AWS WAF
-- **Auto-scaling triggers** — Kubernetes HPA based on requests/sec
+- **Rate limiting —** ограничение числа действий пользователя или клиента.
+- **Метрики —** число запросов или ошибок за недавний интервал.
+- **Обнаружение аномалий —** сравнение текущей интенсивности с baseline.
+- **Top-K analytics —** популярные ключи за ограниченный интервал.
+- **Защита от всплесков —** локальные и распределённые лимиты трафика.
+- **Автомасштабирование —** производная метрика запросов в секунду для внешнего
+  контроллера.
 
 ---
 
-## Что важно показать на собеседовании
+## Interview-ready answer
 
-1. **Trade-offs алгоритмов:**
-   - Exact log — память O(N), точно
-   - Bucket-based — память O(buckets), approximate ±bucketSize
-   - Weighted sliding — память O(1), approximate но достаточно точно
-2. **Boundary problem** в fixed window — почему sliding нужен
-3. **Concurrent через atomic per bucket** — fast lock-less
-4. **Cleanup для idle keys** — без него memory leak
-5. **Distributed через Redis sorted set** — production случай
-6. **Per-key + global** — hierarchical rate limit
+**1. Какие варианты sliding window counter существуют?**
+
+- Точный журнал — хранит timestamp каждого события и использует память,
+  пропорциональную числу событий в окне.
+- Бакеты — хранят счётчик на интервал и ограничивают память, но погрешность
+  зависит от ширины бакета.
+- Взвешенные окна — используют два счётчика и предполагают равномерность событий
+  в предыдущем окне.
+
+**2. Где возникает ошибка на границе?**
+
+- Fixed window — допускает почти двойной лимит около границы двух интервалов.
+- Bucket-based sliding — сглаживает границу, но эта реализация отбрасывает
+  частично попадающий старейший бакет и потому может недосчитать события.
+- Точный журнал — сравнивает timestamp каждого события с cutoff.
+
+**3. Что важно для конкурентной реализации?**
+
+- Reset — timestamp бакета и его count образуют одно логическое состояние.
+- Синхронизация — отдельные atomic-поля не гарантируют атомарный переход и могут
+  потерять increment.
+- Время — тестируемые часы устраняют `Sleep`, а clock rollback требует явной
+  политики.
+- Lifecycle — per-key cleanup должен останавливаться через context или `Close`.
+
+---
 
 ## Связки
 

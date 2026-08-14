@@ -1,6 +1,23 @@
 # Задача 4: Trie (Prefix Tree)
 
-Trie — дерево, где каждый node = одна буква, путь от root до node = строка. Используется для **autocomplete**, **spell check**, **routing** (HTTP routers как chi/gin внутри), **IP prefix matching**.
+## Содержание
+
+- [Формулировка](#формулировка)
+- [Уточняющие вопросы](#уточняющие-вопросы)
+- [Базовая реализация](#базовое-решение-для-lowercase-ascii)
+- [Unicode и переменный алфавит](#для-unicode--переменного-алфавита)
+- [Autocomplete](#autocomplete-top-k-с-префиксом)
+- [Тесты](#тесты)
+- [Типичные ошибки](#подводные-камни)
+- [Расширения](#возможные-расширения)
+- [Interview-ready answer](#interview-ready-answer)
+- [Связанные материалы](#связки)
+
+Trie, или префиксное дерево, хранит ключи по частям: путь от корня до узла
+соответствует префиксу. В строковом trie ребро обычно обозначает байт или Unicode
+code point, а отдельный флаг отличает полное слово от промежуточного префикса.
+
+---
 
 ## Формулировка
 
@@ -53,16 +70,23 @@ func New() *Trie {
     return &Trie{root: &node{}}
 }
 
-func (t *Trie) Insert(word string) {
+func (t *Trie) Insert(word string) bool {
+    for i := 0; i < len(word); i++ {
+        if _, ok := letterIndex(word[i]); !ok {
+            return false
+        }
+    }
+
     n := t.root
     for i := 0; i < len(word); i++ {
-        c := word[i] - 'a'
-        if n.children[c] == nil {
-            n.children[c] = &node{}
+        index, _ := letterIndex(word[i])
+        if n.children[index] == nil {
+            n.children[index] = &node{}
         }
-        n = n.children[c]
+        n = n.children[index]
     }
     n.isEnd = true
+    return true
 }
 
 func (t *Trie) Contains(word string) bool {
@@ -77,13 +101,20 @@ func (t *Trie) StartsWith(prefix string) bool {
 func (t *Trie) find(s string) *node {
     n := t.root
     for i := 0; i < len(s); i++ {
-        c := s[i] - 'a'
-        if n.children[c] == nil {
+        index, ok := letterIndex(s[i])
+        if !ok || n.children[index] == nil {
             return nil
         }
-        n = n.children[c]
+        n = n.children[index]
     }
     return n
+}
+
+func letterIndex(char byte) (int, bool) {
+    if char < 'a' || char > 'z' {
+        return 0, false
+    }
+    return int(char - 'a'), true
 }
 ```
 
@@ -101,9 +132,9 @@ t.StartsWith("appl")     // true
 t.Contains("apple")      // true
 ```
 
-**Сложность:**
-- Time: O(L) для всех операций (L = длина слова)
-- Memory: O(N * L * |alphabet|) worst case. С общими префиксами — лучше.
+Время операций равно `O(L)`, где `L` — число байт. Если создано `P` узлов,
+вариант с массивом использует `O(P * |alphabet|)` ссылок; в худшем случае
+`P = O(N * L)` для `N` ключей без общих префиксов.
 
 ---
 
@@ -130,7 +161,10 @@ func (t *Trie) Insert(word string) {
 }
 ```
 
-**Trade-off:** Unicode поддерживается, но map медленнее array (~3-5x slower per access). Для autocomplete с английским — array быстрее.
+`map[rune]*node` хранит только существующие рёбра и поддерживает переменный
+алфавит, но платит хешированием и дополнительными allocations. Массив обычно
+компактнее только при маленьком плотном алфавите. Итерация по `rune` различает
+code points, но не нормализует эквивалентные Unicode-последовательности.
 
 ---
 
@@ -149,29 +183,44 @@ type Autocomplete struct {
     root *autocompleteNode
 }
 
-func (a *Autocomplete) AddWord(word string, count int) {
+func NewAutocomplete() *Autocomplete {
+    return &Autocomplete{root: &autocompleteNode{}}
+}
+
+func (a *Autocomplete) AddWord(word string, count int) bool {
+    for i := 0; i < len(word); i++ {
+        if _, ok := letterIndex(word[i]); !ok {
+            return false
+        }
+    }
+
     n := a.root
     for i := 0; i < len(word); i++ {
-        c := word[i] - 'a'
-        if n.children[c] == nil {
-            n.children[c] = &autocompleteNode{}
+        index, _ := letterIndex(word[i])
+        if n.children[index] == nil {
+            n.children[index] = &autocompleteNode{}
         }
-        n = n.children[c]
+        n = n.children[index]
     }
     n.isEnd = true
     n.count += count
+    return true
 }
 
 // Suggest возвращает топ-K самых частых слов с данным префиксом.
 func (a *Autocomplete) Suggest(prefix string, k int) []string {
+    if k <= 0 {
+        return nil
+    }
+
     // Найти node префикса
     n := a.root
     for i := 0; i < len(prefix); i++ {
-        c := prefix[i] - 'a'
-        if n.children[c] == nil {
+        index, ok := letterIndex(prefix[i])
+        if !ok || n.children[index] == nil {
             return nil
         }
-        n = n.children[c]
+        n = n.children[index]
     }
 
     // DFS — собрать все слова из этого поддерева
@@ -216,7 +265,7 @@ func (a *Autocomplete) Suggest(prefix string, k int) []string {
 **Использование:**
 
 ```go
-ac := &Autocomplete{root: &autocompleteNode{}}
+ac := NewAutocomplete()
 ac.AddWord("apple", 100)
 ac.AddWord("application", 50)
 ac.AddWord("app", 200)
@@ -226,7 +275,9 @@ suggestions := ac.Suggest("app", 3)
 // ["app", "apple", "application"]
 ```
 
-**Оптимизация:** для очень больших словарей хранить **top-K в каждом node** заранее. На insert — обновлять topK по пути. Тогда Suggest = O(L), не O(всех слов с префиксом).
+Для большого словаря можно хранить top-K в каждом узле заранее. Тогда чтение
+занимает `O(L + K)`, но вставка обновляет кандидатов во всех `L` узлах пути, а
+память может вырасти до `O(P * K)`.
 
 ---
 
@@ -272,7 +323,7 @@ func TestTrie_MultipleWords(t *testing.T) {
 }
 
 func TestAutocomplete(t *testing.T) {
-    ac := &Autocomplete{root: &autocompleteNode{}}
+    ac := NewAutocomplete()
 
     ac.AddWord("apple", 100)
     ac.AddWord("application", 50)
@@ -294,7 +345,9 @@ func TestAutocomplete(t *testing.T) {
 
 ### 1. Memory blowup для широкого алфавита
 
-`children [26]*node` — 26 указателей по 8 байт = 208 байт на каждый node. Для Unicode (millions of code points) — array невозможен.
+На 64-битной архитектуре один массив из 26 указателей занимает 208 байт ещё до
+учёта остальных полей и выравнивания узла. Для разреженного или большого
+алфавита такой массив расходует память впустую.
 
 Решения:
 - Использовать map для редких символов
@@ -329,7 +382,10 @@ if word[i] < 'a' || word[i] > 'z' {
 dfs(n.children[i], append(current, byte('a'+i)))
 ```
 
-`append` может share underlying array. Если slice grows — может corrupt'нуть parent'ов state.
+`append` может использовать общий backing array. В приведённом последовательном
+DFS это безопасно, потому что slice не сохраняется, а `string(current)` копирует
+байты. Ошибка появится, если сохранять сами slices в результате или обходить
+ветви параллельно. Тогда путь нужно явно копировать:
 
 Безопаснее — explicit copy:
 ```go
@@ -354,7 +410,9 @@ Delete: пройти от corner case (один word с этим path) и уда
 
 ### 8. Trie на disk — radix tree
 
-In-memory trie с N=1B нодов = 100+ GB. Для persistent — Radix tree (compressed paths). См. BadgerDB, etcd.
+Большое дерево из узлов с указателями создаёт значительный overhead и нагрузку
+на garbage collector. Сжатый radix tree уменьшает число узлов, но persistence
+требует отдельного формата хранения, а не только замены типа дерева.
 
 ### 9. Autocomplete без top-K cache
 
@@ -372,7 +430,8 @@ Trie:    a → p → p → l → e
 Radix:   "appl" → e
 ```
 
-Меньше памяти, быстрее. Используется в HTTP routers (chi, gin, fasthttp).
+Сжатые пути уменьшают число узлов. Radix-подобные структуры часто применяются в
+маршрутизаторах, но точная реализация зависит от конкретной библиотеки и версии.
 
 ### 2. Suffix Tree
 
@@ -399,27 +458,52 @@ Trie + finite automaton для multi-pattern matching. Поиск всех вх�
 ## Реальные применения
 
 - **Autocomplete** — Google search bar, ChatGPT prompt suggestions
-- **HTTP routing** — chi/gin/fasthttp matching `/users/:id/posts/:postId`
-- **IP routing** — kernel routing table, prefix matching CIDR
-- **Spell checkers** — Hunspell, browser spell-check
-- **DNA matching** — bioinformatics
-- **Compiler symbol tables** — namespace lookup
-- **PDF text search** — Adobe Reader
+- **Маршрутизация HTTP —** сопоставление сегментов пути и параметров.
+- **Префиксная IP-маршрутизация —** longest-prefix match; конкретная структура
+  зависит от реализации.
+- **Словари и autocomplete —** поиск слов по введённому префиксу.
+- **Поиск последовательностей —** работа с общими префиксами шаблонов.
+- **Таблицы символов —** поиск имён внутри пространств имён.
 
 ---
 
-## Что важно показать на собеседовании
+## Interview-ready answer
 
-1. **O(L)** для всех операций — не O(N где N = слов).
-2. **`children [26]*node` vs map** — trade-off speed vs flexibility.
-3. **isEnd флаг** — чтобы различать word vs only prefix.
-4. **DFS для autocomplete** — стандартный паттерн обхода.
-5. **Top-K cache** для production autocomplete — оптимизация.
-6. **Radix tree** в production routers — связь с реальностью.
-7. **Memory considerations** — 26 pointers per node bloat'ит.
+**1. Как устроен trie и какова сложность операций?**
+
+- Модель — путь от корня кодирует префикс, а `isEnd` отмечает полный ключ.
+- Время — поиск и вставка занимают `O(L)` по длине ключа и не зависят напрямую
+  от числа сохранённых ключей.
+- Память — зависит от числа узлов и представления детей; массив выгоден для
+  маленького плотного алфавита, `map` — для разреженного.
+
+**2. Чем Contains отличается от StartsWith?**
+
+- `StartsWith` — достаточно существования пути для всего префикса.
+- `Contains` — конечный узел дополнительно должен иметь `isEnd = true`.
+- Пример — после вставки `apple` префикс `app` существует, но отдельного слова
+  `app` нет.
+
+**3. Как построить autocomplete?**
+
+- Базовый вариант — найти узел префикса, обойти его поддерево и выбрать top-K.
+- Цена — полный DFS зависит от числа слов под популярным префиксом.
+- Оптимизация — хранить кандидатов в узлах заранее, платя памятью и более дорогим
+  обновлением.
+
+**4. Какие ограничения важны в Go?**
+
+- Ввод — индекс `word[i]-'a'` безопасен только после проверки диапазона.
+- Unicode — обход по `rune` не заменяет нормализацию строк.
+- Конкурентность — параллельная запись требует синхронизации или публикации
+  неизменяемого дерева после построения.
+
+---
 
 ## Связки
 
-- [Algorithms: trees and graphs](../../../16-algorithms-and-data-structures/05-trees-and-graphs.md)
-- [HTTP routers](../../../03-go-libraries-and-ecosystem/http-servers/) — chi/gin internal trie
-- [BadgerDB / Radix tree](https://github.com/dgraph-io/badger) — persistent trie variant
+- [Algorithms: trees and graphs](../../../16-algorithms-and-data-structures/04-trees-and-graphs.md)
+- [HTTP servers](../../../03-go-libraries-and-ecosystem/http-servers/) —
+  практический контекст маршрутизации путей.
+- [Оценка сложности](../../../16-algorithms-and-data-structures/01-time-and-space-complexity.md)
+  — анализ времени и памяти.
