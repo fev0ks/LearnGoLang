@@ -768,7 +768,7 @@ concurrency в зависимость и способно ухудшить laten
 - [Incident Response Workflow](./01-incident-response-workflow.md)
 - [Go Profiling](../../01-go-core/profiling/README.md)
 - [Practical Metric Patterns](../prometheus-and-metrics/practical-metric-patterns/README.md)
-- [Tempo And Trace Investigation](../tracing-and-opentelemetry/03-tempo-and-trace-investigation.md)
+- [Grafana Tempo и расследование по traces](../tracing-and-opentelemetry/04-tempo-and-trace-investigation.md)
 - [Linux: команды для диагностики production](../linux/06-linux-commands.md)
 - [Kubernetes: kubectl commands](../kubernetes/05-kubectl-commands.md)
 - [Cross-Layer Incident Cases](./03-cross-layer-incident-cases.md)

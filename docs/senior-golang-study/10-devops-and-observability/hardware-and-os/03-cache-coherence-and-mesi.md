@@ -220,8 +220,8 @@ flowchart TB
     G1 -.->|write| A
     G2 -.->|write| B
 
-    style A fill:#fef3c7,stroke:#a16207
-    style B fill:#dbeafe,stroke:#1e40af
+    style A fill:#fef3c7,stroke:#a16207,color:#0f172a
+    style B fill:#dbeafe,stroke:#1e40af,color:#0f172a
 ```
 
 Они "не shared" логически — каждая работает со своей переменной. Но физически они в одной линии, и каждая запись `counter_a++` принудительно делает копию у Goroutine 2 invalid → её следующая запись `counter_b++` начнётся с cache miss → подтянет линию обратно → теперь у Goroutine 1 invalid → и так в цикле.
