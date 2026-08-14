@@ -1,38 +1,73 @@
-# Prometheus And Metrics
+# Prometheus и проектирование метрик
 
-Этот подпакет про практическую работу с метриками:
-- как данные доходят от приложения до `Prometheus`;
-- какие бывают типы метрик и когда какой использовать;
-- как устроен синтаксис `PromQL`;
-- какие метрики обычно нужны для API, worker и storage-path;
-- какие ошибки чаще всего делают с labels, cardinality и counters.
+Раздел объясняет полный путь метрики: от изменения counter в Go-процессе до
+service-level PromQL, dashboard и alert. Основной акцент — не на запоминании
+синтаксиса, а на контрактах, cardinality, агрегации реплик и диагностике
+production-сигналов.
 
-Как читать:
-- сначала понять общий flow в `Prometheus`;
-- потом разобрать типы метрик и дизайн сигналов;
-- затем перейти к `PromQL`;
-- после этого перейти в `practical-metric-patterns`;
-- и только потом уже смотреть Grafana dashboards и alerting.
+## Как читать
 
-Материалы:
+1. [Путь метрики от приложения до alert](./02-prometheus-metrics-flow.md) —
+   инструментация, scrape, ingestion, staleness и pull/push trade-offs.
+2. [Как Prometheus обнаруживает и scrapes несколько pods](./06-how-prometheus-discovers-and-scrapes-multiple-pods.md) —
+   Kubernetes discovery, ServiceMonitor/PodMonitor и rollout.
+3. [Relabeling и labels scrape target](./03-prometheus-relabeling-and-target-labels.md) —
+   target/metric relabeling, служебные labels и отладка.
+4. [Типы метрик и их проектирование](./01-metric-types-and-design.md) —
+   Counter, Gauge, classic/native Histogram, Summary и визуальное дерево выбора.
+5. [PromQL: практическая шпаргалка](./05-promql-cheatsheet.md) — selectors,
+   counter functions, aggregation, vector matching, histograms и missing data.
+6. [Prometheus UI и Grafana](./04-prometheus-ui-and-grafana.md) — table-first
+   диагностика, service/per-pod views и dashboards.
+7. [Практические паттерны метрик](./practical-metric-patterns/README.md) — HTTP
+   traffic/errors/latency, queues, connection pools, cache и вызовы хранилища.
 
-Foundation:
-- [Prometheus Metrics Flow](./02-prometheus-metrics-flow.md)
-- [How Prometheus Discovers And Scrapes Multiple Pods](./how-prometheus-discovers-and-scrapes-multiple-pods.md)
-- [Prometheus Relabeling And Target Labels](./03-prometheus-relabeling-and-target-labels.md)
-- [Prometheus UI And Grafana](./04-prometheus-ui-and-grafana.md)
+Нумерация имён файлов историческая, поэтому рекомендуемый порядок чтения не
+совпадает с номерами.
 
-Design:
-- [Metric Types And Design](./01-metric-types-and-design.md)
-- [Practical Metric Patterns](./practical-metric-patterns/README.md)
+---
 
-Querying:
-- [PromQL Cheatsheet](./05-promql-cheatsheet.md)
+## Карта вопросов
 
-Что важно уметь объяснить:
-- почему `Prometheus` обычно scrapes, а не принимает push от приложений;
-- чем `Counter`, `Gauge`, `Histogram` и `Summary` отличаются practically;
-- почему `rate()` и `increase()` почти всегда нужны для counters;
-- что такое label cardinality и как ею случайно убить observability stack;
-- какие метрики реально нужны для `HTTP`, `Kafka`, `PostgreSQL`, `Redis` и workers;
-- чем raw metric name отличается от operational question.
+| Вопрос | Материал |
+| --- | --- |
+| Где создаётся time series и откуда берётся timestamp? | Metrics flow |
+| Почему пять pods дают много рядов одной метрики? | Discovery и UI/Grafana |
+| Чем `relabel_configs` отличается от `metric_relabel_configs`? | Relabeling |
+| Чем Counter, Gauge, Histogram и Summary отличаются на графике и в запросе? | Metric types |
+| Почему `rate()` выполняют до `sum()`? | PromQL |
+| Как выбрать buckets и посчитать SLO? | Latency histograms |
+| Когда queue depth нужно суммировать, а когда брать `max`? | Gauges |
+| Как связать HTTP p95 с pool wait и Postgres latency? | Storage metrics |
+
+---
+
+## Что нужно уметь после раздела
+
+- сформулировать operational question до добавления метрики;
+- оценить cardinality как произведение возможных label values, replicas и
+  histogram series;
+- объяснить reset counter и правильный порядок `rate` → `sum`;
+- различить classic histogram, native histogram и Summary;
+- построить service-level RPS, error ratio, p95 и SLO ratio;
+- отделить отсутствие target, `up=0`, stale series и реальный ноль;
+- диагностировать путь discovery → relabeling → scrape → ingestion → query;
+- связать RED symptoms с USE/saturation и dependency metrics;
+- объяснить, почему request ID, raw URL, SQL и тексты ошибок относятся в traces
+  или logs, а не в metric labels.
+
+---
+
+## Официальная документация
+
+- [Prometheus Overview](https://prometheus.io/docs/introduction/overview/)
+- [Metric types](https://prometheus.io/docs/concepts/metric_types/)
+- [Histograms and summaries](https://prometheus.io/docs/practices/histograms/)
+- [Metric and label naming](https://prometheus.io/docs/practices/naming/)
+- [Instrumentation best practices](https://prometheus.io/docs/practices/instrumentation/)
+- [PromQL basics](https://prometheus.io/docs/prometheus/latest/querying/basics/)
+- [PromQL functions](https://prometheus.io/docs/prometheus/latest/querying/functions/)
+- [Prometheus configuration](https://prometheus.io/docs/prometheus/latest/configuration/configuration/)
+- [Native histograms specification](https://prometheus.io/docs/specs/native_histograms/)
+- [Prometheus Operator design](https://prometheus-operator.dev/docs/getting-started/design/)
+- [Grafana Prometheus template variables](https://grafana.com/docs/grafana/latest/datasources/prometheus/template-variables/)

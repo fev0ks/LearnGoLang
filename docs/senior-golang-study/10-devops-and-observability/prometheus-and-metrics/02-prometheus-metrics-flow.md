@@ -1,149 +1,164 @@
-# Prometheus Metrics Flow
-
-Эта заметка нужна, чтобы понимать `Prometheus` не как "место, где лежат графики", а как конкретный pipeline:
+# Путь метрики от приложения до alert
 
 ## Содержание
 
-- [Самая короткая интуиция](#самая-короткая-интуиция)
-- [Почему pull model важна](#почему-pull-model-важна)
-- [Что происходит внутри приложения](#что-происходит-внутри-приложения)
-- [Как выглядит `/metrics`](#как-выглядит-metrics)
-- [Что делает Prometheus на scrape](#что-делает-prometheus-на-scrape)
-- [Как строится flow end-to-end](#как-строится-flow-end-to-end)
-- [Как думать о метриках правильно](#как-думать-о-метриках-правильно)
-- [Основные классы метрик в backend-сервисе](#основные-классы-метрик-в-backend-сервисе)
-- [Что такое good metric contract](#что-такое-good-metric-contract)
-- [Где чаще всего ломаются](#где-чаще-всего-ломаются)
-- [Practical Rule](#practical-rule)
+- [Ментальная модель](#ментальная-модель)
+- [Что происходит внутри Go-приложения](#что-происходит-внутри-go-приложения)
+- [Что публикует endpoint metrics](#что-публикует-endpoint-metrics)
+- [Что происходит во время scrape](#что-происходит-во-время-scrape)
+- [Как Prometheus обнаруживает targets](#как-prometheus-обнаруживает-targets)
+- [Почему pull model удобна](#почему-pull-model-удобна)
+- [Где push действительно нужен](#где-push-действительно-нужен)
+- [Как появляются dashboards и alerts](#как-появляются-dashboards-и-alerts)
+- [Контракт хорошей метрики](#контракт-хорошей-метрики)
+- [Где ломается путь](#где-ломается-путь)
+- [Interview-ready answer](#interview-ready-answer)
 
-## Самая короткая интуиция
+Prometheus — не место, куда приложение «отправляет графики». Приложение меняет
+числовое состояние в памяти и публикует его через HTTP. Prometheus периодически
+читает это состояние, сохраняет samples во времени, а PromQL превращает их в
+скорости, доли, квантили и alerts.
 
-`Prometheus` почти всегда работает так:
-- приложение само считает метрики в памяти;
-- приложение отдает их на `/metrics`;
-- `Prometheus` сам приходит и забирает эти данные;
-- дальше он хранит их как time series и дает язык запросов `PromQL`.
+---
 
-Главная идея:
-- приложение не "пушит графики";
-- `Prometheus` сам регулярно делает `pull`.
+## Ментальная модель
 
-## Почему pull model важна
+Полный путь состоит из нескольких независимых этапов:
 
-Это один из ключевых моментов.
+```mermaid
+flowchart LR
+    R["HTTP handler / worker"] -->|"Inc, Set, Observe"| M["Метрики в памяти процесса"]
+    M -->|"exposition format"| E["GET /metrics"]
+    SD["Service discovery"] --> T["Target relabeling"]
+    T -->|"адрес и target labels"| P["Prometheus scraper"]
+    P -->|"HTTP GET"| E
+    E --> MR["Metric relabeling"]
+    MR --> TSDB["Prometheus TSDB"]
+    TSDB --> Q["PromQL / recording rules"]
+    Q --> G["Grafana"]
+    Q --> A["Alert rules → Alertmanager"]
+```
 
-`Prometheus` предпочитает:
-- `scrape` приложения по `HTTP`;
-- видеть текущее состояние прямо в момент запроса;
-- иметь единый контроль над интервалом опроса.
+Этапы решают разные задачи:
 
-Плюсы такого подхода:
-- проще централизованно конфигурировать, кого и как собирать;
-- проще понимать, что target пропал;
-- удобнее дебажить, потому что `/metrics` можно открыть руками;
-- не надо заставлять каждое приложение знать, куда пушить данные.
+1. Инструментация определяет, что измерять и какие labels допустимы.
+2. Service discovery находит возможные endpoints.
+3. Target relabeling выбирает endpoints и формирует их labels до запроса.
+4. Scraper читает exposition format и добавляет sample timestamp.
+5. Metric relabeling при необходимости отбрасывает или переписывает samples
+   перед ingestion.
+6. PromQL агрегирует временные ряды под конкретный operational question.
 
-Минусы:
-- target должен быть reachable для Prometheus;
-- для batch jobs и короткоживущих процессов часто нужен `Pushgateway` или иной path, но это отдельный special case.
+Разделение важно для диагностики: отсутствие графика может быть ошибкой в коде,
+discovery, relabeling, сети, формате данных или запросе, и каждый слой проверяют
+по-разному.
 
-## Что происходит внутри приложения
+---
 
-Обычно в Go это выглядит так:
+## Что происходит внутри Go-приложения
+
+Клиентская библиотека хранит метрики в процессе. Упрощённая инструментация HTTP
+может выглядеть так:
 
 ```go
-var httpRequestsTotal = prometheus.NewCounterVec(
-	prometheus.CounterOpts{
-		Namespace: "my_service",
-		Subsystem: "http",
-		Name:      "requests_total",
-		Help:      "Total number of HTTP requests.",
-	},
-	[]string{"method", "route", "status_code"},
+var (
+    httpRequests = prometheus.NewCounterVec(
+        prometheus.CounterOpts{
+            Namespace: "shortener",
+            Subsystem: "http",
+            Name:      "requests_total",
+            Help:      "Number of completed HTTP requests.",
+        },
+        []string{"method", "route", "status_code"},
+    )
+
+    httpDuration = prometheus.NewHistogramVec(
+        prometheus.HistogramOpts{
+            Namespace: "shortener",
+            Subsystem: "http",
+            Name:      "request_duration_seconds",
+            Help:      "Duration of completed HTTP requests.",
+            Buckets:   []float64{0.05, 0.1, 0.3, 0.5, 1},
+        },
+        []string{"method", "route"},
+    )
 )
 
 func init() {
-	prometheus.MustRegister(httpRequestsTotal)
+    prometheus.MustRegister(httpRequests, httpDuration)
 }
 ```
 
-Идея здесь простая:
-- метрика создается в коде;
-- регистрируется в in-process registry;
-- потом `promhttp.Handler()` или аналог отдает все это через `/metrics`.
+После завершения запроса middleware вызывает `Inc()` и `Observe(duration)`.
+Route должен быть шаблоном вроде `/links/{id}`, а не фактическим
+`/links/8f17...`; иначе каждый ID создаёт новый временной ряд.
 
-## Как выглядит `/metrics`
+Registry и endpoint можно сделать явными:
 
-Обычно endpoint возвращает текстовый exposition format:
-
-```text
-# HELP my_service_http_requests_total Total number of HTTP requests.
-# TYPE my_service_http_requests_total counter
-my_service_http_requests_total{method="GET",route="/health",status_code="200"} 42
-my_service_http_requests_total{method="POST",route="/api/v1/links",status_code="201"} 15
+```go
+mux.Handle("/metrics", promhttp.Handler())
 ```
 
-Что тут важно:
-- metric name: `my_service_http_requests_total`
-- labels: `method`, `route`, `status_code`
-- value: числовое значение
+Этот пример объясняет механику, но не является полным middleware: production-код
+должен корректно получить шаблон route, зафиксировать код ответа, обработать
+panic и исключить служебный трафик согласно контракту команды.
 
-То есть `Prometheus` видит не "одну метрику", а набор series:
+Метрики существуют только в памяти процесса до следующего scrape. Они не
+становятся общими между репликами и не обязаны сохраняться после рестарта.
 
-```text
-metric_name + label set = отдельная time series
-```
+---
 
-## Что делает Prometheus на scrape
+## Что публикует endpoint metrics
 
-Во время scrape:
-- `Prometheus` идет на target, например `http://shortener:8080/metrics`;
-- читает все текущие значения;
-- пишет sample в свою time-series базу;
-- помечает, жив ли target;
-- использует timestamp scrape-момента.
-
-То есть каждое значение живет во времени:
+Endpoint обычно отдаёт Prometheus или OpenMetrics exposition format. Для classic
+metrics текст выглядит примерно так:
 
 ```text
-my_service_http_requests_total{route="/api"} @ t1 = 10
-my_service_http_requests_total{route="/api"} @ t2 = 14
-my_service_http_requests_total{route="/api"} @ t3 = 19
+# HELP shortener_http_requests_total Number of completed HTTP requests.
+# TYPE shortener_http_requests_total counter
+shortener_http_requests_total{method="GET",route="/links/{id}",status_code="200"} 42
+
+# HELP shortener_http_request_duration_seconds Duration of completed HTTP requests.
+# TYPE shortener_http_request_duration_seconds histogram
+shortener_http_request_duration_seconds_bucket{method="GET",route="/links/{id}",le="0.1"} 38
+shortener_http_request_duration_seconds_bucket{method="GET",route="/links/{id}",le="0.3"} 41
+shortener_http_request_duration_seconds_bucket{method="GET",route="/links/{id}",le="+Inf"} 42
+shortener_http_request_duration_seconds_sum{method="GET",route="/links/{id}"} 3.72
+shortener_http_request_duration_seconds_count{method="GET",route="/links/{id}"} 42
 ```
 
-Из этого уже можно считать:
-- скорость роста;
-- изменения за окно;
-- latency percentiles;
-- error rate.
+Важны четыре сущности:
 
-## Как строится flow end-to-end
+- имя metric family;
+- набор labels;
+- значение sample;
+- metadata `HELP` и `TYPE` в exposition format.
 
-### 1. Код инструментария
+Один metric name не равен одному временному ряду:
 
-Ты вшиваешь счетчики, гейджи, гистограммы в:
-- HTTP middleware;
-- service layer;
-- repository layer;
-- Kafka consumer;
-- Redis/Postgres/ClickHouse path.
+```text
+metric name + полный label set = time series
+```
 
-### 2. Export endpoint
+Если меняется `route`, `status_code`, `pod` или другой label, появляется другой
+ряд. Именно поэтому cardinality нужно оценивать в момент проектирования, а не
+после появления медленного dashboard.
 
-Сервис публикует `/metrics`.
+Endpoint `/metrics` обычно не публикуют в публичный интернет. Его доступность,
+аутентификация и сетевые правила являются частью модели угроз и эксплуатации.
 
-Вопрос на понимание:
-- нужно ли отдавать metrics отдельным портом?
+---
 
-Ответ:
-- локально и в небольших сервисах часто достаточно того же HTTP server;
-- в больших системах иногда делают отдельный admin/metrics port.
+## Что происходит во время scrape
 
-### 3. Prometheus scrape config
-
-В конфиге задаются targets:
+Для каждого target Prometheus по расписанию выполняет HTTP-запрос, разбирает
+ответ и сохраняет samples. Упрощённая конфигурация:
 
 ```yaml
+global:
+  scrape_interval: 15s
+  scrape_timeout: 10s
+
 scrape_configs:
   - job_name: shortener
     metrics_path: /metrics
@@ -151,177 +166,246 @@ scrape_configs:
       - targets: ["shortener:8080"]
 ```
 
-Именно это связывает приложение и Prometheus.
+При успешном scrape происходят следующие шаги:
 
-### 4. Query layer
+1. Prometheus обращается к итоговому `__address__` по настроенным scheme и path.
+2. Endpoint формирует снимок метрик процесса на момент запроса.
+3. Scraper проверяет формат и применяет ограничения scrape, если они настроены.
+4. Target labels объединяются с labels из samples.
+5. `metric_relabel_configs` применяются последним шагом перед ingestion.
+6. Samples записываются в TSDB.
 
-Дальше запрос идёт уже не про raw value, а про time-based вопрос:
+По умолчанию timestamp назначает Prometheus на момент scrape. Exporter может
+передать собственный timestamp, а `honor_timestamps` управляет тем, будет ли он
+сохранён. Для обычной прямой инструментации явные timestamps почти никогда не
+нужны: они усложняют staleness и поиск задержавшихся данных.
 
-```promql
-rate(my_service_http_requests_total[5m])
+Prometheus также создаёт метрики самого scrape:
+
+- `up` — удался ли scrape;
+- `scrape_duration_seconds` — сколько он занял;
+- `scrape_samples_scraped` — сколько samples прочитано;
+- `scrape_samples_post_metric_relabeling` — сколько осталось после metric
+  relabeling;
+- `scrape_series_added` — сколько новых рядов добавлено.
+
+`up=1` означает только успешный scrape endpoint. Это не гарантия readiness,
+здоровья зависимостей или способности обслуживать пользовательский трафик.
+
+### Что происходит при исчезновении series
+
+Если target перестал публиковать ряд или был удалён из discovery, Prometheus
+помечает ряд stale. После этого instant query больше не использует его последнее
+значение как текущее. На графике ряд заканчивается, а не продолжается навсегда.
+
+Это отличается от «получили sample со значением 0». Отсутствие ряда и ноль —
+разные состояния, поэтому ожидаемые label combinations полезно инициализировать
+нулём, когда их множество известно заранее.
+
+---
+
+## Как Prometheus обнаруживает targets
+
+Static config из предыдущего примера удобен для локального стенда, но в
+динамической среде список endpoints предоставляет service discovery:
+
+- Kubernetes API;
+- Consul;
+- cloud provider API;
+- DNS или file-based discovery;
+- другой поддерживаемый механизм.
+
+Discovery создаёт кандидатов с внутренними labels. Затем `relabel_configs`
+выбирают нужные targets, задают `__address__`, `__metrics_path__`, `job`,
+`instance` и стабильные инфраструктурные labels. Подробный разбор находится в
+[статье о discovery нескольких pods](./06-how-prometheus-discovers-and-scrapes-multiple-pods.md)
+и [статье о relabeling](./03-prometheus-relabeling-and-target-labels.md).
+
+---
+
+## Почему pull model удобна
+
+В основном сценарии Prometheus сам инициирует scrape. Это даёт несколько
+практических преимуществ:
+
+- расписание, timeout и ограничения сбора контролируются централизованно;
+- наличие endpoint можно проверить обычным HTTP-запросом;
+- исчезнувший target виден через discovery и `up`;
+- приложение не знает адрес Prometheus и не хранит credentials для отправки;
+- один endpoint можно независимо читать для локальной диагностики.
+
+Цена pull model:
+
+- Prometheus должен иметь сетевой путь до каждого target;
+- firewall, service mesh и TLS становятся частью scrape path;
+- короткоживущий процесс может завершиться до первого scrape;
+- при очень большом числе targets нужно масштабировать и разделять сбор.
+
+Pull не делает систему автоматически дешёвой или надёжной. Высокая cardinality,
+медленный endpoint и слишком тяжёлые queries одинаково опасны при любой модели
+доставки.
+
+---
+
+## Где push действительно нужен
+
+Pushgateway предназначен прежде всего для короткоживущих batch jobs уровня
+сервиса, которые могут закончиться до scrape. Задача публикует, например:
+
+- timestamp последнего успешного завершения;
+- timestamp последнего завершения с любым результатом;
+- длительность последнего запуска;
+- число обработанных записей.
+
+Pushgateway не превращает Prometheus в универсальную push-систему и не подходит
+как замена scrape для обычных сервисных реплик. Он сохраняет отправленные ряды,
+пока их явно не удалят; забытая очистка создаёт устаревшие данные. В labels
+нельзя использовать идентификатор каждого запуска, иначе одновременно растут
+cardinality и число stale grouping keys.
+
+Долго работающую batch job полезно также scrape во время выполнения, чтобы
+видеть потребление ресурсов и промежуточный прогресс.
+
+---
+
+## Как появляются dashboards и alerts
+
+TSDB хранит исходные samples. Пользовательский ответ появляется только после
+PromQL-запроса.
+
+Исходные samples counter:
+
+```text
+t1 = 10
+t2 = 14
+t3 = 19
 ```
 
-или
+Скорость запросов:
 
 ```promql
-histogram_quantile(0.95, sum by (le) (rate(my_service_http_request_duration_seconds_bucket[5m])))
+sum(rate(shortener_http_requests_total[5m]))
 ```
 
-### 5. Visualization and alerting
-
-После этого:
-- `Grafana` рисует dashboards;
-- alert rules смотрят на те же series;
-- recording rules считают pre-aggregated views.
-
-## Как думать о метриках правильно
-
-Нельзя начинать с вопроса:
-- "какие метрики обычно ставят?"
-
-Надо начинать с вопроса:
-- "на какой operational question эта метрика отвечает?"
-
-Примеры нормальных вопросов:
-- растет ли ошибка на create endpoint;
-- падает ли cache hit ratio;
-- растет ли latency Postgres path;
-- успевает ли consumer обрабатывать сообщения;
-- сколько времени занимает ClickHouse insert;
-- есть ли backpressure на event pipeline.
-
-## Основные классы метрик в backend-сервисе
-
-### HTTP / API
-
-Почти всегда нужны:
-- `requests_total`
-- `request_duration_seconds`
-- иногда `in_flight_requests`
-
-Обычно labels:
-- `method`
-- `route`
-- `status_code`
-
-### Domain / business
-
-Это не инфраструктура, а продуктовые события:
-- `link_creates_total`
-- `redirect_resolves_total`
-- `link_visit_publish_total`
-
-Их сила в том, что они отвечают на вопросы продукта, а не только платформы.
-
-### Storage
-
-Очень полезны:
-- `postgres_operations_total`
-- `postgres_operation_duration_seconds`
-- `redis_operations_total`
-- `redis_operation_duration_seconds`
-
-Обычно labels:
-- `operation`
-- `result`
-
-Никогда не надо пихать туда:
-- raw SQL
-- Redis key
-- full URL
-- user ID
-
-### Async / worker
-
-Для consumer'ов и jobs обычно нужны:
-- `events_total`
-- `operation_duration_seconds`
-- queue lag
-- retry / DLQ counters
-
-## Что такое good metric contract
-
-Хорошая метрика:
-- стабильна по имени;
-- имеет мало labels;
-- labels имеют ограниченный набор значений;
-- соответствует конкретному вопросу;
-- не тянет high-cardinality поля.
-
-Плохая метрика:
-- зависит от raw path, `request_id`, user id, SQL text или short code;
-- меняется именем от случая к случаю;
-- дублирует то, что уже лучше видно в traces или logs.
-
-## Где чаще всего ломаются
-
-### 1. Слишком много labels
-
-Если добавить label вроде:
-- `user_id`
-- `email`
-- `trace_id`
-- `request_id`
-- `short_code`
-
-то можно получить взрыв cardinality.
-
-Это опасно, потому что:
-- растет память;
-- тяжелее queries;
-- дороже storage;
-- Prometheus/Grafana становятся медленными.
-
-### 2. Неправильное понимание counter
-
-Counter не надо читать как "текущее число".
-
-Его надо читать через:
-- `rate()`
-- `increase()`
-
-То есть не:
+p95 classic histogram:
 
 ```promql
-my_service_http_requests_total
+histogram_quantile(
+  0.95,
+  sum by (le) (
+    rate(shortener_http_request_duration_seconds_bucket[5m])
+  )
+)
 ```
 
-а чаще:
+Один и тот же PromQL может использоваться в нескольких местах:
 
-```promql
-rate(my_service_http_requests_total[5m])
-```
+- Prometheus UI для ad-hoc проверки;
+- Grafana для dashboard;
+- recording rule для заранее вычисленного ряда;
+- alert rule для проверки условия во времени.
 
-### 3. Смешивание ownership
+Grafana не меняет модель данных и не «объединяет pods сама». Она визуализирует
+результат запроса; необходимый уровень агрегации должен быть выражен в PromQL.
 
-Нельзя свалить все метрики в один абстрактный giant file без структуры.
+---
 
-Лучше группировать по смыслу:
-- `http`
-- `domain`
-- `storage`
-- `eventing`
-- `analytics`
+## Контракт хорошей метрики
 
-### 4. Считать probe traffic как user traffic
+До добавления метрики полезно записать её контракт:
 
-Очень частая ошибка:
-- `/metrics`
-- `/health/live`
-- `/health/ready`
+| Поле | Вопрос |
+| --- | --- |
+| Цель | На какой operational question отвечает сигнал? |
+| Владелец | Состояние локально процессу, общее для очереди или относится к клиенту? |
+| Событие | В какой момент counter увеличивается или duration наблюдается? |
+| Единица | Секунды, байты, ratio или количество? |
+| Labels | Какие значения допустимы и ограничены? |
+| Агрегация | Нужно `sum`, `max`, `avg` или агрегация недопустима? |
+| Жизненный цикл | Что происходит при рестарте, rollout и отсутствии события? |
+| Потребители | Dashboard, alert, SLO, autoscaling или расследование? |
 
-попадают в те же HTTP metrics, что и реальные пользовательские запросы.
+Например, HTTP counter разумно увеличивать после завершения запроса: тогда его
+labels результата совпадают с метрикой duration и позволяют считать error ratio
+на одном множестве запросов. Активные запросы отдельно показывает gauge
+`in_flight`.
 
-Итог:
-- RPS и latency dashboards искажаются.
+---
 
-## Practical Rule
+## Где ломается путь
 
-Если коротко:
+### Метрика не публикуется
 
-- приложение считает метрики локально;
-- `Prometheus` scrapes `/metrics`;
-- каждая комбинация `metric + labels` — отдельная series;
-- дальше `PromQL` отвечает уже не на вопрос "какое число сейчас", а на вопрос "как signal вел себя во времени".
+Collector не зарегистрирован, ветка кода ещё не выполнялась или label
+combination не инициализирована. Сначала нужно открыть endpoint и найти имя
+метрики.
 
-Это и есть правильная mental model для Prometheus.
+### Target не обнаружен
+
+Service discovery не видит объект, selectors не совпадают или RBAC запрещает
+list/watch. Проверяют discovered targets и итоговый список targets.
+
+### Scrape не проходит
+
+Неверны address, port, path, TLS или credentials; endpoint отвечает дольше
+timeout либо превышает настроенный limit. Проверяют `up`, scrape-метрики и текст
+ошибки target.
+
+### Samples отброшены
+
+Metric relabeling, sample limit, label limit или конфликт формата может не дать
+записать данные. Сравнение `scrape_samples_scraped` и
+`scrape_samples_post_metric_relabeling` помогает локализовать слой.
+
+### Запрос возвращает не то
+
+Bare selector даёт тысячи рядов, `rate()` применён после `sum()`, потерян label
+`le` classic histogram или dashboard фильтрует несуществующий label. Запрос
+собирают от table view: selector → rate → aggregation → вычисление ratio или
+quantile.
+
+### Служебный трафик искажает RED
+
+`/metrics`, liveness и readiness попадают в пользовательские HTTP metrics. Нужно
+заранее решить, исключаются ли они в middleware или фильтруются по
+low-cardinality route, и одинаково реализовать это во всех сервисах.
+
+---
+
+## Interview-ready answer
+
+**1. Как метрика доходит от Go-приложения до Grafana?**
+
+- Инструментация — приложение меняет counter, gauge или histogram в памяти.
+- Экспорт — HTTP endpoint публикует registry в exposition format.
+- Сбор — Prometheus обнаруживает target, применяет target relabeling и делает
+  scrape.
+- Хранение — samples после metric relabeling записываются в TSDB.
+- Чтение — PromQL агрегирует ряды, а Grafana визуализирует результат.
+
+**2. Почему Prometheus обычно использует pull?**
+
+- Контроль — расписание, timeout и targets задаются на стороне системы сбора.
+- Диагностика — endpoint можно проверить напрямую, а неуспешный scrape виден
+  через `up`.
+- Развязка — приложению не нужно знать адрес Prometheus и credentials отправки.
+- Ограничение — Prometheus должен иметь сетевой доступ к targets, а очень
+  короткие batch jobs требуют отдельного решения.
+
+**3. Означает ли `up=1`, что сервис здоров?**
+
+- Суть — `up=1` означает, что Prometheus успешно прочитал и разобрал endpoint
+  этого target.
+- Не гарантирует — readiness, доступность зависимостей, корректность бизнес-
+  операций и достаточную latency.
+- Применение — `up` контролирует путь сбора, а пользовательское здоровье
+  оценивают RED/SLO-сигналами.
+
+**4. Чем target relabeling отличается от metric relabeling?**
+
+- Target relabeling — выполняется до scrape, выбирает endpoint и формирует его
+  labels.
+- Metric relabeling — выполняется после scrape перед ingestion и работает с
+  отдельными samples.
+- Цена — metric relabeling не экономит работу endpoint и передачу ответа, потому
+  что sample уже был собран по сети.
