@@ -1,15 +1,11 @@
 # Задача 6: Singleflight
 
-Singleflight — паттерн дедупликации **одновременных** одинаковых запросов. Если 100 goroutines одновременно просят "загрузить user 42", только **один** запрос реально идёт в БД, остальные ждут и получают тот же результат.
-
-Это решение против **cache stampede** и **thundering herd** — когда кэш истёк и сотни клиентов одновременно ломятся в БД за одним ключом.
-
 ## Содержание
 
 - [Формулировка](#формулировка)
 - [Уточняющие вопросы](#уточняющие-вопросы)
 - [Базовое решение](#базовое-решение)
-- [Production-grade: `x/sync/singleflight`](#production-grade-используй-golangorgxsyncsingleflight)
+- [Библиотечная реализация](#библиотечная-реализация-golangorgxsyncsingleflight)
   - [`DoChan` для async API](#dochan-для-async-api)
 - [Singleflight для cache stampede](#singleflight-для-cache-stampede)
 - [Подводный камень: shared result mutation](#подводный-камень-shared-result-mutation)
@@ -19,8 +15,14 @@ Singleflight — паттерн дедупликации **одновремен�
 - [Подводные камни](#подводные-камни)
 - [Возможные расширения](#возможные-расширения)
 - [Реальные применения](#реальные-применения)
-- [Что важно показать на собеседовании](#что-важно-показать-на-собеседовании)
+- [Interview-ready answer](#interview-ready-answer)
 - [Связки](#связки)
+
+Singleflight дедуплицирует одновременно выполняемые вызовы с одинаковым ключом.
+Один caller запускает функцию, остальные ожидают тот же результат. После
+завершения результат не кэшируется.
+
+---
 
 ## Формулировка
 
@@ -62,7 +64,11 @@ Singleflight — паттерн дедупликации **одновремен�
 ```go
 package singleflight
 
-import "sync"
+import (
+    "fmt"
+    "runtime/debug"
+    "sync"
+)
 
 type result struct {
     val any
@@ -79,7 +85,7 @@ type Group struct {
     m  map[string]*call
 }
 
-func (g *Group) Do(key string, fn func() (any, error)) (any, error) {
+func (g *Group) Do(key string, fn func() (any, error)) (val any, err error) {
     g.mu.Lock()
     if g.m == nil {
         g.m = make(map[string]*call)
@@ -98,15 +104,23 @@ func (g *Group) Do(key string, fn func() (any, error)) (any, error) {
     g.m[key] = c
     g.mu.Unlock()
 
-    // Выполняем (без lock — другие могут join'иться)
+    // Cleanup обязан выполниться и при panic callback.
+    defer func() {
+        if recovered := recover(); recovered != nil {
+            c.res.err = fmt.Errorf("singleflight panic: %v\n%s", recovered, debug.Stack())
+        }
+
+        g.mu.Lock()
+        if g.m[key] == c {
+            delete(g.m, key)
+        }
+        g.mu.Unlock()
+
+        c.wg.Done()
+        val, err = c.res.val, c.res.err
+    }()
+
     c.res.val, c.res.err = fn()
-    c.wg.Done()
-
-    // Удаляем call из map (новые вызовы будут делать new call)
-    g.mu.Lock()
-    delete(g.m, key)
-    g.mu.Unlock()
-
     return c.res.val, c.res.err
 }
 ```
@@ -136,9 +150,10 @@ for i := 0; i < 100; i++ {
 
 ---
 
-## Production-grade: используй `golang.org/x/sync/singleflight`
+## Библиотечная реализация: `golang.org/x/sync/singleflight`
 
-В реальной работе **не пиши свой** — есть стандартная реализация:
+В реальной работе обычно используют готовую реализацию из внешнего модуля
+`golang.org/x/sync`:
 
 ```go
 import "golang.org/x/sync/singleflight"
@@ -154,17 +169,18 @@ func (s *UserService) GetUser(ctx context.Context, id int64) (*User, error) {
         return nil, err
     }
     if shared {
-        // Это был "ждал чужой call" — useful for metrics
+        // Результат был разделён хотя бы между двумя callers.
+        // shared может быть true и у caller, который выполнял fn.
         s.metrics.SingleflightHit.Inc()
     }
     return v.(*User), nil
 }
 ```
 
-**Что даёт стандартная версия:**
+**Что даёт библиотечная версия:**
 - `Do(key, fn) (val any, err error, shared bool)` — `shared` показывает был ли результат разделён
 - `DoChan(key, fn) <-chan Result` — async API
-- `Forget(key)` — принудительно забыть in-flight call (полезно если хотим retry)
+- `Forget(key)` — забыть ещё выполняющийся call и разрешить новый независимый запуск
 
 ### `DoChan` для async API
 
@@ -181,7 +197,10 @@ case <-ctx.Done():
 }
 ```
 
-Полезно когда хочешь иметь возможность отменить через `ctx` — но **сам fn не отменяется** — просто прекращается ожидание. Другие waiter'ы продолжают ждать.
+Полезно когда хочешь иметь возможность отменить ожидание через `ctx`, но **сам
+`fn` не отменяется**. Возвращаемый channel содержит ровно один результат и не
+закрывается, поэтому читать из него повторно нельзя. Panic callback библиотека
+не превращает в обычный `error`: он распространяется как panic.
 
 > Разбор устройства `x/sync/singleflight` (структуры `Group`/`call`, `Do` vs `DoChan`, почему канал `cap 1`, `Forget`, обработка паники) — в теории: [03-sync-primitives](../../../01-go-core/concurrency-and-performance/03-sync-primitives.md), раздел про `singleflight`.
 
@@ -211,13 +230,26 @@ func (r *CachedRepo) GetUser(ctx context.Context, id int64) (*User, error) {
 
     // 2. Cache miss — используем singleflight для DB lookup
     v, err, _ := r.g.Do(key, func() (any, error) {
-        u, err := r.db.GetUser(ctx, id)
+        sharedCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+        defer cancel()
+
+        // Повторная проверка закрывает окно между внешним miss и входом в Do.
+        if data, err := r.cache.Get(sharedCtx, key).Bytes(); err == nil {
+            var cached User
+            if err := json.Unmarshal(data, &cached); err == nil {
+                return &cached, nil
+            }
+        }
+
+        u, err := r.db.GetUser(sharedCtx, id)
         if err != nil {
             return nil, err
         }
         // Сохраняем в кэш
         if data, err := json.Marshal(u); err == nil {
-            r.cache.Set(ctx, key, data, 5*time.Minute)
+            // Cache fill — best effort; в production ошибку нужно записать в
+            // лог/метрику, но успешный DB result из-за неё не теряется.
+            _ = r.cache.Set(sharedCtx, key, data, 5*time.Minute).Err()
         }
         return u, nil
     })
@@ -272,9 +304,11 @@ return cloneUser(v.(*User)), nil
 
 Используй immutable domain objects (uncommon в Go).
 
-### 4. Возвращать `[]byte` (JSON)
+### 4. Возвращать immutable-представление
 
-Все парсят свой результат — нет shared mutable state.
+Например, вернуть `string` с сериализованным JSON и отдельно декодировать его у
+каждого caller. `[]byte` не является immutable и без копирования остаётся общей
+изменяемой памятью.
 
 ---
 
@@ -285,23 +319,27 @@ return cloneUser(v.(*User)), nil
 ```go
 func (s *Service) GetUser(ctx context.Context, id int64) (*User, error) {
     v, err, _ := s.g.Do(key, func() (any, error) {
-        // fn НЕ получает ctx первого waiter'а автоматически
-        // Используй свой context (например, ctx из background)
-        bgCtx := context.Background()
-        return s.repo.GetByID(bgCtx, id)
+        // Наивный вариант: shared work зависит от ctx первого caller'а.
+        return s.repo.GetByID(ctx, id)
     })
-    return v.(*User), err
+    if err != nil {
+        return nil, err
+    }
+    return v.(*User), nil
 }
 ```
 
 **Проблема:** если первый waiter имеет timeout 1 секунду, второй 10 секунд — второй "наследует" timeout первого (он отменится через 1 секунду).
 
-**Решение:** использовать background context внутри fn, или DoChan + select с per-caller ctx:
+**Решение:** отделить lifetime shared work от отмены первого caller, но ограничить
+его собственным timeout; ожидание каждого caller сделать через `DoChan`:
 
 ```go
 ch := g.DoChan(key, func() (any, error) {
-    // Не привязан к ctx ни одного caller'а
-    return loadFromDB(context.Background(), id)
+    // Сохраняем values, но отделяемся от cancellation первого caller.
+    sharedCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+    defer cancel()
+    return loadFromDB(sharedCtx, id)
 })
 
 select {
@@ -325,47 +363,50 @@ Caller с коротким timeout уйдёт раньше, остальные �
 // Все ждут результат первого call'а
 ```
 
-**Решение для retry:**
-```go
-v, err, _ := g.Do(key, fn)
-if err != nil {
-    g.Forget(key)  // ← следующий Do(key, fn) создаст новый call
-    return nil, err
-}
-```
-
-`Forget` полезен для negative caching control: "ошибочный результат не надо кэшировать в singleflight на длительное время".
+После завершения вызов автоматически удаляется, поэтому следующий `Do` и без
+`Forget` снова выполнит `fn`. `Forget(key)` нужен, пока старый вызов ещё
+выполняется: он разрешает следующему caller запустить второй независимый вызов с
+тем же ключом. Это осознанно нарушает дедупликацию и может увеличить нагрузку.
 
 ---
 
 ## Тесты
 
 ```go
-import "golang.org/x/sync/singleflight"
+import (
+    "context"
+    "errors"
+    "fmt"
+    "sync/atomic"
+    "testing"
+    "time"
+
+    "golang.org/x/sync/singleflight"
+)
 
 func TestSingleflight_Dedups(t *testing.T) {
     var g singleflight.Group
     var calls atomic.Int32
+    release := make(chan struct{})
 
     fn := func() (any, error) {
         calls.Add(1)
-        time.Sleep(50 * time.Millisecond)
+        <-release
         return "value", nil
     }
 
-    var wg sync.WaitGroup
+    channels := make([]<-chan singleflight.Result, 0, 100)
     for i := 0; i < 100; i++ {
-        wg.Add(1)
-        go func() {
-            defer wg.Done()
-            v, _, _ := g.Do("key", fn)
-            if v.(string) != "value" {
-                t.Errorf("got %v, want value", v)
-            }
-        }()
+        channels = append(channels, g.DoChan("key", fn))
     }
-    wg.Wait()
+    close(release)
 
+    for _, ch := range channels {
+        result := <-ch
+        if result.Err != nil || result.Val != "value" {
+            t.Errorf("got (%v, %v), want (value, nil)", result.Val, result.Err)
+        }
+    }
     if calls.Load() != 1 {
         t.Errorf("fn called %d times, expected 1", calls.Load())
     }
@@ -373,57 +414,44 @@ func TestSingleflight_Dedups(t *testing.T) {
 
 func TestSingleflight_SharedFlag(t *testing.T) {
     var g singleflight.Group
+    release := make(chan struct{})
 
     fn := func() (any, error) {
-        time.Sleep(50 * time.Millisecond)
+        <-release
         return 42, nil
     }
 
-    var sharedCount, notSharedCount atomic.Int32
-    var wg sync.WaitGroup
-    for i := 0; i < 10; i++ {
-        wg.Add(1)
-        go func() {
-            defer wg.Done()
-            _, _, shared := g.Do("k", fn)
-            if shared {
-                sharedCount.Add(1)
-            } else {
-                notSharedCount.Add(1)
-            }
-        }()
-    }
-    wg.Wait()
+    first := g.DoChan("k", fn)
+    second := g.DoChan("k", fn)
+    close(release)
 
-    // Один caller "владеет" вызовом, у него shared=false (либо true — implementation detail)
-    // Главное — total = 10
-    total := sharedCount.Load() + notSharedCount.Load()
-    if total != 10 {
-        t.Errorf("total %d, want 10", total)
+    r1, r2 := <-first, <-second
+    if !r1.Shared || !r2.Shared {
+        t.Fatalf("shared flags = (%v, %v), want both true", r1.Shared, r2.Shared)
     }
 }
 
 func TestSingleflight_DifferentKeys(t *testing.T) {
     var g singleflight.Group
     var calls atomic.Int32
+    release := make(chan struct{})
 
     fn := func() (any, error) {
         calls.Add(1)
-        time.Sleep(50 * time.Millisecond)
+        <-release
         return "value", nil
     }
 
-    var wg sync.WaitGroup
+    channels := make([]<-chan singleflight.Result, 0, 100)
     for i := 0; i < 100; i++ {
-        wg.Add(1)
-        go func(key string) {
-            defer wg.Done()
-            g.Do(key, fn)
-        }(fmt.Sprintf("key-%d", i%5))  // 5 разных ключей
+        key := fmt.Sprintf("key-%d", i%5)
+        channels = append(channels, g.DoChan(key, fn))
     }
-    wg.Wait()
+    close(release)
+    for _, ch := range channels {
+        <-ch
+    }
 
-    // 5 ключей → 5 calls (по одному на ключ)
     if calls.Load() != 5 {
         t.Errorf("calls %d, expected 5", calls.Load())
     }
@@ -432,31 +460,32 @@ func TestSingleflight_DifferentKeys(t *testing.T) {
 func TestSingleflight_ErrorShared(t *testing.T) {
     var g singleflight.Group
     expectedErr := errors.New("fail")
+    release := make(chan struct{})
 
     fn := func() (any, error) {
-        time.Sleep(50 * time.Millisecond)
+        <-release
         return nil, expectedErr
     }
 
-    var wg sync.WaitGroup
+    channels := make([]<-chan singleflight.Result, 0, 10)
     for i := 0; i < 10; i++ {
-        wg.Add(1)
-        go func() {
-            defer wg.Done()
-            _, err, _ := g.Do("key", fn)
-            if !errors.Is(err, expectedErr) {
-                t.Errorf("got %v, want %v", err, expectedErr)
-            }
-        }()
+        channels = append(channels, g.DoChan("key", fn))
     }
-    wg.Wait()
+    close(release)
+
+    for _, ch := range channels {
+        if result := <-ch; !errors.Is(result.Err, expectedErr) {
+            t.Errorf("got %v, want %v", result.Err, expectedErr)
+        }
+    }
 }
 
 func TestSingleflight_DoChan(t *testing.T) {
     var g singleflight.Group
+    release := make(chan struct{})
 
     fn := func() (any, error) {
-        time.Sleep(100 * time.Millisecond)
+        <-release
         return "result", nil
     }
 
@@ -467,9 +496,15 @@ func TestSingleflight_DoChan(t *testing.T) {
 
     select {
     case r := <-ch:
-        t.Errorf("shouldn't receive yet: %v", r)
+        t.Fatalf("shouldn't receive before release: %v", r)
     case <-ctx.Done():
         // Expected — caller timeout'ed
+    }
+
+    // Дожидаемся shared work, чтобы тест не оставлял фоновую goroutine.
+    close(release)
+    if result := <-ch; result.Err != nil || result.Val != "result" {
+        t.Fatalf("result = (%v, %v)", result.Val, result.Err)
     }
 }
 ```
@@ -499,7 +534,7 @@ Singleflight — для **concurrent** дедупликации, не для cac
 
 Первый waiter имеет ctx с timeout 100ms — если fn использует этот ctx и он истёк, второй caller (с большим timeout) получит cancelled error.
 
-### 4. Никогда не возвращает channel — `Do` блокирует
+### 4. `Do` блокирует caller
 
 ```go
 v, _, _ := g.Do(key, fn)  // ← блокирует пока не закончится fn
@@ -507,27 +542,29 @@ v, _, _ := g.Do(key, fn)  // ← блокирует пока не закончи
 
 Если fn зависнет — все waiter'ы зависнут. Используй DoChan + select с ctx если нужен timeout.
 
-### 5. Forget может race с new call
+### 5. `Forget` не отменяет старый call
 
 ```go
-g.Do(k, fn)  // fn'у выполнился, c удалён из map
+g.Do(k, fn)  // fn выполнился, call удалён из map
 g.Forget(k)  // ← already removed, no-op
 g.Do(k, fn)  // новый call (правильно)
 ```
 
-`Forget` безопасен. Главное — понимать его semantics: "забудь in-flight (если есть)".
+`Forget` безопасен для структуры данных, но не останавливает старый `fn`. Пока он
+ещё работает, следующий `Do` может запустить второй `fn` с тем же key.
 
 ### 6. Не подходит для distributed scenarios
 
 Singleflight — **local** (в одном процессе). На 10 pod'ах будет 10 параллельных DB calls (по одному на pod). Для distributed dedup — нужен distributed lock (Redis SET NX) или leader election.
 
-### 7. Возможный starvation для slow consumer
+### 7. Custom channel implementation может блокировать рассылку
 
 В обычном Do — все waiter'ы синхронны. Slow waiter не блокирует других (они уже получили `wg`). Но если используешь свою реализацию через channel — slow consumer может block.
 
 ### 8. Не для long-running operations
 
-Singleflight отлично подходит для milliseconds-level операций (DB query, API call). Для long-running (минуты) — другие подходы (job queue, persistent task).
+Чем дольше операция, тем больше waiter'ов и ресурсов она удерживает. Для задач на
+минуты обычно лучше job queue с persistent status, retry и независимым polling.
 
 ---
 
@@ -575,25 +612,16 @@ func (c *CachedSingleflight) Do(key string, fn func() (any, error)) (any, error)
 
 ### 3. Distributed singleflight (Redis-based)
 
-```go
-// Через Redis SETNX
-ok := redis.SetNX(ctx, "lock:"+key, "1", 10*time.Second)
-if ok {
-    // We own the lock — do the work
-    val := compute()
-    redis.Set(ctx, "result:"+key, val, ttl)
-} else {
-    // Someone else — poll until result appears
-    for {
-        if val, ok := redis.Get("result:"+key); ok {
-            return val
-        }
-        time.Sleep(50*time.Millisecond)
-    }
-}
-```
+Простой `SET NX` с константой `"1"` недостаточен: владелец может потерять lease,
+а затем удалить уже чужой lock; polling без context может зависнуть; TTL может
+истечь раньше вычисления.
 
-Не идеально, но работает для cross-pod дедупликации.
+Безопаснее использовать уникальный ownership token, lease с контролируемым
+продлением и compare-and-delete через Lua. Waiters повторно проверяют result с
+bounded backoff и своим context. Для side effects одного lock всё равно мало:
+после истечения lease старый владелец способен продолжить работу, поэтому нужны
+fencing token или идемпотентная запись. Часто проще принять «один вызов на pod»
+или вынести работу в очередь, чем строить distributed singleflight.
 
 ### 4. Metrics
 
@@ -601,7 +629,8 @@ Counter: singleflight hits (shared=true). Показывает наскольк�
 
 ### 5. Per-key timeout
 
-Если конкретный key зависнет — timeout и Forget.
+Shared work получает собственный timeout. `Forget` можно использовать, чтобы
+разрешить новый запуск, но старый `fn` он не останавливает.
 
 ### 6. Hierarchical (group of groups)
 
@@ -619,16 +648,34 @@ Counter: singleflight hits (shared=true). Показывает наскольк�
 
 ---
 
-## Что важно показать на собеседовании
+## Interview-ready answer
 
-1. **Знать что есть `golang.org/x/sync/singleflight`** — не писать свой когда не просят
-2. **Понимать что singleflight ≠ cache** — он только дедуплицирует concurrent
-3. **Shared result mutation** — предупредить о риске
-4. **Cache stampede как мотивирующий пример** — почему это критично
-5. **Distributed случай требует другого подхода** — Redis lock или брокер
-6. **Forget()** для retry — знать про него
-7. **DoChan + select** для ctx integration
-8. **Внутренности** (если копнут): `cap 1` у `DoChan`-канала, рассылка под мьютексом, обработка паники — разобрано в [03-sync-primitives](../../../01-go-core/concurrency-and-performance/03-sync-primitives.md)
+**1. Что делает singleflight?**
+
+- Он объединяет одновременные вызовы с одинаковым key: один caller выполняет
+  функцию, остальные получают тот же результат.
+- Это не cache: после завершения следующий вызов снова запустит функцию.
+
+**2. Что означает `shared`?**
+
+- Результат был выдан нескольким callers. Флаг может быть `true` и у caller,
+  который фактически выполнял функцию.
+- Объект результата общий, поэтому callers не должны конкурентно изменять его.
+
+**3. Как работать с context?**
+
+- `Do` блокирует и не принимает context. `DoChan` позволяет каждому caller ждать
+  через свой `select`, но само shared-вычисление нужно запускать с отдельным
+  ограниченным context.
+
+**4. Как singleflight защищает cache?**
+
+- После внешнего cache miss код входит в `Do` и повторно проверяет cache внутри,
+  затем только один caller обращается к DB и заполняет cache.
+- Группа локальна процессу; между pods нужны другой coordination mechanism или
+  допустимая дедупликация «один запрос на pod».
+
+---
 
 ## Связки
 
@@ -636,3 +683,4 @@ Counter: singleflight hits (shared=true). Показывает наскольк�
 - [Concurrency и channels](../../../01-go-core/concurrency-and-performance/02-goroutines-and-channels.md)
 - [Reliability patterns: rate limiting](../../../05-system-design/reliability-patterns/04-rate-limiting.md) — другой способ защиты от наплыва
 - [DDoS protection](../../../11-security/perimeter-and-traffic-protection/01-ddos-protection.md)
+- [`golang.org/x/sync/singleflight`](https://pkg.go.dev/golang.org/x/sync/singleflight) — официальный API и семантика `DoChan`/`Forget`

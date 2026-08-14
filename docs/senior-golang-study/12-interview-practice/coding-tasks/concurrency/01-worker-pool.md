@@ -1,6 +1,22 @@
 # Задача 1: Worker Pool
 
-Самая частая concurrency-задача на Go-собеседовании. Спрашивают почти везде, потому что показывает понимание базовых примитивов: goroutines, channels, sync, context.
+## Содержание
+
+- [Формулировка](#формулировка)
+- [Уточняющие вопросы](#уточняющие-вопросы)
+- [Базовое fail-fast решение](#базовое-решение)
+- [Типизированный pool с результатами](#типизированный-pool-с-результатами)
+- [Тесты](#тесты)
+- [Типичные ошибки](#подводные-камни)
+- [Расширения](#возможные-расширения)
+- [Interview-ready answer](#interview-ready-answer)
+- [Связанные материалы](#связки)
+
+Worker pool ограничивает число одновременно выполняемых задач фиксированным
+числом workers. Главные вопросы задачи — кто прекращает приём, как ошибка
+отменяет producer, кто закрывает каналы и какие частичные результаты доступны.
+
+---
 
 ## Формулировка
 
@@ -58,6 +74,9 @@ func Run(ctx context.Context, tasks []Task, concurrency int) error {
         concurrency = 1
     }
 
+    runCtx, cancel := context.WithCancel(ctx)
+    defer cancel()
+
     taskCh := make(chan Task)
     errCh := make(chan error, 1)  // буфер 1 — для первой ошибки
 
@@ -68,26 +87,33 @@ func Run(ctx context.Context, tasks []Task, concurrency int) error {
         wg.Add(1)
         go func() {
             defer wg.Done()
-            for task := range taskCh {
-                if err := task(ctx); err != nil {
-                    select {
-                    case errCh <- err:  // первая ошибка
-                    default:           // буфер заполнен — игнорируем
+            for {
+                select {
+                case <-runCtx.Done():
+                    return
+                case task, ok := <-taskCh:
+                    if !ok {
+                        return
                     }
-                    return  // worker останавливается на ошибке
+                    if err := task(runCtx); err != nil {
+                        select {
+                        case errCh <- err:
+                            cancel()
+                        default:
+                        }
+                        return
+                    }
                 }
             }
         }()
     }
 
-    // Отправляем задачи
+sendLoop:
     for _, task := range tasks {
         select {
         case taskCh <- task:
-        case <-ctx.Done():
-            close(taskCh)
-            wg.Wait()
-            return ctx.Err()
+        case <-runCtx.Done():
+            break sendLoop
         }
     }
     close(taskCh)
@@ -97,7 +123,7 @@ func Run(ctx context.Context, tasks []Task, concurrency int) error {
     case err := <-errCh:
         return err
     default:
-        return nil
+        return ctx.Err()
     }
 }
 ```
@@ -129,7 +155,7 @@ if err := workerpool.Run(ctx, tasks, 10); err != nil {
 
 ---
 
-## Production-grade решение
+## Типизированный pool с результатами
 
 Расширенная версия с:
 - `errgroup` для управления ошибками
@@ -144,13 +170,13 @@ package workerpool
 import (
     "context"
     "fmt"
-    "sync"
+    "runtime/debug"
     "time"
 
     "golang.org/x/sync/errgroup"
 )
 
-// Pool — переиспользуемый worker pool с persistent workers.
+// Pool хранит переиспользуемую конфигурацию; workers создаются на каждый Process.
 type Pool[T any, R any] struct {
     workerFunc  func(ctx context.Context, in T) (R, error)
     concurrency int
@@ -172,6 +198,7 @@ type Result[T any, R any] struct {
     Output   R
     Err      error
     Duration time.Duration
+    Done     bool
 }
 
 // Process обрабатывает все inputs с лимитом параллельности.
@@ -223,27 +250,25 @@ func (p *Pool[T, R]) Process(ctx context.Context, inputs []T) ([]Result[T, R], e
     return results, nil
 }
 
-func (p *Pool[T, R]) processOne(ctx context.Context, input T, result *Result[T, R]) error {
+func (p *Pool[T, R]) processOne(ctx context.Context, input T, result *Result[T, R]) (err error) {
     start := time.Now()
     result.Input = input
 
-    // Panic recovery — один сбойный task не должен валить весь pool
+    // Panic recovery сохраняет процесс живым и превращает panic в ошибку pool.
     defer func() {
+        result.Duration = time.Since(start)
+        result.Done = true
         if r := recover(); r != nil {
-            result.Err = fmt.Errorf("panic: %v", r)
-            result.Duration = time.Since(start)
+            err = fmt.Errorf("worker panic: %v\n%s", r, debug.Stack())
+            result.Err = err
         }
     }()
 
     out, err := p.workerFunc(ctx, input)
     result.Output = out
     result.Err = err
-    result.Duration = time.Since(start)
 
-    if err != nil {
-        return err  // если хочешь fail-fast
-    }
-    return nil
+    return err
 }
 ```
 
@@ -274,6 +299,10 @@ if err != nil {
 }
 
 for _, r := range results {
+    if !r.Done {
+        log.Printf("not started: %s", r.Input)
+        continue
+    }
     if r.Err != nil {
         log.Printf("failed %s: %v", r.Input, r.Err)
         continue
@@ -285,7 +314,7 @@ for _, r := range results {
 **Что добавлено:**
 - **Generics** — type-safe input/output без `any`
 - **errgroup** — встроенная отмена при первой ошибке, координация
-- **Panic recovery** — изолирует сбои отдельных задач
+- **Panic recovery** — превращает panic в наблюдаемую ошибку и отменяет batch
 - **Метрики** — Duration для каждой задачи
 - **Order preservation** — результаты в том же порядке что и inputs (через индекс)
 - **Backpressure** — unbuffered `indices` channel, producer ждёт пока worker'ы заберут
@@ -367,7 +396,7 @@ func TestPool_FailFast(t *testing.T) {
     expectedErr := errors.New("fail")
 
     pool := New(func(ctx context.Context, x int) (int, error) {
-        if x == 10 {
+        if x == 0 {
             return 0, expectedErr
         }
         // Имитируем долгую работу — должны быть отменены через context
@@ -416,6 +445,17 @@ func TestPool_ContextCancel(t *testing.T) {
         t.Errorf("got %v, want DeadlineExceeded", err)
     }
 }
+
+func TestPool_PanicBecomesError(t *testing.T) {
+    pool := New(func(context.Context, int) (int, error) {
+        panic("boom")
+    }, 1)
+
+    _, err := pool.Process(context.Background(), []int{1})
+    if err == nil {
+        t.Fatal("Process() error = nil, want panic error")
+    }
+}
 ```
 
 Если есть `go test -race ./...` — проверь что race detector не находит проблем.
@@ -451,7 +491,10 @@ func bad(inputs []int, concurrency int) {
 }
 ```
 
-**Решение:** всегда `defer close(ch)` или используй errgroup, который сам управляет cancellation.
+**Решение:** owner делает `defer close(ch)`. В отменяемом API producer и workers
+дополнительно используют общий context во всех блокирующих операциях.
+`errgroup.WithContext` создаёт такой context, но код всё равно обязан проверять
+его отмену.
 
 ### 2. Захват loop variable (до Go 1.22)
 
@@ -520,22 +563,22 @@ ch <- value  // panic: send on closed channel
 
 **Правило:** только **owner** канала (producer) закрывает его. Consumer'ы — нет.
 
-### 6. Slow worker блокирует pool
+### 6. Slow worker задерживает завершение batch
 
 ```go
-// ❌ Один worker тормозит → все остальные сидят без работы потому что
-// pool ждёт пока медленный завершится перед close(ch)
+// Остальные workers продолжают брать задачи, но весь batch не завершится,
+// пока медленная задача не вернётся.
 ```
 
 В простом дизайне это нормально. Если важно — добавь per-task timeout через context.
 
-### 7. Panic в worker валит весь pool
+### 7. Panic в worker без recover завершает процесс
 
 ```go
-// ❌ Без recover panic в task валит горутину → goroutine leak → возможно весь pool
+// ❌ Panic, не перехваченный в этой goroutine, завершает весь процесс.
 go func() {
     for t := range ch {
-        t()  // panic тут = goroutine dies
+        t()  // panic без recover завершит процесс
     }
 }()
 
@@ -613,19 +656,47 @@ Counter в обработанных задач, histogram latency, gauge in-flig
 
 ---
 
-## Что важно показать на собеседовании
+## Interview-ready answer
 
-1. **Уточняющие вопросы** перед кодом — что важно, что нет
-2. **Использование context** — обязательно
-3. **errgroup или явный error handling** — не игнорировать errors
-4. **Понимание `close(channel)`** — кто закрывает, когда, почему
-5. **`go test -race`** — упомянуть и желательно показать тест
-6. **Знание `golang.org/x/sync/errgroup`** — это standard для большинства задач
-7. **Trade-offs** — почему такой buffer size, почему такой concurrency
+**1. Как устроен fail-fast worker pool?**
+
+- Workers — фиксированное число goroutine читает общий канал задач.
+- Ошибка — первый failure сохраняется и отменяет общий context.
+- Producer — отправляет через `select` и прекращает работу при отмене, поэтому не
+  зависает после остановки workers.
+- Завершение — владелец producer закрывает jobs, затем `WaitGroup` дожидается
+  workers.
+
+**2. Кто закрывает output channel?**
+
+- Владение — канал закрывает coordinator, который знает, что все writers
+  завершились.
+- Механика — отдельная goroutine вызывает `wg.Wait()` и затем `close(out)`, пока
+  consumer параллельно читает результаты.
+- Запрет — worker не закрывает общий output: другие workers ещё могут отправлять.
+
+**3. Как обрабатывать panic задачи?**
+
+- Граница — `recover` ставится вокруг одной задачи, а не вокруг всего цикла без
+  наблюдаемого результата.
+- Ошибка — panic преобразуется в error со stack trace и участвует в выбранной
+  fail-fast или best-effort политике.
+- Причина — неперехваченный panic в любой goroutine завершает процесс.
+
+**4. Какие ограничения остаются?**
+
+- Context — callback должен сам соблюдать отмену; принудительно остановить
+  произвольную Go-функцию нельзя.
+- Порядок — completion order отличается от input order, если результаты не
+  раскладываются по индексам.
+- Backpressure — размер очереди определяет число ожидающих задач, но не повышает
+  производительность медленного downstream.
+
+---
 
 ## Связки
 
 - [Background workers](../../../04-architecture-and-patterns/patterns/04-background-workers.md) — паттерны production worker'ов
-- [Worker pool patterns](07-worker-pool-debug.md) — больше вариантов
+- [Worker pool patterns](./07-worker-pool-debug.md) — больше вариантов
 - [Context patterns](../../../01-go-core/concurrency-and-performance/04-context-patterns.md) — детально про context
 - [Graceful shutdown](../../../04-architecture-and-patterns/patterns/08-graceful-shutdown.md) — как останавливать pool в k8s

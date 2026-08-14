@@ -1,6 +1,22 @@
 # Задача 8: K максимальных из канала (с отменой через context)
 
-Стриминговый top-K поверх канала: читаем числа из `<-chan int`, держим K наибольших и умеем **прерваться** по `context`. Проверяет связку «каналы + context + heap» и понимание, что значит «прерываемая» функция.
+## Содержание
+
+- [Формулировка](#формулировка)
+- [Уточняющие вопросы](#уточняющие-вопросы-signal-seniority--спросить-до-кода)
+- [Min-heap размера K](#идея-min-heap-размера-k)
+- [Решение](#решение)
+- [Контракт отмены](#замечания-для-production--на-что-обратить-внимание)
+- [Тесты](#тесты)
+- [Типичные ошибки](#подводные-камни)
+- [Interview-ready answer](#interview-ready-answer)
+- [Связанные материалы](#связки-с-другими-темами)
+
+Задача объединяет streaming top-K и отменяемое чтение канала. При отмене
+реализация возвращает top-K среди уже принятых значений; это частичный результат,
+зафиксированный контрактом.
+
+---
 
 ## Формулировка
 
@@ -61,9 +77,9 @@ input ──► select ┬─ <-input  ─► обновить min-heap (раз�
 package kmax
 
 import (
-	"container/heap"
-	"context"
-	"sort"
+    "container/heap"
+    "context"
+    "sort"
 )
 
 // min-heap по int: вершина — наименьший из текущих кандидатов.
@@ -74,49 +90,52 @@ func (h minHeap) Less(i, j int) bool { return h[i] < h[j] }
 func (h minHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
 func (h *minHeap) Push(x any)        { *h = append(*h, x.(int)) }
 func (h *minHeap) Pop() any {
-	old := *h
-	n := len(old)
-	v := old[n-1]
-	*h = old[:n-1]
-	return v
+    old := *h
+    n := len(old)
+    v := old[n-1]
+    *h = old[:n-1]
+    return v
 }
 
 func Kmax(ctx context.Context, k int, input <-chan int) []int {
-	if k <= 0 {
-		return nil
-	}
+    if k <= 0 {
+        return nil
+    }
 
-	h := &minHeap{}
-	heap.Init(h)
+    h := &minHeap{}
+    heap.Init(h)
 
-	consume := func(v int) {
-		switch {
-		case h.Len() < k: // куча не заполнена — кладём
-			heap.Push(h, v)
-		case v > (*h)[0]: // новый больше минимума — вытесняем минимум
-			(*h)[0] = v
-			heap.Fix(h, 0) // восстановить инвариант после замены вершины
-		}
-	}
+    consume := func(v int) {
+        switch {
+        case h.Len() < k: // куча не заполнена — кладём
+            heap.Push(h, v)
+        case v > (*h)[0]: // новый больше минимума — вытесняем минимум
+            (*h)[0] = v
+            heap.Fix(h, 0) // восстановить инвариант после замены вершины
+        }
+    }
 
 loop:
-	for {
-		select {
-		case <-ctx.Done(): // отмена — выходим с тем, что накопили
-			break loop
-		case v, ok := <-input:
-			if !ok { // канал закрыт — прочитали всё
-				break loop
-			}
-			consume(v)
-		}
-	}
+    for {
+        if ctx.Err() != nil {
+            break loop
+        }
+        select {
+        case <-ctx.Done(): // отмена — выходим с тем, что накопили
+            break loop
+        case v, ok := <-input:
+            if !ok { // канал закрыт — прочитали всё
+                break loop
+            }
+            consume(v)
+        }
+    }
 
-	// выгружаем кучу и сортируем по убыванию
-	res := make([]int, h.Len())
-	copy(res, *h)
-	sort.Sort(sort.Reverse(sort.IntSlice(res)))
-	return res
+    // выгружаем кучу и сортируем по убыванию
+    res := make([]int, h.Len())
+    copy(res, *h)
+    sort.Sort(sort.Reverse(sort.IntSlice(res)))
+    return res
 }
 ```
 
@@ -131,7 +150,7 @@ loop:
 
 | Вопрос | Ответ |
 |---|---|
-| **Что при `select`, если готовы оба case?** | Go выбирает случайный. Это ок: при отмене мы всё равно скоро выйдем; одно «лишнее» прочитанное значение погоды не делает. Если важно гарантированно реагировать на отмену — проверять `ctx.Err()` отдельно. |
+| **Что при `select`, если готовы оба case?** | Go выбирает одну готовую ветку. Проверка `ctx.Err()` перед `select` ограничивает реакцию максимум одной дополнительной итерацией после гонки между проверкой и готовностью input. |
 | **Память** | Строго O(k): размер кучи не превышает `k`, входной поток не материализуется. |
 | **Возврат через канал?** | Если результат нужен асинхронно — обернуть в горутину и отдать `<-chan []int`; сигнатура задачи синхронная. |
 | **Несколько источников** | Fan-in нескольких каналов в один (см. fan-in) перед `Kmax`, либо `reflect.Select`/доп. ветки. |
@@ -143,52 +162,60 @@ loop:
 
 ```go
 func TestKmax_ClosedChannel(t *testing.T) {
-	in := make(chan int)
-	go func() {
-		defer close(in)
-		for _, v := range []int{3, 1, 9, 7, 2, 8, 5} {
-			in <- v
-		}
-	}()
+    in := make(chan int)
+    go func() {
+        defer close(in)
+        for _, v := range []int{3, 1, 9, 7, 2, 8, 5} {
+            in <- v
+        }
+    }()
 
-	got := Kmax(context.Background(), 3, in)
-	want := []int{9, 8, 7}
-	if !slices.Equal(got, want) {
-		t.Fatalf("got %v, want %v", got, want)
-	}
+    got := Kmax(context.Background(), 3, in)
+    want := []int{9, 8, 7}
+    if !slices.Equal(got, want) {
+        t.Fatalf("got %v, want %v", got, want)
+    }
 }
 
 func TestKmax_Cancel(t *testing.T) {
-	in := make(chan int) // никто не закрывает
-	go func() {
-		for i := 0; ; i++ {
-			in <- i
-		}
-	}()
+    ctx, cancel := context.WithCancel(context.Background())
+    in := make(chan int)
+    producerDone := make(chan struct{})
+    go func() {
+        defer close(producerDone)
+        for i := 0; ; i++ {
+            select {
+            case in <- i:
+            case <-ctx.Done():
+                return
+            }
+        }
+    }()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	go func() { time.Sleep(20 * time.Millisecond); cancel() }()
+    cancel()
 
-	got := Kmax(ctx, 5, in) // должна вернуться по отмене, не зависнуть
-	if len(got) > 5 {
-		t.Fatalf("len(got)=%d, want <= 5", len(got))
-	}
-	if !sort.SliceIsSorted(got, func(i, j int) bool { return got[i] > got[j] }) {
-		t.Fatalf("result must be sorted desc: %v", got)
-	}
+    got := Kmax(ctx, 5, in) // должна вернуться по отмене, не зависнуть
+    <-producerDone
+    if len(got) > 5 {
+        t.Fatalf("len(got)=%d, want <= 5", len(got))
+    }
+    if !sort.SliceIsSorted(got, func(i, j int) bool { return got[i] > got[j] }) {
+        t.Fatalf("result must be sorted desc: %v", got)
+    }
 }
 
 func TestKmax_FewerThanK(t *testing.T) {
-	in := make(chan int)
-	go func() { defer close(in); in <- 5; in <- 1 }()
-	got := Kmax(context.Background(), 10, in)
-	if !slices.Equal(got, []int{5, 1}) {
-		t.Fatalf("got %v", got)
-	}
+    in := make(chan int)
+    go func() { defer close(in); in <- 5; in <- 1 }()
+    got := Kmax(context.Background(), 10, in)
+    if !slices.Equal(got, []int{5, 1}) {
+        t.Fatalf("got %v", got)
+    }
 }
 ```
 
-Главный тест — **TestKmax_Cancel**: канал бесконечный и не закрывается, и без реакции на `ctx` функция зависла бы. Он доказывает, что прерывание работает.
+Тест отмены проверяет и завершение producer. Producer, который делает бесконечный
+`in <- value` без ветки `ctx.Done()`, сам утечёт после возврата `Kmax`.
 
 ---
 
@@ -213,10 +240,28 @@ func TestKmax_FewerThanK(t *testing.T) {
 
 ---
 
+## Interview-ready answer
+
+**1. Как поддерживать K максимальных значений потока?**
+
+- Структура — min-heap размером не больше `K`.
+- Обновление — пока heap не заполнен, добавлять; затем заменять корень только
+  большим значением.
+- Стоимость — `O(N log K)` времени и `O(K)` памяти.
+
+**2. Как определяется отмена?**
+
+- Ожидание — receive выполняется в `select` вместе с `ctx.Done()`.
+- Результат — при отмене возвращается top-K среди уже принятых значений.
+- Producer — источник тоже должен соблюдать context, иначе он заблокируется
+  после ухода consumer.
+
+---
+
 ## Связки с другими темами
 
 - [Top-K Elements](../data-structures/02-top-k.md) — та же идея min-heap размера K, но на массиве/без context.
 - [Context patterns](../../../01-go-core/concurrency-and-performance/04-context-patterns.md) — отмена через `select` + `ctx.Done()`.
 - [Fan-In / Fan-Out](./03-fan-in-fan-out.md) — если источников несколько.
-- [Sorting and heap](../../../16-algorithms-and-data-structures/07-sorting-and-heap.md) — теория кучи.
+- [Sorting and heap](../../../16-algorithms-and-data-structures/06-sorting-and-heap.md) — теория кучи.
 - [External Merge Sort](../data-structures/06-external-merge-sort.md) — родственная тема «данные не влезают в память».

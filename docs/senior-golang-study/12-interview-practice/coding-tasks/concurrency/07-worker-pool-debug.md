@@ -1,9 +1,5 @@
 # Worker Pool
 
-Worker pool — один из самых частых паттернов в Go-коде: bounded concurrency для CPU-bound или I/O-bound задач. Здесь — разбор реального баг-репорта с собеседования и правильная реализация.
-
-> **Рабочий код в репозитории:** [topics/02-concurrency/workerpool](../../../../../topics/02-concurrency/workerpool/README.md) — одна задача в трёх уровнях (junior / middle / senior), каждый отдельный модуль с тестами. junior — базовый пул с типичными багами; middle — production-ready (context, recover, single-producer); senior — backpressure, observability, dynamic resize. По мотивам [видео-разбора](https://www.youtube.com/watch?v=OHCqbREDx8U). (Ссылка ведёт за пределы этого гайда — открывается в IDE/репозитории, не во встроенном viewer.)
-
 ## Содержание
 
 - [Разбор задачи с собеседования: task_before.go](#разбор-задачи-с-собеседования-task_beforego)
@@ -14,6 +10,13 @@ Worker pool — один из самых частых паттернов в Go-�
 - [Semaphore через buffered channel как альтернатива pool](#semaphore-через-buffered-channel-как-альтернатива-pool)
 - [Разбор примеров-загадок](#разбор-примеров-загадок)
 - [Interview-ready answer](#interview-ready-answer)
+
+Worker pool ограничивает число одновременно выполняемых задач. Здесь основной
+навык — увидеть блокировки на nil-каналах, гонку на `map`, отсутствие владельца
+закрытия и context, который не достигает операции.
+
+Рабочие упражнения находятся в
+[topics/02-concurrency/workerpool](../../../../../topics/02-concurrency/workerpool/README.md).
 
 ---
 
@@ -31,9 +34,9 @@ func (f *Fetcher) FetchAll(ids []int) chan Result {
     var jobs chan int     // BUG 2
 
     go func() {
-        defer close(jobs) // BUG 3: close nil channel → panic
+        defer close(jobs) // BUG 3: если defer выполнится, close(nil) вызовет panic
         for _, id := range ids {
-            jobs <- id    // отправка в nil channel → goroutine leak + panic
+            jobs <- id    // отправка в nil channel блокируется навсегда
         }
     }()
 
@@ -42,12 +45,12 @@ func (f *Fetcher) FetchAll(ids []int) chan Result {
             for id := range jobs {       // range nil channel — блокируется вечно
                 r, ok := f.cache[id]     // BUG 4: race condition
                 if ok {
-                    out <- r             // BUG 1: send to nil channel → panic
+                    out <- r             // send в nil channel блокируется
                     continue
                 }
                 r = f.doRequest(id)
                 f.cache[id] = r          // BUG 4: race condition
-                out <- r                 // BUG 1: send to nil channel → panic
+                out <- r                 // send в nil channel блокируется
             }
         }(i)
     }
@@ -88,7 +91,9 @@ r, ok := f.cache[id]  // concurrent read
 f.cache[id] = r        // concurrent write — DATA RACE
 ```
 
-Go race detector (`go test -race`) поймает это немедленно. Одновременная запись в map → **undefined behavior**, возможен crash рантайма.
+Race detector (`go test -race`) обнаруживает конфликтующий доступ. Concurrent
+read/write или write/write обычной Go `map` также может завершить процесс
+runtime-ошибкой; полагаться на это как на синхронизацию нельзя.
 
 ```go
 // Правильно: sync.RWMutex для cache
@@ -175,6 +180,7 @@ func (f *Fetcher) FetchAll(ctx context.Context, ids []int, workers int) (<-chan 
         workers = 1
     }
 
+    runCtx, cancel := context.WithCancel(ctx)
     out := make(chan Result, workers) // небольшой буфер — снижает coupling
     errCh := make(chan error, 1)      // первая ошибка wins
 
@@ -186,7 +192,7 @@ func (f *Fetcher) FetchAll(ctx context.Context, ids []int, workers int) (<-chan 
         for _, id := range ids {
             select {
             case jobs <- id:
-            case <-ctx.Done():
+            case <-runCtx.Done():
                 return
             }
         }
@@ -199,7 +205,7 @@ func (f *Fetcher) FetchAll(ctx context.Context, ids []int, workers int) (<-chan 
         defer wg.Done()
         for {
             select {
-            case <-ctx.Done():
+            case <-runCtx.Done():
                 return
             case id, ok := <-jobs:
                 if !ok {
@@ -212,15 +218,15 @@ func (f *Fetcher) FetchAll(ctx context.Context, ids []int, workers int) (<-chan 
                 f.mu.RUnlock()
                 if ok {
                     select {
-                    case out <- r:    // отправляем результат
-                    case <-ctx.Done(): // или уходим при отмене
+                    case out <- r:       // отправляем результат
+                    case <-runCtx.Done(): // или уходим при отмене
                         return
                     }
                     continue
                 }
 
                 // Slow path: реальный запрос
-                r, err := f.fetch(ctx, id)
+                r, err := f.fetch(runCtx, id)
                 if err != nil {
                     if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
                         return // тихий выход при отмене ctx
@@ -229,6 +235,7 @@ func (f *Fetcher) FetchAll(ctx context.Context, ids []int, workers int) (<-chan 
                     case errCh <- err: // первая ошибка в канал
                     default:           // остальные дропаются
                     }
+                    cancel()
                     return
                 }
 
@@ -239,7 +246,7 @@ func (f *Fetcher) FetchAll(ctx context.Context, ids []int, workers int) (<-chan 
 
                 select {
                 case out <- r:
-                case <-ctx.Done():
+                case <-runCtx.Done():
                     return
                 }
             }
@@ -253,6 +260,7 @@ func (f *Fetcher) FetchAll(ctx context.Context, ids []int, workers int) (<-chan 
     // Closer: закрывает каналы когда все воркеры завершились
     go func() {
         wg.Wait()
+        cancel()
         close(out)
         close(errCh)
     }()
@@ -278,6 +286,11 @@ func main() {
 }
 ```
 
+Mutex защищает `map`, но последовательность «cache miss → fetch → write» не
+дедуплицирует одинаковые `id`: два workers могут одновременно выполнить один
+запрос. Если это существенно, поверх slow path нужен `singleflight` или другая
+per-key координация.
+
 ---
 
 ## Worker pool шаблон — универсальный
@@ -290,6 +303,11 @@ func WorkerPool[T, R any](
     workers int,
     fn func(ctx context.Context, job T) (R, error),
 ) (<-chan R, <-chan error) {
+    if workers <= 0 {
+        workers = 1
+    }
+
+    runCtx, cancel := context.WithCancel(ctx)
     out := make(chan R, workers)
     errCh := make(chan error, 1)
     jobsCh := make(chan T)
@@ -300,7 +318,7 @@ func WorkerPool[T, R any](
         for _, j := range jobs {
             select {
             case jobsCh <- j:
-            case <-ctx.Done():
+            case <-runCtx.Done():
                 return
             }
         }
@@ -314,23 +332,24 @@ func WorkerPool[T, R any](
             defer wg.Done()
             for {
                 select {
-                case <-ctx.Done():
+                case <-runCtx.Done():
                     return
                 case job, ok := <-jobsCh:
                     if !ok {
                         return
                     }
-                    r, err := fn(ctx, job)
+                    r, err := fn(runCtx, job)
                     if err != nil {
                         select {
                         case errCh <- err:
                         default:
                         }
+                        cancel()
                         return
                     }
                     select {
                     case out <- r:
-                    case <-ctx.Done():
+                    case <-runCtx.Done():
                         return
                     }
                 }
@@ -340,6 +359,7 @@ func WorkerPool[T, R any](
 
     go func() {
         wg.Wait()
+        cancel()
         close(out)
         close(errCh)
     }()
@@ -371,6 +391,9 @@ if err := <-errCh; err != nil {
 - `make(chan error)` — unbuffered: горутина заблокируется если никто не читает → **leak**
 - `make(chan error, 1)` — первая ошибка записывается без блокировки, остальные дропаются через `default`
 - `make(chan error, n)` — можно собрать несколько ошибок (но обычно нужна только первая)
+
+Сам `errCh` не делает pool fail-fast. После записи первой ошибки нужно отменить
+общий context, чтобы producer и остальные workers прекратили работу.
 
 ---
 
@@ -424,6 +447,9 @@ type Semaphore struct {
 }
 
 func NewSemaphore(n int) *Semaphore {
+    if n <= 0 {
+        n = 1
+    }
     return &Semaphore{ch: make(chan struct{}, n)}
 }
 
@@ -453,14 +479,18 @@ for _, url := range urls {
 }
 ```
 
+Каждому успешному `Acquire` должен соответствовать ровно один `Release`.
+`Release` без занятого token заблокируется; это не ownership-aware mutex.
+
 **Semaphore vs Worker Pool:**
 
 | | Worker Pool | Semaphore |
 |---|---|---|
 | Управление горутинами | фиксированный пул | новая горутина на задачу |
-| Memory overhead | меньше (N горутин) | больше (M горутин) |
-| Порядок завершения | предсказуемый | нет |
-| Use case | долгие задачи | короткие burst задачи |
+| Жизненный цикл | N goroutine переиспользуются | goroutine создаётся на каждую допущенную задачу |
+| Число одновременно живых goroutine | N workers + coordinator | не больше N при acquire до `go` |
+| Порядок завершения | не гарантирован | не гарантирован |
+| Use case | поток задач и явная очередь | независимые задачи без отдельной очереди |
 
 ---
 
@@ -592,11 +622,16 @@ for r := range out { use(r) }
 
 **1. Какие баги в task_before.go?**
 
-- Пять независимых: (1) `var out/jobs chan` — nil-каналы: send виснет вечно (leak), `close(nil)` — паника; (2) гонка на `f.cache` без mutex — `go test -race` ловит, нужен `RWMutex`; (3) нет `WaitGroup` — `out` не закрывается, `range out` дедлочит; (4) `ctx` создан, но не передан — timeout не работает; (5) следствие #1 — `close(jobs)` паникует.
+- Пять независимых: (1) `out` nil — send/range блокируются; (2) `jobs` nil —
+  producer и workers блокируются, а `close(nil)` паникует; (3) `f.cache` доступен
+  без mutex; (4) нет `WaitGroup` и владельца закрытия `out`; (5) `ctx` не
+  передаётся в работу.
 
 **2. Зачем `errCh chan error, 1`?**
 
-- Unbuffered заблокирует отправителя, если читателя нет → leak. Буфер 1: первая ошибка пишется без блокировки, остальные дропаются через `select { default }`. Горутина завершается чисто при любом числе ошибок.
+- Unbuffered заблокирует отправителя, если читателя нет. Буфер 1 и
+  `select { default }` сохраняют первую ошибку без блокировки. Для fail-fast
+  после этого отдельно отменяют общий context.
 
 **3. Где в пуле обязателен `select` на `ctx.Done()`?**
 
@@ -608,7 +643,10 @@ for r := range out { use(r) }
 
 **5. Worker pool или semaphore?**
 
-- Пул (фиксированное N горутин, читающих общий `jobs`) — для долгих задач и предсказуемого потребления памяти. Semaphore (новая горутина на задачу, ограниченная buffered-каналом) — для коротких burst-задач. Пул экономит горутины, semaphore проще по коду.
+- Пул переиспользует N workers и естественно представляет очередь задач.
+  Semaphore проще для набора независимых задач; при `Acquire` до `go` он тоже
+  держит не больше N рабочих goroutine одновременно, но создаёт новую на каждую
+  допущенную задачу.
 
 **6. Несколько воркеров на одном канале — дублируют работу?**
 

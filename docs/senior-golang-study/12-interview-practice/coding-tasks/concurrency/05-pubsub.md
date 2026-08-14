@@ -1,6 +1,21 @@
 # Задача 5: Pub/Sub In-Memory
 
-In-memory publish-subscribe — простая, но богатая на детали задача. Тестирует понимание channels, locks, goroutine lifecycle, slow consumers.
+## Содержание
+
+- [Формулировка](#формулировка)
+- [Базовая модель](#базовое-решение)
+- [Topics и безопасная подписка](#production-grade-с-topics-slow-consumer-handling-и-metrics)
+- [Slow consumer](#slow-consumer--стратегии)
+- [Тесты](#тесты)
+- [Типичные ошибки](#подводные-камни)
+- [Interview-ready answer](#interview-ready-answer)
+- [Связанные материалы](#связки)
+
+In-memory Pub/Sub доставляет копию сообщения каждой активной подписке. Главная
+сложность — согласовать `Publish`, `Unsubscribe` и `Close`, не отправляя в уже
+закрытый канал, а также выбрать поведение для slow consumer.
+
+---
 
 ## Формулировка
 
@@ -34,7 +49,8 @@ In-memory publish-subscribe — простая, но богатая на дет�
    "Обязательно — иначе goroutine leak когда subscriber больше не нужен."
 
 6. **Ordering — strict per-subscriber или нет?**
-   "Per-subscriber strict — да, естественно. Между subscriber'ами — нет, async."
+   "Один publisher сохраняет порядок своих send. Несколько concurrent publishers
+   не задают общий порядок без отдельного sequencer/dispatcher."
 
 ---
 
@@ -56,6 +72,9 @@ type PubSub[T any] struct {
 }
 
 func New[T any](bufferSize int) *PubSub[T] {
+    if bufferSize < 0 {
+        bufferSize = 0
+    }
     return &PubSub[T]{bufferSize: bufferSize}
 }
 
@@ -163,8 +182,9 @@ import (
 )
 
 var (
-    ErrTopicNotFound      = errors.New("topic not found")
     ErrSubscriptionClosed = errors.New("subscription closed")
+    ErrPubSubClosed        = errors.New("pubsub closed")
+    ErrNilContext         = errors.New("nil context")
 )
 
 type Message[T any] struct {
@@ -178,7 +198,10 @@ type Subscription[T any] struct {
     id      uint64
     topic   string
     ch      chan Message[T]
-    closed  atomic.Bool
+    mu      sync.Mutex
+    closed  bool
+    done    chan struct{}
+    senders sync.WaitGroup
     dropped atomic.Int64 // счётчик потерянных сообщений
     bus     *PubSub[T]
 }
@@ -196,9 +219,72 @@ func (s *Subscription[T]) Unsubscribe() {
     s.bus.unsubscribe(s)
 }
 
+func (s *Subscription[T]) beginSend() bool {
+    s.mu.Lock()
+    defer s.mu.Unlock()
+    if s.closed {
+        return false
+    }
+    s.senders.Add(1)
+    return true
+}
+
+func (s *Subscription[T]) trySend(msg Message[T]) bool {
+    if !s.beginSend() {
+        return false
+    }
+    defer s.senders.Done()
+
+    select {
+    case <-s.done:
+        return false
+    case s.ch <- msg:
+        return true
+    default:
+        s.dropped.Add(1)
+        return false
+    }
+}
+
+func (s *Subscription[T]) send(ctx context.Context, msg Message[T]) error {
+    if ctx == nil {
+        return ErrNilContext
+    }
+    if !s.beginSend() {
+        return ErrSubscriptionClosed
+    }
+    defer s.senders.Done()
+
+    select {
+    case <-s.done:
+        return ErrSubscriptionClosed
+    case s.ch <- msg:
+        return nil
+    case <-ctx.Done():
+        return ctx.Err()
+    }
+}
+
+func (s *Subscription[T]) close() bool {
+    s.mu.Lock()
+    if s.closed {
+        s.mu.Unlock()
+        return false
+    }
+    s.closed = true
+    close(s.done)
+    s.mu.Unlock()
+
+    // Новые send уже не зарегистрируются, активные увидят done и завершатся.
+    s.senders.Wait()
+    close(s.ch)
+    return true
+}
+
 type PubSub[T any] struct {
     mu       sync.RWMutex
     topics   map[string]map[uint64]*Subscription[T]  // topic → id → subscription
+    closed   bool
     nextID   atomic.Uint64
     buffer   int
 
@@ -209,6 +295,9 @@ type PubSub[T any] struct {
 }
 
 func New[T any](bufferSize int) *PubSub[T] {
+    if bufferSize < 0 {
+        bufferSize = 0
+    }
     return &PubSub[T]{
         topics: make(map[string]map[uint64]*Subscription[T]),
         buffer: bufferSize,
@@ -220,10 +309,16 @@ func (ps *PubSub[T]) Subscribe(topic string) *Subscription[T] {
         id:    ps.nextID.Add(1),
         topic: topic,
         ch:    make(chan Message[T], ps.buffer),
+        done:  make(chan struct{}),
         bus:   ps,
     }
 
     ps.mu.Lock()
+    if ps.closed {
+        ps.mu.Unlock()
+        sub.close()
+        return sub
+    }
     if _, ok := ps.topics[topic]; !ok {
         ps.topics[topic] = make(map[uint64]*Subscription[T])
     }
@@ -234,10 +329,6 @@ func (ps *PubSub[T]) Subscribe(topic string) *Subscription[T] {
 }
 
 func (ps *PubSub[T]) unsubscribe(sub *Subscription[T]) {
-    if !sub.closed.CompareAndSwap(false, true) {
-        return  // уже отписан
-    }
-
     ps.mu.Lock()
     if subs, ok := ps.topics[sub.topic]; ok {
         delete(subs, sub.id)
@@ -246,15 +337,12 @@ func (ps *PubSub[T]) unsubscribe(sub *Subscription[T]) {
         }
     }
     ps.mu.Unlock()
-
-    close(sub.ch)
+    sub.close()
 }
 
 // Publish отправляет сообщение всем subscriber'ам topic'а.
 // Slow subscribers получают drop (counted via Dropped()).
 func (ps *PubSub[T]) Publish(topic string, data T) {
-    ps.published.Add(1)
-
     msg := Message[T]{
         Topic: topic,
         Data:  data,
@@ -262,6 +350,10 @@ func (ps *PubSub[T]) Publish(topic string, data T) {
     }
 
     ps.mu.RLock()
+    if ps.closed {
+        ps.mu.RUnlock()
+        return
+    }
     subs := ps.topics[topic]
     // Копируем список чтобы не держать lock на send
     subList := make([]*Subscription[T], 0, len(subs))
@@ -269,14 +361,12 @@ func (ps *PubSub[T]) Publish(topic string, data T) {
         subList = append(subList, s)
     }
     ps.mu.RUnlock()
+    ps.published.Add(1)
 
     for _, s := range subList {
-        select {
-        case s.ch <- msg:
+        if s.trySend(msg) {
             ps.delivered.Add(1)
-        default:
-            // Slow subscriber — drop
-            s.dropped.Add(1)
+        } else {
             ps.dropped.Add(1)
         }
     }
@@ -284,21 +374,28 @@ func (ps *PubSub[T]) Publish(topic string, data T) {
 
 // PublishBlocking — то же, но блокируется если slow consumer (опционально).
 func (ps *PubSub[T]) PublishBlocking(ctx context.Context, topic string, data T) error {
+    if ctx == nil {
+        return ErrNilContext
+    }
     msg := Message[T]{Topic: topic, Data: data, Time: time.Now()}
 
     ps.mu.RLock()
+    if ps.closed {
+        ps.mu.RUnlock()
+        return ErrPubSubClosed
+    }
     subList := make([]*Subscription[T], 0, len(ps.topics[topic]))
     for _, s := range ps.topics[topic] {
         subList = append(subList, s)
     }
     ps.mu.RUnlock()
+    ps.published.Add(1)
 
     for _, s := range subList {
-        select {
-        case s.ch <- msg:
-        case <-ctx.Done():
-            return ctx.Err()
+        if err := s.send(ctx, msg); err != nil {
+            return err
         }
+        ps.delivered.Add(1)
     }
     return nil
 }
@@ -332,18 +429,30 @@ func (ps *PubSub[T]) Stats() Stats {
 
 func (ps *PubSub[T]) Close() {
     ps.mu.Lock()
-    defer ps.mu.Unlock()
-
+    if ps.closed {
+        ps.mu.Unlock()
+        return
+    }
+    ps.closed = true
+    var subscriptions []*Subscription[T]
     for _, subs := range ps.topics {
         for _, s := range subs {
-            if s.closed.CompareAndSwap(false, true) {
-                close(s.ch)
-            }
+            subscriptions = append(subscriptions, s)
         }
     }
     ps.topics = make(map[string]map[uint64]*Subscription[T])
+    ps.mu.Unlock()
+
+    for _, s := range subscriptions {
+        s.close()
+    }
 }
 ```
+
+`PublishBlocking` доставляет подписчикам последовательно, поэтому один медленный
+consumer задерживает следующих. Передавай context с deadline. `Unsubscribe` и
+`Close` закрывают внутренний `done`, поэтому даже вызов с `context.Background()`
+разблокируется и вернёт `ErrSubscriptionClosed`.
 
 **Использование:**
 
@@ -372,7 +481,8 @@ log.Printf("dropped: %d", stats.Dropped)
 **Что улучшено по сравнению с базовым:**
 - **Topics** — несколько тем, не один список
 - **`Subscription` struct** с метаданными — нет нужды искать по `chan` для unsubscribe
-- **`atomic.Bool` для closed flag** — idempotent unsubscribe (можно вызвать несколько раз)
+- **Send registration + `done`** — close запрещает новые send, отменяет активные,
+  ждёт их и только затем закрывает channel; `send on closed channel` невозможен
 - **Per-subscriber drop counter** — диагностика slow consumer'ов
 - **Copy list under lock, send без lock** — Publish не блокирует Subscribe
 - **`PublishBlocking`** — для случаев когда нельзя терять сообщения
@@ -551,15 +661,59 @@ func TestPubSub_ConcurrentPublishSubscribe(t *testing.T) {
     }
     pubWg.Wait()
 
-    // Дать subscriber'ам время прочитать
-    time.Sleep(100 * time.Millisecond)
     ps.Close()
     wg.Wait()
 
-    // 5 * 100 publishes * 10 subscribers = 5000 delivers (если без drop'ов)
-    // С buffer 100 на subscriber — drop'ы возможны но мало
-    if receivedCount.Load() < 4000 {
-        t.Errorf("received only %d, expected ~5000", receivedCount.Load())
+    stats := ps.Stats()
+    if stats.Published != 500 {
+        t.Errorf("published = %d, want 500", stats.Published)
+    }
+    if stats.Delivered+stats.Dropped != 5000 {
+        t.Errorf("delivered + dropped = %d, want 5000", stats.Delivered+stats.Dropped)
+    }
+    if got := int64(receivedCount.Load()); got != stats.Delivered {
+        t.Errorf("received = %d, delivered metric = %d", got, stats.Delivered)
+    }
+}
+
+func TestPubSub_PublishConcurrentWithUnsubscribe(t *testing.T) {
+    ps := New[int](8)
+    sub := ps.Subscribe("topic")
+
+    var wg sync.WaitGroup
+    wg.Add(2)
+    go func() {
+        defer wg.Done()
+        for i := 0; i < 1000; i++ {
+            ps.Publish("topic", i)
+        }
+    }()
+    go func() {
+        defer wg.Done()
+        sub.Unsubscribe()
+    }()
+
+    wg.Wait()
+    ps.Close()
+}
+
+func TestPubSub_CloseUnblocksBlockingPublish(t *testing.T) {
+    ps := New[int](0)
+    ps.Subscribe("topic") // receiver намеренно отсутствует
+
+    done := make(chan error, 1)
+    go func() {
+        done <- ps.PublishBlocking(context.Background(), "topic", 1)
+    }()
+
+    ps.Close()
+    select {
+    case err := <-done:
+        if !errors.Is(err, ErrSubscriptionClosed) && !errors.Is(err, ErrPubSubClosed) {
+            t.Fatalf("error = %v, want closed error", err)
+        }
+    case <-time.After(time.Second):
+        t.Fatal("Close did not unblock PublishBlocking")
     }
 }
 
@@ -616,13 +770,24 @@ ps.Close()
 sub.Unsubscribe()  // ← close(sub.ch) второй раз → panic
 ```
 
-**Решение:** atomic flag `closed`:
+**Решение:** закрытие сначала запрещает новые send, отменяет активные и ждёт их:
 ```go
-if !sub.closed.CompareAndSwap(false, true) {
-    return  // уже закрыт
+sub.mu.Lock()
+if sub.closed {
+    sub.mu.Unlock()
+    return
 }
+sub.closed = true
+close(sub.done)
+sub.mu.Unlock()
+
+sub.senders.Wait()
 close(sub.ch)
 ```
+
+Одного atomic-флага недостаточно: между проверкой флага и send другой поток
+может закрыть канал. Проверка, send и close должны быть согласованы одной
+синхронизацией либо каналом должен владеть отдельный dispatcher.
 
 ### 3. Lock contention под нагрузкой
 
@@ -650,13 +815,17 @@ ps.mu.RUnlock()
 ### 5. Map итерация под Lock
 
 ```go
-ps.mu.Lock()
+// ❌ Concurrent writer без того же lock может привести к data race и
+// runtime fatal error: concurrent map iteration and map write.
+ps.mu.RLock()
 for _, sub := range ps.topics[topic] {
-    // Если внутри изменяем topics → undefined behavior
+    use(sub)
 }
+ps.mu.RUnlock()
 ```
 
-Не модифицируй map во время range. Скопируй keys, потом обрабатывай.
+Удалять элементы из map во время `range` в той же goroutine разрешено. Опасно
+читать и изменять map конкурентно без общей синхронизации.
 
 ### 6. Race condition при Subscribe + Publish
 
@@ -670,19 +839,20 @@ for _, sub := range ps.topics[topic] {
 
 ### 7. Subscribe slow path
 
-Если Subscribe возвращает channel и сразу же Publisher шлёт — first message может быть lost если subscriber ещё не успел запустить goroutine для чтения.
-
-В тестах это видно — нужен sleep or sync mechanism.
+При буфере больше нуля сообщение может дождаться consumer'а. При unbuffered
+канале и non-blocking publish оно будет отброшено, пока receiver не готов. Если
+потеря недопустима, нужен handshake готовности или blocking delivery с timeout.
 
 ### 8. Buffer size choice
 
 ```go
 ch := make(chan T, 1000000)  // ← memory eating
 ch := make(chan T, 0)         // ← блокирует publisher
-ch := make(chan T, 10)        // ← OK для большинства случаев
+ch := make(chan T, 10)        // ← пример, а не универсальный default
 ```
 
-Default 10-100 для in-memory pub/sub. Подбирай эмпирически.
+Размер выводят из допустимого burst, скорости consumer'а, размера сообщения и
+лимита памяти; затем проверяют метрикой drops и нагрузочным тестом.
 
 ### 9. Type assertion в любых направлениях
 
@@ -754,15 +924,35 @@ Counter published / delivered / dropped per topic.
 
 ---
 
-## Что важно показать на собеседовании
+## Interview-ready answer
 
-1. **Closure semantics** — кто close channel, когда, как защита от double close (atomic flag)
-2. **RWMutex для optimization** — больше Publisher'ов чем Subscribe'ов
-3. **Slow consumer handling** — drop strategy объяснить
-4. **Goroutine leak prevention** — Unsubscribe closes channel → consumer's range exits
-5. **Lock-free hot path** — копируй subscriber list под lock, send вне
-6. **Generics** — type-safe API
-7. **Trade-offs** — drop vs block vs disconnect
+**1. Какие delivery guarantees у этого in-memory pub/sub?**
+
+- Non-blocking `Publish` даёт at-most-once попытку: заполненный buffer приводит к
+  drop, который отражается в метриках.
+- Один publisher сохраняет свой порядок, но concurrent publishers не имеют
+  общего порядка без dispatcher/sequencer.
+
+**2. Как безопасно совместить send и Unsubscribe?**
+
+- Подписка под mutex запрещает новые send, закрывает `done`, ждёт уже
+  зарегистрированных senders и лишь затем закрывает output channel.
+- Простая пара `if !closed { ch <- v }` небезопасна: между проверкой и send канал
+  может быть закрыт.
+
+**3. Что делать с медленным consumer?**
+
+- Drop защищает latency publisher, blocking delivery сохраняет сообщение ценой
+  head-of-line blocking, disconnect ограничивает ущерб одной подпиской.
+- Buffer выбирают по burst, скорости чтения, размеру сообщений и памяти, а не по
+  универсальному числу.
+
+**4. Когда этого решения недостаточно?**
+
+- Состояние живёт только в одном процессе, replay и durable delivery отсутствуют.
+  Для нескольких pods и восстановления после сбоя нужен внешний broker.
+
+---
 
 ## Связки
 

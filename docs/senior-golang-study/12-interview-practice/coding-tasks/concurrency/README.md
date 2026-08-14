@@ -1,98 +1,117 @@
-# Concurrency Tasks
+# Задачи на конкурентность
 
-Задачи на concurrency — самая частая категория для Go-собеседований. Знание этих паттернов обязательно для senior Go-разработчика.
+Раздел тренирует проектирование goroutine lifecycle, владение каналами,
+ограничение параллелизма, отмену и согласование ошибок. Рабочее решение должно
+не только выдавать правильные значения, но и завершать все запущенные goroutine
+при успехе, ошибке и отмене.
 
-## Задачи
+## Материалы
 
-1. [Worker Pool](./01-worker-pool.md) — ограничить количество параллельных горутин, graceful shutdown
-2. [Rate Limiter](./02-rate-limiter.md) — token bucket, leaky bucket, sliding window
-3. [Fan-In / Fan-Out](./03-fan-in-fan-out.md) — разделить работу и собрать результаты
-4. [Pipeline](./04-pipeline.md) — цепочка обработки через каналы
-5. [Pub/Sub In-Memory](./05-pubsub.md) — один publisher, много subscriber'ов
-6. [Singleflight](./06-singleflight.md) — дедупликация одинаковых concurrent запросов
-7. [Worker Pool (debug)](./07-worker-pool-debug.md) — найти 5 багов в типовой реализации, errCh, graceful shutdown, semaphore + паттерны
-8. [K максимальных из канала](./08-kmax-from-channel.md) — стриминговый top-K из `<-chan int` с отменой через `context` (select + min-heap, O(k) памяти)
+1. [Worker Pool](./01-worker-pool.md) — фиксированное число обработчиков,
+   fail-fast и сохранение порядка результатов.
+2. [Rate Limiter](./02-rate-limiter.md) — token bucket, ожидание квоты и лимиты
+   по ключам.
+3. [Fan-In / Fan-Out](./03-fan-in-fan-out.md) — распределение работы и слияние
+   потоков.
+4. [Pipeline](./04-pipeline.md) — цепочка этапов с backpressure и отменой.
+5. [Pub/Sub In-Memory](./05-pubsub.md) — доставка копий сообщения нескольким
+   подписчикам и политика slow consumer.
+6. [Singleflight](./06-singleflight.md) — дедупликация одновременно выполняемых
+   запросов с одинаковым ключом.
+7. [Worker Pool: code review](./07-worker-pool-debug.md) — поиск блокировок,
+   data race и утечек goroutine.
+8. [K максимальных из канала](./08-kmax-from-channel.md) — streaming top-K с
+   ограниченной памятью и отменой.
+9. [Проверка списка URL](./09-http-url-checker.md) — пошаговая задача: HTTP-статусы,
+   канал вместо длины слайса, ранняя остановка после N успехов, границы для моков.
+10. [HTTP-сервис последовательностей Коллатца](./10-collatz-http-service.md) —
+    доработка готового кода: разбор дефектов, противоречие в условии, goroutine на
+    число, победитель гонки, кеш под `RWMutex` и отмена от клиента.
 
-## Что важно знать
+---
 
-### Channels vs Mutex — когда что
+## Канал или mutex
 
-**Channel:**
-- Передача владения данными между goroutines ("я закончил, держи")
-- Координация (сигнал "done", синхронизация фаз)
-- Pipeline / fan-in / fan-out
+| Задача | Основной инструмент |
+| --- | --- |
+| передать владение значением | канал |
+| ограничить число одновременно выполняемых задач | workers или semaphore |
+| защитить общую `map`, список или счётчик | mutex либо атомарная операция |
+| сообщить об отмене дереву операций | `context.Context` |
+| дождаться завершения известного числа goroutine | `sync.WaitGroup` или `errgroup` |
 
-**Mutex:**
-- Защита изменяемого состояния (counter, map, cache)
-- Когда несколько goroutines одновременно работают с одной структурой
+Канал не делает передаваемый объект потокобезопасным после получения, а mutex
+не управляет lifecycle goroutine. Выбор следует из инварианта, который нужно
+защитить.
 
-**Правило большого пальца:** "Don't communicate by sharing memory; share memory by communicating." Но это **не догма**. Mutex часто проще и быстрее для простых случаев.
+---
 
-### Context везде
+## Владение каналами
 
-Любая долгоживущая операция должна принимать `context.Context` первым параметром:
-```go
-func (s *Service) Process(ctx context.Context, req Request) error
-```
+- **Закрытие —** канал закрывает сторона, которая знает, что новых отправок
+  больше не будет.
+- **Несколько producers —** закрытие выполняет отдельный coordinator после
+  завершения всех отправителей.
+- **Получатель —** обычно не закрывает входной канал, которым не владеет.
+- **Nil-канал —** send и receive блокируются навсегда; `close(nil)` вызывает
+  panic.
+- **Закрытый канал —** receive возвращает остаток буфера, затем zero value и
+  `ok = false`; send и повторный close вызывают panic.
 
-Без context'а нет cancellation, нет timeout, нет propagation request ID. На собеседовании отсутствие context — красный флаг.
+---
 
-### Channel buffering
+## Backpressure и буфер
 
-- `make(chan T)` — unbuffered, синхронизация (send блокирует пока receive)
-- `make(chan T, N)` — buffered, asynchronous до N элементов
-- `make(chan T, 1)` — "signal" канал для одного события
+Backpressure означает, что медленный downstream ограничивает скорость upstream.
+Блокировка producer на заполненном канале может быть корректным механизмом, а
+не дефектом. Ошибка возникает, когда блокировку нельзя отменить или её семантика
+не согласована.
 
-**На собеседовании можешь объяснить почему выбрал такой буфер?** Это важный сигнал.
+Буфер определяет допустимое число ожидающих элементов, но не исправляет
+медленного consumer. Большой буфер откладывает момент backpressure, увеличивает
+память и latency в очереди.
 
-### Никогда не делай
+---
 
-```go
-// ❌ Leak горутин — нет cancellation
-go func() {
-    for {
-        process()
-    }
-}()
+## Context и ошибки
 
-// ❌ Send в nil channel — навсегда блокирует
-var ch chan int
-ch <- 1
+Долгоживущая операция принимает `context.Context`, если caller должен уметь
+отменить ожидание. Одного наличия `ctx` в сигнатуре недостаточно: каждый
+потенциально блокирующий send, receive, timer и внешний вызов должен иметь путь
+завершения.
 
-// ❌ Close channel дважды — panic
-close(ch)
-close(ch)  // panic!
+Для fail-fast обычно нужен общий отменяемый context и первая причинная ошибка.
+Для best-effort каждая задача возвращает собственный outcome. Эти контракты
+нельзя незаметно смешивать: частичный результат должен быть явно описан.
 
-// ❌ Send в закрытый channel — panic
-close(ch)
-ch <- 1  // panic!
+Panic в любой goroutine без `recover` завершает процесс, а не только эту
+goroutine. `recover` ставят на границе недоверенного callback или отдельной
+задачи и преобразуют panic в наблюдаемую ошибку со stack trace.
 
-// ❌ Захват loop variable goroutine'ой (до Go 1.22)
-for _, v := range items {
-    go func() { process(v) }()  // v одинаковый для всех!
-}
-// Go 1.22+ это исправлено; в более старых надо:
-for _, v := range items {
-    v := v
-    go func() { process(v) }()
-}
-```
+---
 
-### Базовый "проверочный список" любого concurrent кода
+## Проверочный список
 
-```
-□ Все goroutines имеют способ остановиться (context, channel, кончился input)
-□ Нет deadlock — горутины не ждут друг друга бесконечно
-□ Нет goroutine leak — после завершения работы все горутины завершились
-□ Нет race condition — `go test -race` проходит
-□ Producer не блокируется навсегда если consumer медленный (backpressure)
-□ Errors собираются и возвращаются (через errgroup или error channel)
-□ panic в goroutine не валит весь процесс (recover где нужно)
-```
+- Все запущенные goroutine имеют условие завершения.
+- Каждый блокирующий send или receive можно отменить там, где caller может уйти.
+- `WaitGroup.Add` выполняется до запуска goroutine.
+- Канал закрывается ровно одним владельцем после всех writers.
+- При ошибке сохраняется причинная ошибка, а не только производный
+  `context.Canceled`.
+- Частичные результаты и порядок выдачи определены контрактом.
+- Slow consumer имеет явную политику: block, drop, disconnect или bounded queue.
+- Callback panic не оставляет ожидателей заблокированными.
+- Тесты не зависят от случайного `Sleep`, если можно использовать барьеры или
+  управляемые часы.
+- `go test -race` проходит, а тест дополнительно проверяет завершение goroutine.
 
-## Связки
+---
 
-- [Concurrency и channels](../../../01-go-core/concurrency-and-performance/02-goroutines-and-channels.md) — детальная теория
-- [Sync primitives](../../../01-go-core/concurrency-and-performance/03-sync-primitives.md) — mutex, atomic, sync.Map
-- [Worker pool patterns](07-worker-pool-debug.md) — расширенные варианты
-- [Context patterns](../../../01-go-core/concurrency-and-performance/04-context-patterns.md) — context propagation
+## Связанные материалы
+
+- [Goroutine и channels](../../../01-go-core/concurrency-and-performance/02-goroutines-and-channels.md)
+  — базовая семантика каналов.
+- [Sync primitives](../../../01-go-core/concurrency-and-performance/03-sync-primitives.md)
+  — mutex, atomic, `sync.Map` и `singleflight`.
+- [Context patterns](../../../01-go-core/concurrency-and-performance/04-context-patterns.md)
+  — распространение отмены и deadline.

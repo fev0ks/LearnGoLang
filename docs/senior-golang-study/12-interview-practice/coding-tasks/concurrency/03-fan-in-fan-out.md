@@ -1,6 +1,23 @@
 # Задача 3: Fan-In / Fan-Out
 
-Базовые паттерны для распараллеливания: **fan-out** — раздать работу множеству worker'ов, **fan-in** — собрать результаты в один поток. Часто комбинируются.
+## Содержание
+
+- [Формулировка](#формулировка)
+- [Fan-Out](#fan-out)
+- [Fan-In](#fan-in)
+- [Map с ограниченным параллелизмом](#базовое-решение-fan-out--fan-in)
+- [Context, ошибки и порядок](#production-grade-с-context-errors-order-preservation)
+- [Мультиплексирование](#pattern-multiplexing-с-select)
+- [Тесты](#тесты)
+- [Типичные ошибки](#подводные-камни)
+- [Interview-ready answer](#interview-ready-answer)
+- [Связанные материалы](#связки)
+
+Fan-Out распределяет элементы одного потока между несколькими workers. Fan-In
+объединяет несколько входных потоков в один. Fan-Out не является broadcast:
+одно значение общего канала получает один worker.
+
+---
 
 ## Формулировка
 
@@ -39,6 +56,9 @@ Fan-out = разделить работу. Один input channel → N goroutin
 ```go
 // Один input, несколько workers
 func fanOut[T any, R any](in <-chan T, fn func(T) R, workers int) []<-chan R {
+    if workers <= 0 {
+        workers = 1
+    }
     outs := make([]<-chan R, workers)
     for i := 0; i < workers; i++ {
         out := make(chan R)
@@ -108,6 +128,9 @@ import "sync"
 // Возвращает output channel который закроется когда in закроется и все workers закончат.
 func Map[T any, R any](in <-chan T, fn func(T) R, workers int) <-chan R {
     out := make(chan R)
+    if workers <= 0 {
+        workers = 1
+    }
     var wg sync.WaitGroup
 
     // Запускаем N worker'ов, каждый читает из in и пишет в out
@@ -166,8 +189,6 @@ package fanout
 
 import (
     "context"
-    "sync"
-    "sync/atomic"
 
     "golang.org/x/sync/errgroup"
 )
@@ -209,16 +230,13 @@ func MapOrdered[T any, R any](
     })
 
     // Workers
-    var inFlight atomic.Int32
     for w := 0; w < workers; w++ {
         g.Go(func() error {
             for idx := range indices {
                 if gctx.Err() != nil {
                     return gctx.Err()
                 }
-                inFlight.Add(1)
                 out, err := fn(gctx, inputs[idx])
-                inFlight.Add(-1)
                 if err != nil {
                     return err
                 }
@@ -241,6 +259,9 @@ func MapUnordered[T any, R any](
     fn func(context.Context, T) (R, error),
     workers int,
 ) (<-chan R, <-chan error) {
+    if workers <= 0 {
+        workers = 1
+    }
     out := make(chan R)
     errCh := make(chan error, 1)
 
@@ -306,7 +327,11 @@ in := make(chan string)
 go func() {
     defer close(in)
     for _, u := range urls {
-        in <- u
+        select {
+        case in <- u:
+        case <-ctx.Done():
+            return
+        }
     }
 }()
 
@@ -326,19 +351,31 @@ if err := <-errs; err != nil {
 Иногда нужно fan-in между **разными типами** каналов или с приоритетом:
 
 ```go
-// Merge с приоритетом: high-priority channel читается первым
+// Merge отдаёт предпочтение high, если значение уже готово.
 func mergeWithPriority(ctx context.Context, high, low <-chan Task) <-chan Task {
     out := make(chan Task)
     go func() {
         defer close(out)
-        for {
+        send := func(task Task) bool {
+            select {
+            case out <- task:
+                return true
+            case <-ctx.Done():
+                return false
+            }
+        }
+
+        for high != nil || low != nil {
             // Сначала проверить high — если есть, взять
             select {
             case t, ok := <-high:
                 if !ok {
+                    high = nil
+                    continue
+                }
+                if !send(t) {
                     return
                 }
-                out <- t
                 continue
             default:
             }
@@ -349,14 +386,20 @@ func mergeWithPriority(ctx context.Context, high, low <-chan Task) <-chan Task {
                 return
             case t, ok := <-high:
                 if !ok {
+                    high = nil
+                    continue
+                }
+                if !send(t) {
                     return
                 }
-                out <- t
             case t, ok := <-low:
                 if !ok {
+                    low = nil
+                    continue
+                }
+                if !send(t) {
                     return
                 }
-                out <- t
             }
         }
     }()
@@ -364,7 +407,8 @@ func mergeWithPriority(ctx context.Context, high, low <-chan Task) <-chan Task {
 }
 ```
 
-`default` в первом select — non-blocking check. Если high пустой — переходим ко второму select с обоими каналами.
+`default` выполняет неблокирующую проверку high. Это предпочтение, а не строгая
+гарантия: high может стать готовым уже после первой проверки.
 
 ---
 
@@ -452,22 +496,18 @@ func TestMap_Parallelism(t *testing.T) {
     }
 }
 
-func TestMap_NoGoroutineLeak(t *testing.T) {
-    before := runtime.NumGoroutine()
-
+func TestMap_ClosesOutput(t *testing.T) {
     in := make(chan int)
     close(in)  // нет данных
 
     out := Map(in, func(x int) int { return x }, 5)
-    for range out {
-    }
-
-    // Дать time runtime'у убрать горутины
-    time.Sleep(50 * time.Millisecond)
-
-    after := runtime.NumGoroutine()
-    if after > before {
-        t.Errorf("goroutine leak: before %d, after %d", before, after)
+    select {
+    case _, ok := <-out:
+        if ok {
+            t.Fatal("output must be closed")
+        }
+    case <-time.After(time.Second):
+        t.Fatal("output was not closed")
     }
 }
 ```
@@ -635,19 +675,38 @@ func tee[T any](in <-chan T) (<-chan T, <-chan T) {
 
 ---
 
-## Что важно показать на собеседовании
+## Interview-ready answer
 
-1. **Правильное закрытие channel** — owner закрывает, только один раз
-2. **`sync.WaitGroup + close()` паттерн** для fan-in
-3. **Понимание что общий channel = "first wins"** для fan-out
-4. **Context cancellation** обязательно
-5. **`errgroup`** как std-tool для координации
-6. **Order preservation через индексы** если попросят
-7. **Goroutine leak prevention** — все горутины должны иметь exit path
+**1. Чем fan-out отличается от broadcast?**
+
+- Fan-out — несколько workers читают один channel, и каждое значение получает
+  ровно один из них.
+- Broadcast — каждое событие должно попасть каждому subscriber; для этого нужны
+  отдельные каналы или отдельный pub/sub слой.
+
+**2. Как корректно собрать несколько каналов в один?**
+
+- На каждый input запускается forwarding goroutine.
+- `WaitGroup` ждёт все forwarders, а единственный closer после `Wait` закрывает
+  общий output.
+
+**3. Как не получить goroutine leak?**
+
+- Каждый blocking receive и send в отменяемом варианте участвует в `select` с
+  `ctx.Done()`.
+- Если consumer прекращает чтение раньше, он отменяет context или дренирует
+  output; один лишь большой buffer проблему не решает.
+
+**4. Как сохранить порядок?**
+
+- Задачам назначают индексы, результаты пишут в заранее выделенный slice по
+  индексам. Потоковый unordered API дешевле, но порядок завершения не сохраняет.
+
+---
 
 ## Связки
 
 - [Worker pool](./01-worker-pool.md) — частный случай fan-out + fan-in
 - [Pipeline](./04-pipeline.md) — fan-out + fan-in в виде stage'ей
 - [Concurrency patterns Go blog](https://go.dev/blog/pipelines) — официальный гайд от Sameer Ajmani
-- [Worker pool patterns](07-worker-pool-debug.md)
+- [Worker pool patterns](./07-worker-pool-debug.md)

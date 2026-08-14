@@ -1,6 +1,22 @@
 # Задача 4: Pipeline
 
-Pipeline — фундаментальный паттерн Go concurrency: цепочка stages, каждый = goroutine + channel. Данные текут через stages, обрабатываются на каждом, в конце — финальный output. Похоже на UNIX pipes (`cat | grep | sort`).
+## Содержание
+
+- [Формулировка](#формулировка)
+- [Базовый pipeline](#базовое-решение-3-stage-pipeline)
+- [Параллельные этапы и ошибки](#production-grade-с-параллельностью-stages-и-errors)
+- [Композиция Pipe](#pipeline-с-явной-структурой-pipe)
+- [Backpressure](#backpressure-и-буферизация)
+- [Тесты](#тесты)
+- [Типичные ошибки](#подводные-камни)
+- [Interview-ready answer](#interview-ready-answer)
+- [Связанные материалы](#связки)
+
+Pipeline — цепочка этапов, соединённых каналами. Каждый этап владеет своим
+выходом, прекращает работу при закрытии входа или отмене и передаёт
+backpressure предыдущему этапу.
+
+---
 
 ## Формулировка
 
@@ -151,7 +167,17 @@ func runStage[In, Out any](
         wg.Add(1)
         g.Go(func() error {
             defer wg.Done()
-            for v := range in {
+            for {
+                var v In
+                var ok bool
+                select {
+                case <-ctx.Done():
+                    return ctx.Err()
+                case v, ok = <-in:
+                    if !ok {
+                        return nil
+                    }
+                }
                 result, err := stage.Process(ctx, v)
                 if err != nil {
                     return err  // errgroup отменит остальные
@@ -162,7 +188,6 @@ func runStage[In, Out any](
                 case out <- result:
                 }
             }
-            return nil
         })
     }
 
@@ -259,11 +284,25 @@ func Parallel[In, Out any](workers int, fn func(context.Context, In) (Out, error
         out := make(chan Out)
         var wg sync.WaitGroup
 
+        if workers <= 0 {
+            workers = 1
+        }
+
         for i := 0; i < workers; i++ {
             wg.Add(1)
             go func() {
                 defer wg.Done()
-                for v := range in {
+                for {
+                    var v In
+                    var ok bool
+                    select {
+                    case <-ctx.Done():
+                        return
+                    case v, ok = <-in:
+                        if !ok {
+                            return
+                        }
+                    }
                     if r, err := fn(ctx, v); err == nil {
                         select {
                         case <-ctx.Done():
@@ -303,7 +342,9 @@ for r := range results {
 }
 ```
 
-Композиция через типизированные generics — clean API.
+Этот упрощённый `Pipe` намеренно пропускает элементы с ошибкой, потому что его
+сигнатура не имеет error channel. Для fail-fast нужен вариант с `errgroup` выше
+либо единый `Outcome{Value, Err}`.
 
 ---
 
@@ -375,7 +416,11 @@ func TestPipeline_ContextCancel(t *testing.T) {
     go func() {
         defer close(in)
         for i := 0; i < 1000; i++ {
-            in <- i
+            select {
+            case in <- i:
+            case <-ctx.Done():
+                return
+            }
         }
     }()
 
@@ -384,22 +429,26 @@ func TestPipeline_ContextCancel(t *testing.T) {
         return x, nil
     })(ctx, in)
 
-    var processed int
+    var processed atomic.Int32
+    done := make(chan struct{})
     go func() {
+        defer close(done)
         for range out {
-            processed++
-            if processed == 5 {
+            if processed.Add(1) == 5 {
                 cancel()  // отменяем после 5
             }
         }
     }()
 
-    // Дать pipeline время остановиться
-    time.Sleep(100 * time.Millisecond)
+    select {
+    case <-done:
+    case <-time.After(time.Second):
+        t.Fatal("pipeline did not stop after cancellation")
+    }
 
     // Не все 1000 элементов обработаны
-    if processed > 50 {
-        t.Errorf("processed %d items after cancel, expected ≤ 50", processed)
+    if got := processed.Load(); got > 50 {
+        t.Errorf("processed %d items after cancel, expected ≤ 50", got)
     }
 }
 
@@ -484,7 +533,9 @@ go func() {
 }()
 ```
 
-В стандартном паттерне (один closer goroutine после wg.Wait) этого не происходит — workers пишут пока активны, после wg.Done() — closer закрывает. Но если разделить ответственность — careful.
+В стандартном паттерне один closer после `wg.Wait()` закрывает канал, когда все
+workers уже перестали писать. Если ответственность за close разделена, этот
+инвариант легко нарушить.
 
 ### 4. Buffer ослепляет проблему
 
@@ -550,6 +601,9 @@ Workers per stage = think about downstream resources.
 
 ```go
 func Batcher[T any](size int, timeout time.Duration) Pipe[T, []T] {
+    if size <= 0 || timeout <= 0 {
+        panic("batch size and timeout must be positive")
+    }
     return func(ctx context.Context, in <-chan T) <-chan []T {
         out := make(chan []T)
         go func() {
@@ -558,10 +612,17 @@ func Batcher[T any](size int, timeout time.Duration) Pipe[T, []T] {
             ticker := time.NewTicker(timeout)
             defer ticker.Stop()
 
-            flush := func() {
-                if len(batch) > 0 {
-                    out <- batch
-                    batch = make([]T, 0, size)
+            flush := func() bool {
+                if len(batch) == 0 {
+                    return true
+                }
+                ready := batch
+                batch = make([]T, 0, size)
+                select {
+                case out <- ready:
+                    return true
+                case <-ctx.Done():
+                    return false
                 }
             }
 
@@ -573,11 +634,13 @@ func Batcher[T any](size int, timeout time.Duration) Pipe[T, []T] {
                         return
                     }
                     batch = append(batch, v)
-                    if len(batch) >= size {
-                        flush()
+                    if len(batch) >= size && !flush() {
+                        return
                     }
                 case <-ticker.C:
-                    flush()  // flush по timeout даже если меньше size
+                    if !flush() { // flush по timeout даже если меньше size
+                        return
+                    }
                 case <-ctx.Done():
                     return
                 }
@@ -596,7 +659,17 @@ func Filter[T any](pred func(T) bool) Pipe[T, T] {
         out := make(chan T)
         go func() {
             defer close(out)
-            for v := range in {
+            for {
+                var v T
+                var ok bool
+                select {
+                case <-ctx.Done():
+                    return
+                case v, ok = <-in:
+                    if !ok {
+                        return
+                    }
+                }
                 if pred(v) {
                     select {
                     case <-ctx.Done():
@@ -637,16 +710,33 @@ Per-stage histogram latency, throughput, error rate. Prometheus integration.
 
 ---
 
-## Что важно показать на собеседовании
+## Interview-ready answer
 
-1. **Понимание cascading close** — close upstream → range exits → close downstream
-2. **Context propagation** — в каждый stage
-3. **`select` с `<-ctx.Done()`** в каждом send/receive
-4. **Wait + close pattern** для closing output после всех workers
-5. **Trade-off buffered vs unbuffered** — почему такой выбор
-6. **Backpressure** — slow consumer тормозит producer
-7. **errgroup** для координации ошибок
-8. **Ссылка на Sameer Ajmani's blog** — официальный гайд
+**1. Как завершается pipeline?**
+
+- Producer закрывает свой output, каждый следующий stage после исчерпания input
+  закрывает собственный output.
+- Если writers несколько, channel закрывает отдельный coordinator после
+  `WaitGroup.Wait()`.
+
+**2. Зачем context проверять и на receive, и на send?**
+
+- Receive может навсегда ждать upstream, а send — consumer, который уже ушёл.
+- В обоих местах `select` с `ctx.Done()` даёт goroutine независимый exit path.
+
+**3. Как передавать ошибки?**
+
+- Для fail-fast pipeline подходит `errgroup.WithContext`: первая ошибка отменяет
+  связанные stages и возвращается caller'у.
+- Для best-effort потоков передают `Outcome{Value, Err}` и продолжают обработку.
+
+**4. Что даёт buffer?**
+
+- Он сглаживает короткий burst и развязывает latency соседних stages, но не
+  исправляет устойчиво медленный downstream. Полный buffer снова создаёт
+  backpressure.
+
+---
 
 ## Связки
 

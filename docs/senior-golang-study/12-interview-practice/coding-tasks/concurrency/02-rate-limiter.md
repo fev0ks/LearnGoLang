@@ -1,6 +1,25 @@
 # Задача 2: Rate Limiter
 
-Классическая задача — реализовать ограничение частоты вызовов. Спрашивают почти на каждом Go-собеседовании, потому что в production rate limiter нужен везде: API gateway, защита от abuse, fairness между клиентами.
+## Содержание
+
+- [Формулировка](#формулировка)
+- [Уточняющие вопросы](#уточняющие-вопросы)
+- [Сравнение алгоритмов](#алгоритмы--теория)
+- [Token bucket](#базовое-решение-token-bucket)
+- [Sliding window, окно 1 секунда](#реализация-sliding-window-окно-1-секунда)
+- [Пакет x/time/rate](#пакет-golangorgxtimerate)
+- [Лимиты по ключам](#per-key-rate-limiter)
+- [Распределённый limiter](#distributed-rate-limiter-redis)
+- [Тесты](#тесты)
+- [Типичные ошибки](#подводные-камни)
+- [Interview-ready answer](#interview-ready-answer)
+- [Связанные материалы](#связки)
+
+Rate limiter управляет скоростью допуска операций. До выбора алгоритма нужно
+определить burst, ключ лимита, реакцию на превышение и допустимую согласованность
+между процессами.
+
+---
 
 ## Формулировка
 
@@ -33,7 +52,8 @@
    "В одном процессе — in-memory. Несколько pod'ов в k8s — Redis или другой shared store."
 
 6. **Точность важна?**
-   "Token bucket — approximate но быстрый. Sliding window log — точный но память O(N)."
+   "Token bucket точно реализует собственную модель накопления токенов, но не
+   обещает точное число запросов в каждом произвольном скользящем окне."
 
 ---
 
@@ -85,11 +105,13 @@ window = 1s, limit = 100
 
 Два counter'а: текущая секунда + предыдущая. Вес предыдущей пропорционален позиции внутри окна:
 ```
-count_now * 0.7 + count_prev * 0.3 ≤ limit
+elapsed = 0.7 окна
+count_now + count_prev * (1 - elapsed) ≤ limit
 ```
 
-**Плюсы:** константная память, точность ~99%.
-**Минусы:** approximate.
+**Плюсы:** константная память.
+**Минусы:** результат зависит от распределения событий в предыдущем окне;
+универсальной точности в процентах нет.
 
 ### Fixed Window
 
@@ -106,9 +128,12 @@ count_now * 0.7 + count_prev * 0.3 ≤ limit
 package ratelimit
 
 import (
+    "errors"
     "sync"
     "time"
 )
+
+var ErrInvalidConfig = errors.New("ratelimit: rate and burst must be positive")
 
 // TokenBucket — простой token bucket rate limiter.
 type TokenBucket struct {
@@ -117,15 +142,25 @@ type TokenBucket struct {
     capacity   float64       // максимум (burst)
     refillRate float64       // tokens per second
     lastRefill time.Time
+    now        func() time.Time
 }
 
-func NewTokenBucket(rate float64, burst float64) *TokenBucket {
+func NewTokenBucket(rate float64, burst float64) (*TokenBucket, error) {
+    return newTokenBucket(rate, burst, time.Now)
+}
+
+func newTokenBucket(rate float64, burst float64, now func() time.Time) (*TokenBucket, error) {
+    if rate <= 0 || burst <= 0 || now == nil {
+        return nil, ErrInvalidConfig
+    }
+    current := now()
     return &TokenBucket{
         tokens:     burst,  // стартуем полным
         capacity:   burst,
         refillRate: rate,
-        lastRefill: time.Now(),
-    }
+        lastRefill: current,
+        now:        now,
+    }, nil
 }
 
 // Allow возвращает true если запрос разрешён.
@@ -135,13 +170,15 @@ func (tb *TokenBucket) Allow() bool {
     defer tb.mu.Unlock()
 
     // Refill — добавить токены за прошедшее время
-    now := time.Now()
+    now := tb.now()
     elapsed := now.Sub(tb.lastRefill).Seconds()
-    tb.tokens += elapsed * tb.refillRate
-    if tb.tokens > tb.capacity {
-        tb.tokens = tb.capacity
+    if elapsed > 0 {
+        tb.tokens += elapsed * tb.refillRate
+        if tb.tokens > tb.capacity {
+            tb.tokens = tb.capacity
+        }
+        tb.lastRefill = now
     }
-    tb.lastRefill = now
 
     if tb.tokens >= 1 {
         tb.tokens--
@@ -154,7 +191,10 @@ func (tb *TokenBucket) Allow() bool {
 **Использование:**
 
 ```go
-limiter := ratelimit.NewTokenBucket(100, 200)  // 100/sec rate, burst 200
+limiter, err := ratelimit.NewTokenBucket(100, 200)
+if err != nil {
+    log.Fatal(err)
+}
 
 if !limiter.Allow() {
     http.Error(w, "rate limit exceeded", 429)
@@ -170,9 +210,240 @@ if !limiter.Allow() {
 
 ---
 
-## Production-grade решение
+## Реализация: Sliding Window (окно 1 секунда)
 
-Используй стандартную библиотеку — `golang.org/x/time/rate`. Она проверенная, эффективная, имеет всё что нужно.
+Token bucket отвечает на вопрос «есть ли сейчас накопленная квота». Sliding window
+отвечает на другой вопрос — «сколько запросов реально прошло за последнюю секунду».
+Разница проявляется на границе: fixed window с лимитом 100 пропускает 100 запросов
+в 23:59:59.9 и ещё 100 в 00:00:00.0 — 200 событий за 100 мс. Sliding window такой
+всплеск не пропускает, потому что окно двигается вместе с текущим временем, а не
+сбрасывается по календарной границе.
+
+Ниже — два варианта окна в одну секунду: точный (log) и приближённый (counter).
+
+### Вариант 1: Sliding Window Log на ring buffer
+
+Наивная реализация хранит slice timestamp'ов и на каждом запросе выбрасывает
+устаревшие — это O(N) работы и постоянные аллокации (см. [подводный камень 4](#4-sliding-window--память-on)).
+Если лимит фиксирован, тех же гарантий достигает кольцевой буфер ровно на `limit`
+элементов: `limit + 1`-й запрос физически некуда записать, пока самый старый не
+выйдет из окна.
+
+```go
+package ratelimit
+
+import (
+    "sync"
+    "time"
+)
+
+// slidingWindowSize — ширина окна лимитера: одна секунда.
+const slidingWindowSize = time.Second
+
+// SlidingWindowLog разрешает не более limit запросов за последнюю секунду.
+// Окно — полуинтервал (now-1s, now]: запись возрастом ровно 1s уже вышла из окна.
+type SlidingWindowLog struct {
+    mu     sync.Mutex
+    window time.Duration
+    ring   []time.Time // кольцевой буфер на limit отметок
+    next   int         // индекс самой старой отметки — её же перезапишет следующий Allow
+    now    func() time.Time
+}
+
+// NewSlidingWindowLog создаёт лимитер на limit запросов в секунду.
+func NewSlidingWindowLog(limit int) (*SlidingWindowLog, error) {
+    return newSlidingWindowLog(limit, slidingWindowSize, time.Now)
+}
+
+func newSlidingWindowLog(limit int, window time.Duration, now func() time.Time) (*SlidingWindowLog, error) {
+    if limit <= 0 || window <= 0 || now == nil {
+        return nil, ErrInvalidConfig
+    }
+    return &SlidingWindowLog{
+        window: window,
+        ring:   make([]time.Time, limit),
+        now:    now,
+    }, nil
+}
+
+// Allow возвращает true, если за последнюю секунду прошло меньше limit запросов.
+// Не блокирует, работает за O(1).
+func (s *SlidingWindowLog) Allow() bool {
+    s.mu.Lock()
+    defer s.mu.Unlock()
+
+    now := s.now()
+    oldest := s.ring[s.next]
+
+    // Нулевой time.Time — слот ещё не использован, окно не заполнено.
+    if !oldest.IsZero() && now.Sub(oldest) < s.window {
+        return false
+    }
+
+    s.ring[s.next] = now
+    s.next = (s.next + 1) % len(s.ring)
+    return true
+}
+```
+
+**Ключевые моменты:**
+- **Ring buffer вместо slice** — O(1) на запрос, ноль аллокаций после конструктора,
+  память не зависит от нагрузки.
+- **Проверяется только самая старая отметка** — если она внутри окна, то и все
+  остальные `limit - 1` тоже: записи в буфере монотонно возрастают.
+- **`s.next` играет две роли** — это одновременно позиция самой старой отметки и
+  слот для записи новой, поэтому отдельный счётчик размера не нужен.
+- **Память O(limit)** — `time.Time` занимает 24 байта, лимит 100 RPS → 2.4 КБ на
+  ключ. Для лимитов порядка миллиона запросов вместо `time.Time` хранят
+  `int64` unix-nanos (8 байт) либо переходят на counter-вариант.
+- **Монотонные часы** — `time.Now()` несёт монотонное показание, и `Sub` использует
+  именно его. Перевод системных часов (NTP-скачок) окно не ломает.
+
+### Вариант 2: Sliding Window Counter (O(1) памяти)
+
+Точный log хранит отметку на каждый разрешённый запрос. Counter хранит два числа:
+счётчик текущего окна и счётчик предыдущего, взвешенный по тому, какая его часть
+ещё попадает в скользящее окно.
+
+```
+                  сколько прошлого окна ещё внутри
+                  ↓
+estimated = prev * (1 - elapsed) + cur
+                              ↑
+                     доля текущего окна, которая уже истекла (0.0 … 1.0)
+```
+
+```go
+// SlidingWindowCounter — приближённый лимитер: два счётчика вместо журнала отметок.
+type SlidingWindowCounter struct {
+    mu          sync.Mutex
+    limit       int
+    window      time.Duration
+    windowStart time.Time // начало текущего окна
+    cur         int       // счётчик текущего окна
+    prev        int       // счётчик предыдущего окна
+    now         func() time.Time
+}
+
+func NewSlidingWindowCounter(limit int) (*SlidingWindowCounter, error) {
+    return newSlidingWindowCounter(limit, slidingWindowSize, time.Now)
+}
+
+func newSlidingWindowCounter(limit int, window time.Duration, now func() time.Time) (*SlidingWindowCounter, error) {
+    if limit <= 0 || window <= 0 || now == nil {
+        return nil, ErrInvalidConfig
+    }
+    return &SlidingWindowCounter{
+        limit:       limit,
+        window:      window,
+        windowStart: now(),
+        now:         now,
+    }, nil
+}
+
+func (s *SlidingWindowCounter) Allow() bool {
+    s.mu.Lock()
+    defer s.mu.Unlock()
+
+    now := s.now()
+    s.rotate(now)
+
+    elapsed := float64(now.Sub(s.windowStart)) / float64(s.window) // 0.0 … 1.0
+    estimated := float64(s.prev)*(1-elapsed) + float64(s.cur)
+    if estimated >= float64(s.limit) {
+        return false
+    }
+
+    s.cur++
+    return true
+}
+
+// rotate сдвигает окна вперёд, если с прошлого вызова прошла хотя бы одна ширина окна.
+func (s *SlidingWindowCounter) rotate(now time.Time) {
+    passed := int64(now.Sub(s.windowStart) / s.window)
+    switch {
+    case passed <= 0: // ещё внутри текущего окна
+        return
+    case passed == 1: // соседнее окно — текущий счётчик становится предыдущим
+        s.prev, s.cur = s.cur, 0
+    default: // была пауза дольше двух окон — история неактуальна
+        s.prev, s.cur = 0, 0
+    }
+    s.windowStart = s.windowStart.Add(time.Duration(passed) * s.window)
+}
+```
+
+**Ключевые моменты:**
+- **Память O(1) на ключ** — два `int` вместо журнала на `limit` отметок. Именно
+  этот вариант используют, когда ключей миллионы (per-user лимиты).
+- **Lazy rotation** — окна сдвигаются внутри `Allow`, фоновый ticker не нужен.
+- **`windowStart.Add(...)` вместо `Truncate`** — `Truncate` выравнивает время по
+  календарной сетке и при этом **срезает монотонное показание**; дальнейшие `Sub`
+  начали бы считать по настенным часам и ломались бы на NTP-коррекции. Сложение
+  монотонность сохраняет.
+- **Приближение** — оценка предполагает равномерное распределение запросов внутри
+  предыдущего окна. Если весь предыдущий трафик пришёлся на его начало, лимитер
+  переоценит нагрузку и отклонит лишнее; если на конец — недооценит и пропустит
+  лишнее. Обещать конкретный процент точности нельзя, он зависит от формы трафика.
+
+### Использование
+
+```go
+limiter, err := ratelimit.NewSlidingWindowLog(100) // 100 запросов за последнюю секунду
+if err != nil {
+    log.Fatal(err)
+}
+
+if !limiter.Allow() {
+    w.Header().Set("Retry-After", "1")
+    http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
+    return
+}
+```
+
+Для sliding window с окном в секунду `Retry-After: 1` — честная оценка: слот
+освобождается не позже чем через секунду после самого старого запроса.
+
+### Что выбрать
+
+| Критерий | Sliding window log | Sliding window counter | Token bucket |
+|---|---|---|---|
+| Гарантия | точно ≤ limit за любую секунду | приближённо | точно по своей модели, но не по окну |
+| Память на ключ | O(limit) | O(1) | O(1) |
+| Время на запрос | O(1) на ring buffer | O(1) | O(1) |
+| Burst | не разрешает сверх limit | зависит от оценки | разрешает до `capacity` |
+| Типичное применение | биллинг, квоты по договору, строгие внешние лимиты | миллионы per-user ключей | защита сервиса от перегрузки |
+
+Практическое правило: если превышение лимита стоит денег или нарушает контракт —
+log; если лимит нужен как защита и небольшая погрешность допустима — counter или
+token bucket.
+
+### Distributed-вариант
+
+В Redis точное окно кладут в sorted set: score — timestamp, member — уникальный id
+запроса. Один Lua-скрипт чистит окно и считает оставшееся:
+
+```lua
+local key, now, window, limit = KEYS[1], tonumber(ARGV[1]), tonumber(ARGV[2]), tonumber(ARGV[3])
+redis.call('ZREMRANGEBYSCORE', key, 0, now - window)   -- выбросить всё старше окна
+if redis.call('ZCARD', key) >= limit then
+    return 0
+end
+redis.call('ZADD', key, now, ARGV[4])                  -- ARGV[4] — уникальный id запроса
+redis.call('PEXPIRE', key, window)
+return 1
+```
+
+Цена — память под `limit` элементов на каждый активный ключ и `ZREMRANGEBYSCORE` на
+каждом запросе. Counter-вариант в Redis обходится двумя `INCR` по ключам вида
+`key:<номер секунды>` и памятью O(1) на ключ.
+
+---
+
+## Пакет `golang.org/x/time/rate`
+
+`golang.org/x/time/rate` — внешний Go-модуль, а не стандартная библиотека. Он
+поддерживает неблокирующую проверку, ожидание с context и reservation.
 
 ```go
 import "golang.org/x/time/rate"
@@ -190,31 +461,33 @@ if err := limiter.Wait(ctx); err != nil {
     return err  // context cancelled или таймаут
 }
 
-// Зарезервировать N токенов (для batch обработки)
-r := limiter.ReserveN(time.Now(), 5)
-if !r.OK() {
-    return ErrRateLimited
+// Дождаться N токенов с отменой через context.
+if err := limiter.WaitN(ctx, 5); err != nil {
+    return err
 }
-time.Sleep(r.Delay())
-// ... выполняй 5 операций
 ```
 
 ### HTTP Middleware
 
 ```go
-func RateLimitMiddleware(rps float64, burst int) func(http.Handler) http.Handler {
+func RateLimitMiddleware(rps float64, burst int) (func(http.Handler) http.Handler, error) {
+    if rps <= 0 || burst <= 0 {
+        return nil, ErrInvalidConfig
+    }
     limiter := rate.NewLimiter(rate.Limit(rps), burst)
+    retryAfterSeconds := max(1, int(math.Ceil(1/rps)))
 
-    return func(next http.Handler) http.Handler {
+    middleware := func(next http.Handler) http.Handler {
         return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
             if !limiter.Allow() {
-                w.Header().Set("Retry-After", "1")
+                w.Header().Set("Retry-After", strconv.Itoa(retryAfterSeconds))
                 http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
                 return
             }
             next.ServeHTTP(w, r)
         })
     }
+    return middleware, nil
 }
 ```
 
@@ -233,15 +506,18 @@ type PerKeyLimiter struct {
     lastSeen map[string]time.Time
 }
 
-func NewPerKeyLimiter(rps float64, burst int) *PerKeyLimiter {
+func NewPerKeyLimiter(ctx context.Context, rps float64, burst int) (*PerKeyLimiter, error) {
+    if ctx == nil || rps <= 0 || burst <= 0 {
+        return nil, ErrInvalidConfig
+    }
     pk := &PerKeyLimiter{
         limiters: make(map[string]*rate.Limiter),
         lastSeen: make(map[string]time.Time),
         rate:     rate.Limit(rps),
         burst:    burst,
     }
-    go pk.cleanup()
-    return pk
+    go pk.cleanup(ctx)
+    return pk, nil
 }
 
 func (pk *PerKeyLimiter) Allow(key string) bool {
@@ -258,28 +534,36 @@ func (pk *PerKeyLimiter) Allow(key string) bool {
 }
 
 // cleanup удаляет idle limiters чтобы map не рос бесконечно
-func (pk *PerKeyLimiter) cleanup() {
+func (pk *PerKeyLimiter) cleanup(ctx context.Context) {
     ticker := time.NewTicker(time.Minute)
     defer ticker.Stop()
 
-    for range ticker.C {
-        pk.mu.Lock()
-        cutoff := time.Now().Add(-10 * time.Minute)
-        for key, lastSeen := range pk.lastSeen {
-            if lastSeen.Before(cutoff) {
-                delete(pk.limiters, key)
-                delete(pk.lastSeen, key)
+    for {
+        select {
+        case <-ctx.Done():
+            return
+        case now := <-ticker.C:
+            pk.mu.Lock()
+            cutoff := now.Add(-10 * time.Minute)
+            for key, lastSeen := range pk.lastSeen {
+                if lastSeen.Before(cutoff) {
+                    delete(pk.limiters, key)
+                    delete(pk.lastSeen, key)
+                }
             }
+            pk.mu.Unlock()
         }
-        pk.mu.Unlock()
     }
 }
 
 // HTTP middleware с per-IP rate limit
-func PerIPRateLimit(rps float64, burst int) func(http.Handler) http.Handler {
-    pk := NewPerKeyLimiter(rps, burst)
+func PerIPRateLimit(ctx context.Context, rps float64, burst int) (func(http.Handler) http.Handler, error) {
+    pk, err := NewPerKeyLimiter(ctx, rps, burst)
+    if err != nil {
+        return nil, err
+    }
 
-    return func(next http.Handler) http.Handler {
+    middleware := func(next http.Handler) http.Handler {
         return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
             ip := clientIP(r)
             if !pk.Allow(ip) {
@@ -289,6 +573,7 @@ func PerIPRateLimit(rps float64, burst int) func(http.Handler) http.Handler {
             next.ServeHTTP(w, r)
         })
     }
+    return middleware, nil
 }
 ```
 
@@ -305,7 +590,6 @@ package ratelimit
 
 import (
     "context"
-    "errors"
     "time"
 
     "github.com/redis/go-redis/v9"
@@ -316,7 +600,7 @@ const tokenBucketScript = `
 local key = KEYS[1]
 local rate = tonumber(ARGV[1])         -- tokens per second
 local capacity = tonumber(ARGV[2])      -- burst
-local now = tonumber(ARGV[3])           -- current unix time (seconds)
+local now = tonumber(ARGV[3])           -- current unix time (milliseconds)
 local requested = tonumber(ARGV[4])     -- requested tokens (обычно 1)
 
 local data = redis.call('HMGET', key, 'tokens', 'last_refill')
@@ -324,7 +608,7 @@ local tokens = tonumber(data[1]) or capacity
 local last_refill = tonumber(data[2]) or now
 
 -- Refill
-local elapsed = math.max(0, now - last_refill)
+local elapsed = math.max(0, now - last_refill) / 1000
 tokens = math.min(capacity, tokens + elapsed * rate)
 
 local allowed = 0
@@ -333,8 +617,8 @@ if tokens >= requested then
     allowed = 1
 end
 
-redis.call('HMSET', key, 'tokens', tokens, 'last_refill', now)
-redis.call('EXPIRE', key, math.ceil(capacity / rate * 2))
+redis.call('HSET', key, 'tokens', tokens, 'last_refill', now)
+redis.call('EXPIRE', key, math.max(1, math.ceil(capacity / rate * 2)))
 
 return allowed
 `
@@ -346,17 +630,20 @@ type RedisRateLimiter struct {
     capacity float64
 }
 
-func NewRedisRateLimiter(c *redis.Client, rate, capacity float64) *RedisRateLimiter {
+func NewRedisRateLimiter(c *redis.Client, rate, capacity float64) (*RedisRateLimiter, error) {
+    if c == nil || rate <= 0 || capacity <= 0 {
+        return nil, ErrInvalidConfig
+    }
     return &RedisRateLimiter{
         client:   c,
         script:   redis.NewScript(tokenBucketScript),
         rate:     rate,
         capacity: capacity,
-    }
+    }, nil
 }
 
 func (r *RedisRateLimiter) Allow(ctx context.Context, key string) (bool, error) {
-    now := time.Now().Unix()
+    now := time.Now().UnixMilli()
     result, err := r.script.Run(ctx, r.client, []string{key},
         r.rate, r.capacity, now, 1,
     ).Int()
@@ -370,7 +657,7 @@ func (r *RedisRateLimiter) Allow(ctx context.Context, key string) (bool, error) 
 **Ключевые моменты:**
 - **Lua script** — атомарность операции "проверь + уменьши" в одной операции на Redis
 - **EXPIRE** — авто-cleanup idle keys
-- **Hash в Redis** (HMSET) — храним два поля (tokens + last_refill) в одной key
+- **Hash в Redis** (`HSET`) — храним два поля (`tokens` и `last_refill`) в одном key
 
 ### Когда нужен distributed
 
@@ -382,7 +669,9 @@ func (r *RedisRateLimiter) Allow(ctx context.Context, key string) (bool, error) 
 - Single pod (development, low scale)
 - Soft per-pod limits (если 5 pod'ов, каждый по 100 RPS = approximate 500 RPS глобально, OK)
 
-**Trade-off:** distributed добавляет latency (Redis round-trip ~1ms) и точку failure.
+Client time на разных pods может расходиться. Для строгого общего лимита время
+лучше получать внутри Redis через `TIME`. Распределённый вариант добавляет
+сетевой round-trip и зависимость от доступности Redis.
 
 ---
 
@@ -390,7 +679,11 @@ func (r *RedisRateLimiter) Allow(ctx context.Context, key string) (bool, error) 
 
 ```go
 func TestTokenBucket_Allow(t *testing.T) {
-    tb := NewTokenBucket(10, 5)  // 10/sec, burst 5
+    now := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+    tb, err := newTokenBucket(10, 5, func() time.Time { return now })
+    if err != nil {
+        t.Fatal(err)
+    }
 
     // Первые 5 — должны пройти (burst)
     for i := 0; i < 5; i++ {
@@ -404,15 +697,18 @@ func TestTokenBucket_Allow(t *testing.T) {
         t.Error("6th request should be rejected")
     }
 
-    // Через 100ms должен накопиться 1 токен (10/sec)
-    time.Sleep(150 * time.Millisecond)
+    now = now.Add(100 * time.Millisecond)
     if !tb.Allow() {
-        t.Error("after 150ms 1 token should be available")
+        t.Error("after 100ms 1 token should be available")
     }
 }
 
 func TestTokenBucket_Concurrent(t *testing.T) {
-    tb := NewTokenBucket(100, 100)
+    fixed := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+    tb, err := newTokenBucket(100, 100, func() time.Time { return fixed })
+    if err != nil {
+        t.Fatal(err)
+    }
 
     var allowed atomic.Int32
     var wg sync.WaitGroup
@@ -428,15 +724,87 @@ func TestTokenBucket_Concurrent(t *testing.T) {
     }
     wg.Wait()
 
-    // Burst = 100, поэтому первые 100 должны пройти
-    // (refill за время теста минимальный)
-    if allowed.Load() > 105 || allowed.Load() < 95 {
-        t.Errorf("allowed %d, want ~100", allowed.Load())
+    if allowed.Load() != 100 {
+        t.Errorf("allowed %d, want 100", allowed.Load())
     }
 }
 ```
 
-Тестировать **timing-зависимый** код сложно. Дай tolerance в ±5%.
+```go
+func TestSlidingWindowLog_Allow(t *testing.T) {
+    now := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+    sw, err := newSlidingWindowLog(3, time.Second, func() time.Time { return now })
+    if err != nil {
+        t.Fatal(err)
+    }
+
+    for i := 0; i < 3; i++ {
+        if !sw.Allow() {
+            t.Errorf("request %d should be allowed", i)
+        }
+    }
+    if sw.Allow() {
+        t.Error("4th request should be rejected")
+    }
+
+    // Окно ещё не сдвинулось настолько, чтобы освободить слот.
+    now = now.Add(900 * time.Millisecond)
+    if sw.Allow() {
+        t.Error("request at +900ms should be rejected")
+    }
+
+    // Ровно на границе все три отметки выходят из окна.
+    now = now.Add(100 * time.Millisecond)
+    for i := 0; i < 3; i++ {
+        if !sw.Allow() {
+            t.Errorf("request %d after full window should be allowed", i)
+        }
+    }
+    if sw.Allow() {
+        t.Error("4th request in new window should be rejected")
+    }
+}
+
+func TestSlidingWindowCounter_NoBoundaryBurst(t *testing.T) {
+    now := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+    start := now
+    sw, err := newSlidingWindowCounter(100, time.Second, func() time.Time { return now })
+    if err != nil {
+        t.Fatal(err)
+    }
+
+    // Весь лимит выбран в конце первого окна.
+    now = start.Add(900 * time.Millisecond)
+    for i := 0; i < 100; i++ {
+        if !sw.Allow() {
+            t.Fatalf("request %d should be allowed", i)
+        }
+    }
+
+    // Начало следующего окна: fixed window пропустил бы ещё 100 (boundary problem),
+    // sliding window видит полный вес предыдущего окна.
+    now = start.Add(time.Second)
+    if sw.Allow() {
+        t.Error("request right after window boundary should be rejected")
+    }
+
+    // Через 900 мс нового окна вес предыдущего — 10%, значит доступно 90 запросов.
+    now = start.Add(1900 * time.Millisecond)
+    allowed := 0
+    for i := 0; i < 200; i++ {
+        if sw.Allow() {
+            allowed++
+        }
+    }
+    if allowed != 90 {
+        t.Errorf("allowed %d, want 90", allowed)
+    }
+}
+```
+
+Управляемые часы делают проверку refill и сдвига окон детерминированной и не
+зависящей от скорости CI. Тест на границе окна — главный аргумент в пользу sliding
+window: тот же сценарий на fixed window пропустил бы 200 запросов за 100 мс.
 
 ---
 
@@ -487,6 +855,8 @@ log = append(log, time.Now())
 При 10k RPS список — десятки тысяч записей. CPU тратится на slice операции. Лучше:
 - Token bucket — O(1) memory
 - Sliding window counter — O(1) memory, approximate
+- [Ring buffer на `limit` отметок](#вариант-1-sliding-window-log-на-ring-buffer) —
+  точность log'а без роста памяти и аллокаций
 
 ### 5. Возвращать только `bool` без `Retry-After`
 
@@ -497,15 +867,15 @@ if !limiter.Allow() {
 }
 ```
 
-Лучше:
+Простой conservative hint для token bucket:
 ```go
-reservation := limiter.Reserve()
-if !reservation.OK() {
-    return ErrRateLimited
-}
-delay := reservation.Delay()
-w.Header().Set("Retry-After", strconv.Itoa(int(delay.Seconds())))
+retryAfter := max(1, int(math.Ceil(1/rps)))
+w.Header().Set("Retry-After", strconv.Itoa(retryAfter))
 ```
+
+`Reserve` нельзя вызывать только ради вычисления header и забывать: reservation
+меняет состояние limiter'а. Если используешь reservation, ненужную квоту нужно
+корректно отменить через `CancelAt`.
 
 ### 6. Distributed rate limiter без atomic operation
 
@@ -516,13 +886,15 @@ if tokens > 0:
     redis.DECR(key)  # ← между GET и DECR могла прийти другая goroutine
 ```
 
-Всегда **Lua script** или native Redis команды (`INCR`).
+Для token bucket используй одну Lua/Function-операцию. Для fixed-window counter
+подходит атомарный `INCR`, но установку TTL тоже нужно согласовать так, чтобы
+сбой между командами не оставил вечный ключ.
 
 ### 7. Не учитывать context
 
 ```go
-// ❌ Wait блокирует навсегда
-limiter.Wait()
+// ❌ Ожидание не связано с отменой caller'а.
+limiter.Wait(context.Background())
 
 // ✓ С context
 if err := limiter.Wait(ctx); err != nil {
@@ -537,7 +909,9 @@ if err := limiter.Wait(ctx); err != nil {
 limiter := rate.NewLimiter(100, 10000)  // 10k burst!
 ```
 
-10k burst означает что **внезапно** может прийти 10k запросов мгновенно. Downstream может не выдержать. Burst обычно = 1-2x от среднего RPS.
+Burst `10 000` разрешает почти мгновенно допустить до десяти тысяч накопленных
+операций. Его выбирают из допустимой мгновенной нагрузки downstream, а не
+универсальным множителем среднего RPS.
 
 ### 9. Считать ошибку 429 как "норму"
 
@@ -576,7 +950,8 @@ limiter.AllowN(time.Now(), cost)
 - Per-tenant: 1k RPS
 - Per-user: 100 RPS
 
-Проверка проходит **все три уровня**. Используется в Stripe, AWS API Gateway.
+Проверка проходит **все три уровня**; такой contract типичен для API gateway и
+multi-tenant сервисов.
 
 ### 4. Different algorithms per endpoint
 
@@ -588,38 +963,74 @@ Token bucket для regular API. Leaky bucket для downstream protection. Slid
 
 ### 6. Soft vs hard limit
 
-Soft — warning header, но запрос проходит. Hard — 429. Используется в GitHub API.
+Soft — warning header, но запрос проходит. Hard — запрос отклоняется, обычно с
+`429 Too Many Requests`.
 
 ### 7. Backpressure для воркеров
 
 Worker pool читает из канала, lim'итер на потребителе:
 ```go
 for task := range tasks {
-    limiter.Wait(ctx)
+    if err := limiter.Wait(ctx); err != nil {
+        return err
+    }
     process(task)
 }
 ```
 
 ### 8. Rate limit info в headers
 
-GitHub-style:
+Не выдавай legacy `X-RateLimit-*` за общий стандарт: их семантика зависит от API.
+В актуальном IETF draft предлагаются structured fields:
+
 ```
-X-RateLimit-Limit: 5000
-X-RateLimit-Remaining: 4999
-X-RateLimit-Reset: 1620000000
+RateLimit-Policy: "default";q=5000;w=3600
+RateLimit: "default";r=4999;t=3590
 ```
+
+На август 2026 года это всё ещё Internet-Draft, а не опубликованный RFC, поэтому
+формат нужно зафиксировать в контракте своего API. Для ответа `429` отдельно
+полезен стандартный `Retry-After`.
 
 ---
 
-## Что важно показать на собеседовании
+## Interview-ready answer
 
-1. **Знать `golang.org/x/time/rate`** — стандарт де-факто. Не писать свой когда не просят.
-2. **Объяснить разницу алгоритмов** — token bucket vs leaky bucket vs sliding window.
-3. **Per-key cleanup** — без него memory leak.
-4. **Atomic operations в distributed** — Lua script, объяснить зачем.
-5. **Context cancellation** — `Wait(ctx)` а не просто `Wait()`.
-6. **429 + Retry-After header** — клиенту нужно знать когда retry.
-7. **Trade-offs** — burst vs steady, approximate vs exact, in-memory vs distributed.
+**1. Как работает token bucket?**
+
+- Состояние — число токенов ограничено ёмкостью `burst`.
+- Refill — прошедшее время умножается на скорость и лениво добавляет токены.
+- Allow — операция списывает стоимость запроса либо немедленно отказывает.
+- Семантика — алгоритм допускает накопленный burst, но не обещает точный лимит в
+  каждом произвольном sliding window.
+
+**2. Как гарантировать «не более N запросов за любую секунду»?**
+
+- Token bucket такой гарантии не даёт — накопленный burst проходит мгновенно.
+- Sliding window log хранит отметку на каждый разрешённый запрос и сравнивает
+  самую старую с границей окна.
+- Ring buffer на `limit` отметок даёт O(1) по времени и фиксированную память:
+  проверяется только самая старая запись, она же перезаписывается новой.
+- Sliding window counter меняет точность на O(1) памяти — берётся, когда ключей
+  слишком много для журнала.
+
+**3. Что важно для per-key limiter?**
+
+- Память — map ключей требует удаления idle-записей.
+- Lifecycle — cleanup goroutine должна останавливаться вместе с приложением.
+- Identity — proxy headers доверяют только после проверки доверенного proxy.
+- Contention — sharding уменьшает общий lock, если ключей много.
+
+**4. Чем распределённый limiter сложнее локального?**
+
+- Атомарность — refill, проверка и списание выполняются одной server-side
+  операцией.
+- Время — часы разных pods могут расходиться, поэтому нужен согласованный
+  источник.
+- Доступность — нужно выбрать fail-open или fail-closed при ошибке Redis.
+- Цена — каждый строгий допуск добавляет сетевой round-trip.
+
+---
 
 ## Связки
 
@@ -627,3 +1038,6 @@ X-RateLimit-Reset: 1620000000
 - [Rate limiting в reliability patterns](../../../05-system-design/reliability-patterns/04-rate-limiting.md) — system design
 - [HTTP rate limit middleware](../../../08-networking-and-api/protocols/05-integration-patterns/03-rate-limiting.md) — детальный разбор
 - [Rate limiter interview case](../../../05-system-design/interview-cases/03-rate-limiter.md) — system design версия задачи
+- [`golang.org/x/time/rate`](https://pkg.go.dev/golang.org/x/time/rate) — API локального token bucket
+- [Redis `TIME`](https://redis.io/docs/latest/commands/time/) — server-side источник времени
+- [IETF RateLimit header fields](https://datatracker.ietf.org/doc/draft-ietf-httpapi-ratelimit-headers/) — актуальный draft формата HTTP headers
