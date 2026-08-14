@@ -125,10 +125,10 @@ flowchart TB
         end
     end
 
-    style L1 fill:#fef3c7,stroke:#a16207
-    style L2 fill:#dbeafe,stroke:#1e40af
-    style L3 fill:#dcfce7,stroke:#15803d
-    style L4 fill:#fce7f3,stroke:#9d174d
+    style L1 fill:#fef3c7,stroke:#a16207,color:#0f172a
+    style L2 fill:#dbeafe,stroke:#1e40af,color:#0f172a
+    style L3 fill:#dcfce7,stroke:#15803d,color:#0f172a
+    style L4 fill:#fce7f3,stroke:#9d174d,color:#0f172a
 ```
 
 Зависимости — только внутрь. Внешний слой знает о внутреннем, не наоборот.
@@ -251,7 +251,7 @@ flowchart LR
 
 ## Outbox
 
-Атомарно сохранить изменение и событие в одной DB transaction, отдельный publisher доставляет в broker.
+Изменение данных и событие о нём сохраняются в одной транзакции БД, а доставкой события в брокер занимается отдельный процесс. Так исчезает двойная запись: без общей транзакции возможен исход, когда заказ в базе есть, а события о нём никто не получил.
 
 ```mermaid
 sequenceDiagram
@@ -261,7 +261,7 @@ sequenceDiagram
     participant K as Kafka
     participant B as Service B
 
-    rect rgb(219, 234, 254)
+    rect rgba(59, 130, 246, 0.12)
         Note over A,DB: Атомарная TX
         A->>DB: BEGIN
         A->>DB: UPDATE orders SET status='completed'
@@ -457,8 +457,8 @@ flowchart LR
     MDTO --> CM --> PC
     UR --> UM --> Cust
 
-    style Domain fill:#dbeafe,stroke:#1e40af
-    style ACL fill:#fef3c7,stroke:#a16207
+    style Domain fill:#dbeafe,stroke:#1e40af,color:#0f172a
+    style ACL fill:#fef3c7,stroke:#a16207,color:#0f172a
 ```
 
 **Где нужен ACL:**

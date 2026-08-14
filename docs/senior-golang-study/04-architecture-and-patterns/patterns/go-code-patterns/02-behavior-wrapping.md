@@ -239,7 +239,7 @@ flowchart TB
     SA --> Stripe
     SGA --> SG
 
-    style Domain fill:#dbeafe,stroke:#1e40af
+    style Domain fill:#dbeafe,stroke:#1e40af,color:#0f172a
 ```
 
 ---
@@ -256,9 +256,9 @@ flowchart TB
         end
     end
 
-    style M fill:#fef3c7,stroke:#a16207
-    style C fill:#dbeafe,stroke:#1e40af
-    style P fill:#dcfce7,stroke:#15803d
+    style M fill:#fef3c7,stroke:#a16207,color:#0f172a
+    style C fill:#dbeafe,stroke:#1e40af,color:#0f172a
+    style P fill:#dcfce7,stroke:#15803d,color:#0f172a
 ```
 
 ```go

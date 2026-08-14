@@ -158,7 +158,7 @@ flowchart LR
     Broker[(Kafka / RabbitMQ)]
     Relay -->|publish| Broker
 
-    style Svc fill:#dbeafe,stroke:#1e40af
+    style Svc fill:#dbeafe,stroke:#1e40af,color:#0f172a
 ```
 
 ```mermaid
@@ -169,7 +169,7 @@ sequenceDiagram
     participant Relay as Outbox Relay
     participant K as Kafka
 
-    rect rgb(219, 234, 254)
+    rect rgba(59, 130, 246, 0.12)
         Note over App,DB: Атомарная TX
         App->>DB: BEGIN
         App->>DB: INSERT orders
