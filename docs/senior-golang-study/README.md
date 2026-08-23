@@ -26,6 +26,8 @@
 11. `16-algorithms-and-data-structures`
 12. `12-interview-practice`
 
+Специализированные разделы `17-llm-and-ai-integration` и `18-blockchain-and-web3` удобнее читать после базовых тем по архитектуре, базам данных, networking и security.
+
 Разделы:
 - `00-roadmap` - приоритеты, план подготовки, чек-листы
 - `01-go-core` - язык, runtime, memory model, idiomatic Go, конкурентность и профилирование (подраздел `concurrency-and-performance`)
@@ -45,6 +47,7 @@
 - `15-go-version-differences` - ключевые изменения между версиями Go и влияние на кодовую базу
 - `16-algorithms-and-data-structures` - O-нотация, паттерны алгоритмов, структуры данных с Go-примерами
 - `17-llm-and-ai-integration` - интеграция LLM в backend-сервисы, RAG, vector БД, embeddings
+- `18-blockchain-and-web3` - основы blockchain, децентрализация, smart contracts, Web3 и интеграция с Go-backend
 
 ## Базовая подборка
 
