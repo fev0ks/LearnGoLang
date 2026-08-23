@@ -13,6 +13,8 @@
 
 - **[questions-olezhek28go.md](questions-olezhek28go.md)** — разбор 20 задач с Go-собесов (Олег Козырев): concurrency, runtime, channels, interfaces, http — с ответами и ссылками на теорию
 
+- **[gis_interview_questions.md](gis_interview_questions.md)** — 73 вопроса с краткими ответами: Go core, concurrency, channels, HTTP и PostgreSQL
+
 - _Behavioral_ _(planned)_ — STAR-кейсы, рассказ о себе, leadership примеры
 - _Design drills_ _(planned)_ — system design на 30-45 минут
 
