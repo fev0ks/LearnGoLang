@@ -1,232 +1,334 @@
-# Go 1.26
+# Go 1.26: new(expr), новый go fix и Green Tea GC по умолчанию
 
-Релиз: февраль 2026.
+## Содержание
 
-Главная идея релиза: следующий шаг после 1.25, где experimental идеи начинают становиться default, а tooling сильнее помогает с модернизацией кода.
+- [Ментальная модель](#ментальная-модель)
+- [Краткий обзор](#краткий-обзор)
+- [Что изменилось](#что-изменилось)
+- [Практические последствия](#практические-последствия)
+- [Что проверить перед апгрейдом](#что-проверить-перед-апгрейдом)
+- [Типичные ошибки](#типичные-ошибки)
+- [Interview-ready answer](#interview-ready-answer)
+- [Источники](#источники)
 
-## Обзор изменений
+Go 1.26.0 выпущен 10 февраля 2026 года. Релиз переводит Green Tea GC из эксперимента в поведение по умолчанию, превращает `go fix` в инструмент современных миграций и добавляет несколько языковых и диагностических возможностей.
 
-| Категория | Изменение | Влияние |
-|---|---|---|
-| Язык | `new(expr)` — создание указателя с инициализацией | Меньше временных переменных в struct literal |
-| Язык | Self-referential generic constraints | Более выразительные самотипизированные интерфейсы |
-| Tooling | `go fix` перестроен на analysis framework | Массовые автоматические миграции API |
-| Tooling | `go mod init` пишет `go 1.25.0` по умолчанию | Улучшение совместимости новых модулей |
-| Tooling | `cmd/doc` и `go tool doc` удалены | Стандартная замена — `go doc` |
-| Runtime | Green Tea GC включён по умолчанию | Снижение GC latency на heavy нагрузках |
-| Runtime | cgo overhead снижен на ~30% | Ускорение сервисов с C-библиотеками |
-| Runtime | Randomization heap base address | Security hardening на 64-bit платформах |
-| Debugging | Experimental `goroutineleak` pprof profile | Обнаружение утечек горутин в CI и production |
-| Stdlib | `runtime/secret` (experimental) | Надёжное стирание секретов из памяти |
-| Stdlib | `crypto/hpke` по RFC 9180 | Post-quantum hybrid KEMs out of the box |
-| Platform | `windows/arm` 32-bit удалён | Нужна миграция на `windows/arm64` |
-| Platform | `linux/riscv64` race detector | Полноценная поддержка race detection на RISC-V |
+---
+
+## Ментальная модель
+
+Go 1.26 состоит из двух разных типов изменений:
+
+- **Прозрачные для исходного кода.** Новый garbage collector, более быстрый cgo call path и randomization heap base включаются без изменения API приложения.
+- **Доступные по выбору команды.** `new(expr)`, modernizers в `go fix`, профиль `goroutineleak` и экспериментальные SIMD/`runtime/secret` требуют явного использования или флага сборки.
+
+Прозрачное изменение не означает безрисковое. Сборщик может изменить профили CPU и памяти, cgo-оптимизация — относительную стоимость границы Go/C, а изменения структуры бинарника — поведение внутренних symbolizers. Обновление нужно измерять, даже если diff прикладного кода пуст.
+
+---
+
+## Краткий обзор
+
+| Категория | Изменение | Практический эффект |
+| --- | --- | --- |
+| Язык | `new(expr)` | Указатель на вычисленное значение без временной переменной |
+| Язык | Self-referential generic constraints | Generic type может ссылаться на себя в списке type parameters |
+| Инструменты | `go fix` переписан на analysis framework | Автоматические modernizers и миграции API на уровне исходного кода |
+| Инструменты | `go mod init` выбирает предыдущую Go-версию | Новый модуль по умолчанию совместим с двумя поддерживаемыми ветками |
+| Runtime | Green Tea GC включён по умолчанию | Меньше marking/scanning overhead в GC-heavy программах |
+| Runtime | Базовый cgo overhead уменьшен примерно на 30% | Дешевле частые короткие переходы Go/C |
+| Runtime | Случайный базовый адрес кучи на 64-bit | Дополнительное усложнение эксплуатации повреждения памяти через cgo |
+| Диагностика | Экспериментальный `goroutineleak` profile | Runtime находит часть горутин, которые уже невозможно разблокировать |
+| Стандартная библиотека | `crypto/hpke`, `errors.AsType`, `bytes.Buffer.Peek` | Новые стабильные API |
+| Эксперименты | `simd/archsimd`, `runtime/secret` | Низкоуровневый SIMD и стирание временных секретов с platform limitations |
+
+---
 
 ## Что изменилось
 
-### Язык
+### Язык: new принимает выражение
 
-Встроенная функция `new` теперь принимает выражение: можно писать `new(expr)`, сразу создавая указатель на значение выражения. Это особенно удобно для optional pointer fields, например в `encoding/json` или protobuf-моделях.
+До Go 1.26 built-in `new` принимает тип и создаёт указатель на его zero value. Теперь operand может быть выражением, и указатель сразу получает вычисленное значение:
 
 ```go
-// До 1.26: new() принимал только тип
-p := new(int)
-*p = 42
-
-// Go 1.26: new(expr) — создаёт указатель сразу с инициализацией
-p := new(42)       // *int со значением 42
-s := new("hello")  // *string
-
-// Особенно удобно для optional полей в struct literal:
 type Config struct {
     Timeout *time.Duration
     Debug   *bool
 }
 
-// До 1.26:
-d := 5 * time.Second
-b := true
-cfg := Config{Timeout: &d, Debug: &b}
-
-// Go 1.26:
-cfg := Config{
+config := Config{
     Timeout: new(5 * time.Second),
     Debug:   new(true),
 }
 ```
 
-Снято ограничение на self-reference generic type в списке type parameters constraint'а. Это делает generic constraints выразительнее и полезнее для самотипизированных интерфейсов.
+Раньше для такого literal требовались временные переменные:
 
 ```go
-// До 1.26: нельзя было использовать T в его же constraint
-type Ordered[T Ordered[T]] interface { // ошибка в 1.25
-    Less(T) bool
-}
+timeout := 5 * time.Second
+debug := true
 
-// Go 1.26: работает
-type Comparable[T Comparable[T]] interface {
-    CompareTo(T) int
+config := Config{
+    Timeout: &timeout,
+    Debug:   &debug,
 }
-
-type Temperature struct{ celsius float64 }
-func (t Temperature) CompareTo(other Temperature) int {
-    if t.celsius < other.celsius { return -1 }
-    if t.celsius > other.celsius { return 1 }
-    return 0
-}
-// Temperature теперь удовлетворяет Comparable[Temperature]
 ```
 
-### Tooling и `go` command
+`new(expr)` особенно полезен для необязательных полей в JSON, Protobuf и конфигурационных структурах. Он не решает семантический вопрос: указатель по-прежнему означает отдельное состояние `nil`, которое нужно отличать от нулевого значения.
 
-`go fix` фактически перезапущен как платформа modernizers. Он теперь строится на том же analysis framework, что и `go vet`, и рассчитан на безопасные автоматические миграции к современным idioms и API.
+---
+
+### Self-referential generic constraints
+
+Generic type теперь может ссылаться на самого себя в собственном type parameter list:
+
+```go
+type Adder[A Adder[A]] interface {
+    Add(A) A
+}
+
+func Sum[A Adder[A]](left, right A) A {
+    return left.Add(right)
+}
+```
+
+До Go 1.26 ссылка `Adder[A]` внутри объявления `Adder` запрещалась. Возможность полезна для self-typed contracts, где операция принимает и возвращает тот же concrete type.
+
+Это не generic methods: метод `Add` сам не объявляет type parameters. Generic methods появляются только в Go 1.27.
+
+---
+
+### go fix как платформа modernizers
+
+Исторические fixers удалены, а новый `go fix` построен на том же analysis framework, что и `go vet`. Он предлагает и применяет transformations вроде перехода на `slices`, `strings.Cut`, integer range, `new(expr)` и `WaitGroup.Go`.
+
+Безопасный рабочий процесс начинается с просмотра diff:
 
 ```bash
-# До 1.26: go fix — ручные fixers, почти не развивался
-# Go 1.26: построен на analysis framework (как go vet)
-
-# Доступные modernizers:
-go fix -fix=modernize ./...     # применить все безопасные modernizers
-go fix -fix=stdversion ./...    # обновить go directive до актуальной версии
-
-# Примеры автоматических миграций:
-# - заменяет sort.Slice на slices.Sort где возможно
-# - заменяет strings.Index на strings.Contains для bool-результата
-# - обновляет устаревшие API до современных эквивалентов
+go fix -diff ./...
+go fix ./...
+go test ./...
 ```
 
-`go mod init` теперь по умолчанию пишет более низкую версию Go в новый `go.mod`. На toolchain `1.26.x` новый модуль по умолчанию получит `go 1.25.0`, а не `go 1.26.0`.
+Modernizers должны сохранять поведение, но это не причина применять большой diff без ревью. Автоматическая замена может ухудшить читаемость локального кода, затронуть сгенерированные файлы или конфликтовать с минимальной версией библиотеки.
 
-`cmd/doc` и `go tool doc` удалены; стандартная замена теперь `go doc`.
+`//go:fix inline` позволяет автору API описать миграцию на уровне исходного кода: анализатор подставляет тело отмеченной обёртки в места вызова. Это полезно для контролируемой миграции внутреннего API, но требует проверки внешней семантики, порядка вычислений и побочных эффектов.
 
-В `pprof -http` flame graph стал default view.
+---
 
-### Runtime и debugging
+### Версия нового модуля и удаление cmd/doc
 
-Green Tea GC, который в 1.25 был экспериментом, в 1.26 включен по умолчанию. Для GC-heavy нагрузок релиз обещает заметное снижение GC overhead, а на новых amd64 CPU ожидается дополнительный выигрыш.
+Стабильная toolchain `1.N.x` теперь создаёт новый модуль с директивой `go 1.(N-1).0`. Поэтому Go 1.26 записывает:
 
-```go
-// Go 1.25: GOEXPERIMENT=greenteagc (экспериментально)
-// Go 1.26: включён по умолчанию
+```mod
+module example.com/service
 
-// Что изменилось архитектурно:
-// - GC работает с более мелкими регионами памяти (не весь heap)
-// - Снижена stop-the-world latency
-// - Особенно заметно на GC-intensive нагрузках
-
-// Проверить GC stats:
-var stats runtime.MemStats
-runtime.ReadMemStats(&stats)
-fmt.Printf("GC pause (last): %v\n", time.Duration(stats.PauseNs[(stats.NumGC+255)%256]))
-fmt.Printf("GC cycles: %d\n", stats.NumGC)
-
-// Для отладки: GODEBUG=gccheckmark=1 для consistency check
-// GODEBUG=gctrace=1 для вывода каждого GC цикла
+go 1.25.0
 ```
 
-Базовый overhead `cgo` вызовов снижен примерно на 30%. Это важно для сервисов с C-библиотеками: SQLite, librdkafka, BoringSSL.
+Идея — новый модуль по умолчанию собирается обеими поддерживаемыми major-ветками. Если проекту нужен синтаксис Go 1.26, версию нужно поднять явно, например `go get go@1.26.0`.
+
+`cmd/doc` и `go tool doc` удалены. Поддерживаемая команда — `go doc`. Web UI `pprof -http` теперь открывается на flame graph; прежний graph view остаётся в меню.
+
+---
+
+### Green Tea GC по умолчанию
+
+Эксперимент Go 1.25 становится основным сборщиком. Его дизайн улучшает локальность и масштабирование по CPU при маркировке и сканировании небольших объектов.
+
+Release notes дают две отдельные оценки:
+
+- 10–40% меньше GC overhead в реальных GC-heavy программах;
+- ещё около 10% экономии GC overhead на новых amd64 CPU уровня Intel Ice Lake или AMD Zen 4 благодаря vectorized scanning небольших объектов.
+
+Обе цифры относятся к затратам garbage collector, а не ко всему CPU приложения и не напрямую к stop-the-world pauses. Например, если GC занимал 20% CPU процесса, а его накладные расходы уменьшились на 30%, грубая верхнеуровневая оценка экономии составит:
+
+```text
+20% CPU × 30% = 6% общего CPU процесса
+```
+
+Это только иллюстрация: изменение allocation rate, heap goal и взаимодействие с mutator требуют реального измерения.
+
+В Go 1.26 старый сборщик можно вернуть через `GOEXPERIMENT=nogreenteagc`. Это временная диагностическая возможность, а не долгосрочная конфигурация; в Go 1.27 флаг уже удалён.
+
+---
+
+### Более быстрые cgo calls
+
+Базовый runtime overhead перехода Go/C уменьшен примерно на 30%. Это не означает, что SQLite, librdkafka или другая C-библиотека целиком ускоряется на 30%.
+
+Если один вызов состоит из 100 ns перехода и 10 µs работы C-функции, уменьшение перехода на 30 ns почти не влияет на общее время. Выигрыш заметнее при очень частых коротких вызовах; batching по-прежнему может быть важнее micro-оптимизации границы.
+
+---
+
+### Случайный базовый адрес кучи
+
+На 64-bit платформах runtime выбирает случайный базовый адрес кучи при старте. Это защитная мера прежде всего для программ с cgo или другими компонентами без безопасности памяти: предсказуемые адреса проще использовать при эксплуатации уязвимости.
+
+Корректный Go-код не должен замечать изменение. Тесты, дамп-анализаторы или самописные инструменты, которые ошибочно ожидают стабильные адреса между запусками, требуют исправления.
+
+---
+
+### Профиль утечек горутин
+
+Эксперимент включается при сборке:
+
+```bash
+GOEXPERIMENT=goroutineleakprofile go test ./...
+GOEXPERIMENT=goroutineleakprofile go build ./cmd/service
+```
+
+После включения профиль доступен как `runtime/pprof` profile `goroutineleak` и через `/debug/pprof/goroutineleak` у `net/http/pprof`.
+
+Runtime ищет не «долго живущие» горутины, а доказуемо неразблокируемые. Если goroutine G ждёт примитив синхронизации P, а P недостижим из исполняемых goroutines и из goroutines, которые они могут разбудить, никто уже не сможет изменить P и разбудить G.
 
 ```go
-// cgo вызовы стали быстрее ~на 30% в Go 1.26
-// Это важно для сервисов с C-библиотеками: SQLite, librdkafka, BoringSSL
+func runAll(jobs []Job) error {
+    results := make(chan error)
 
-// Benchmark до/после апгрейда:
-func BenchmarkCGOCall(b *testing.B) {
-    for b.Loop() {
-        C.some_c_function()
+    for _, job := range jobs {
+        go func(job Job) {
+            results <- run(job)
+        }(job)
     }
-}
-// До 1.26: ~50ns/op
-// После 1.26: ~35ns/op (примерные числа)
-```
 
-На 64-битных платформах включена randomization heap base address как security hardening.
-
-Появился experimental leak profile `goroutineleak` в `runtime/pprof` и endpoint `/debug/pprof/goroutineleak`.
-
-```go
-// Новый pprof endpoint в Go 1.26
-import "net/http/pprof"  // регистрирует /debug/pprof/goroutineleak
-
-// Или вручную:
-import "runtime/pprof"
-
-func dumpGoroutineLeaks(w io.Writer) error {
-    p := pprof.Lookup("goroutineleak")
-    if p == nil {
-        return errors.New("goroutineleak profile not available")
+    for range len(jobs) {
+        if err := <-results; err != nil {
+            return err // остальные senders могут навсегда заблокироваться
+        }
     }
-    return p.WriteTo(w, 1)
+    return nil
 }
-
-// Показывает горутины, которые:
-// - живут дольше порогового времени
-// - заблокированы на одном и том же месте
-// Не ловит: горутины завершившиеся до снапшота
 ```
 
-### Standard library
+После раннего `return` оставшиеся senders ждут unbuffered channel. Когда канал становится недостижим для остальных goroutines, runtime может доказать утечку.
 
-Появился experimental `runtime/secret` для более надежного стирания временных данных, связанных с секретами.
+Метод основан на достижимости и не находит все утечки. Если примитив синхронизации хранится в глобальной переменной или остаётся в локальной переменной исполняемой goroutine, он формально достижим, даже если бизнес-логика уже никогда его не использует.
+
+---
+
+### runtime/secret без выдуманного Wipe API
+
+Эксперимент `runtime/secret` включается через `GOEXPERIMENT=runtimesecret`. Его основной API — `secret.Do`, а не контейнер с методами `Make`, `Bytes` или `Wipe`:
 
 ```go
-// Проблема: секреты (пароли, ключи) могут остаться в памяти
-// после освобождения — GC не гарантирует немедленное обнуление
+signature := make([]byte, signatureSize)
 
-// Go 1.26 experimental: runtime/secret
-import "runtime/secret"
-
-func processPassword(pwd string) {
-    s := secret.Make([]byte(pwd))
-    defer s.Wipe() // надёжно затирает память при defer
-
-    // работаем с паролем через s.Bytes()
-    hash := bcrypt.GenerateFromPassword(s.Bytes(), bcrypt.DefaultCost)
-    _ = hash
-    // После defer s.Wipe() — память обнулена
-}
+secret.Do(func() {
+    privateKey := loadPrivateKey()
+    temporary := sign(privateKey, message)
+    copy(signature, temporary)
+})
 ```
 
-Новый пакет `crypto/hpke` добавляет Hybrid Public Key Encryption по RFC 9180, включая post-quantum hybrid KEMs.
+`Do` старается стереть регистры и стек, использованные деревом вызовов функции, до возврата; новые выделения в куче стираются после того, как становятся недостижимыми и GC это обнаруживает. Результирующий буфер создаётся снаружи и сознательно сохраняется.
 
-Появился experimental `simd/archsimd` для architecture-specific SIMD на amd64.
+Ограничения существенны:
 
-`bytes.Buffer.Peek` позволяет посмотреть следующие `n` байт без продвижения указателя чтения.
+- в Go 1.26 полная поддержка есть только на Linux amd64 и arm64;
+- записи в глобальные переменные и работа новых goroutines не входят в защиту;
+- стирание памяти кучи зависит от потери всех ссылок и работы GC;
+- дополнительные выделения памяти увеличивают нагрузку на GC и расход памяти;
+- API экспериментальный и может измениться.
 
-В crypto-пакетах усиливается тренд на более безопасное использование randomness: часть API теперь игнорирует пользовательский random source и берет криптографически безопасный источник.
+Поэтому пакет предназначен для узкого cryptographic code, а не для общего хранения паролей в web-приложении.
 
-### Platform и compatibility
+---
 
-Go 1.26 требует для bootstrap минимум Go 1.24.6.
+### Стандартная библиотека и crypto defaults
 
-`windows/arm` 32-bit удален.
+Наиболее заметные дополнения:
 
-`linux/riscv64` получил поддержку race detector.
+- `crypto/hpke` реализует HPKE по RFC 9180, включая post-quantum hybrid KEMs;
+- `errors.AsType[E](err)` даёт type-safe generic вариант `errors.As`;
+- `bytes.Buffer.Peek(n)` возвращает следующие `n` байт без продвижения чтения;
+- `io.ReadAll` использует меньше промежуточной памяти;
+- `testing.T.ArtifactDir` и аналоги дают каталог для артефактов тестов;
+- `simd/archsimd` под `GOEXPERIMENT=simd` открывает нестабильный architecture-specific SIMD API на amd64.
 
-Go 1.26 — последний релиз с поддержкой macOS 12 Monterey.
+Несколько crypto-функций теперь игнорируют переданный `random` и всегда используют безопасный внутренний источник. Для детерминированных тестов предназначен `testing/cryptotest.SetGlobalRandom`. Старые тесты, которые передавали пользовательский reader прямо в `rsa.GenerateKey`, `ecdsa.Sign` или похожий API, могут потерять детерминизм.
 
-## Что это меняет на практике
+---
 
-- `go fix` становится реальным инструментом массовой миграции кодовой базы, а не историческим артефактом;
-- если сервис сильно упирается в GC или делает много `cgo` вызовов, апгрейд до 1.26 стоит мерить отдельными benchmark/profiling прогонами;
-- leak detection для горутин становится ближе к production use, особенно в CI и на сервисах со сложной конкурентностью;
-- security-команды и криптографический код получают новые примитивы и более безопасные defaults.
+### Платформы
+
+- Go 1.26 требует Go 1.24.6 или новее для bootstrap.
+- 32-bit port `windows/arm` удалён.
+- `linux/riscv64` получает race detector.
+- Go 1.26 — последний релиз для macOS 12 Monterey.
+- Go 1.26 — последний релиз с ELFv1 ABI для `linux/ppc64`.
+
+---
+
+## Практические последствия
+
+- **GC-heavy сервисы.** Обновление может снизить CPU, но нужно сравнивать общий CPU, allocation rate, RSS и tail latency, а не только `gctrace`.
+- **cgo.** Частые короткие вызовы становятся дешевле; крупные операции почти не меняются, поэтому batching остаётся главным trade-off.
+- **Модернизация кода.** `go fix -diff` даёт управляемый список migrations, который удобно делить на reviewable commits.
+- **Конкурентность.** `goroutineleak` находит класс доказуемых permanent blocks, дополняя обычный goroutine profile и счётчик goroutines.
+- **Криптография.** Новые безопасные настройки по умолчанию полезны production-коду, но детерминированные тесты нужно перевести на `testing/cryptotest`.
+- **Платформы.** Старые macOS runners, `windows/arm` и инструменты разбора бинарников требуют отдельной проверки.
+
+---
 
 ## Что проверить перед апгрейдом
 
-- нет ли внутренних скриптов или IDE-интеграций, которые все еще вызывают `go tool doc`;
-- устраивает ли команду новый default `go` version в `go mod init`;
-- есть ли сервисы, которым полезно включить и протестировать `goroutineleak` profile;
-- не используется ли кастомный источник randomness там, где новое crypto API теперь его игнорирует.
+1. Снять baseline CPU, GC overhead, RSS, allocation rate, throughput и p95/p99 latency.
+2. Для cgo workload измерить отдельно стоимость пустого перехода и реальной C-операции.
+3. Выполнить `go fix -diff ./...`, но применять результат отдельным изменением с review и тестами.
+4. Найти вызовы crypto API с пользовательским источником случайности и перевести детерминированные тесты на `testing/cryptotest`.
+5. Проверить scripts и IDE integrations, вызывающие удалённый `go tool doc`.
+6. Проверить OS/architecture matrix CI, минимальную macOS и bootstrap toolchain.
+7. При использовании experimental profiles собирать отдельный binary variant и защищать pprof endpoints.
+8. Проверить инструменты, которые читают `.gopclntab`, `.gosymtab`, `moduledata` или другие детали Go-бинарников.
 
-## Что могут спросить на интервью
+---
 
-- зачем менять `go fix`, если есть линтеры и ручные refactor'ы;
-- почему lower default version в `go mod init` полезен для совместимости модулей;
-- чем Go 1.26 отличается от 1.25 по состоянию Green Tea GC;
-- какие типы goroutine leaks можно найти новым профилем, а какие он не поймает.
+## Типичные ошибки
+
+- Описывать Green Tea GC как гарантированное уменьшение stop-the-world latency: release notes говорят о GC overhead, а не обещают конкретную pause distribution.
+- Переносить оценку 30% для cgo call overhead на полное время работы C-библиотеки.
+- Считать любую заблокированную или давно живущую goroutine результатом `goroutineleak`; профиль ищет доказуемую невозможность разблокировки.
+- Вызывать `/debug/pprof/goroutineleak` без сборки с `GOEXPERIMENT=goroutineleakprofile`.
+- Использовать несуществующие `runtime/secret.Make` и `Wipe`; API Go 1.26 строится вокруг `secret.Do`.
+- Считать результат `go fix` заменой ревью кода и регрессионных тестов.
+- Предполагать, что Go 1.26 автоматически записывает `go 1.26` при `go mod init`; stable toolchain записывает `go 1.25.0`.
+
+---
+
+## Interview-ready answer
+
+**1. Что меняется в Green Tea GC между Go 1.25 и Go 1.26?**
+
+- Статус — в Go 1.25 это эксперимент времени сборки, а в Go 1.26 новый сборщик включён по умолчанию.
+- Цель — улучшить locality и CPU scalability scanning и marking небольших объектов.
+- Оценка — команда Go ожидает 10–40% снижения GC overhead в GC-heavy программах, а не такого же ускорения всего сервиса.
+- Проверка — сравниваются CPU profile, allocations, RSS, throughput и tail latency на своей нагрузке.
+
+**2. Как runtime находит goroutine leak?**
+
+- Суть — профиль ищет goroutine, заблокированную на primitive, который уже никто достижимый не может изменить.
+- Механика — доказательство строится на reachability во время garbage collection.
+- Ограничение — global или другая формально достижимая ссылка мешает доказать утечку, даже если бизнес-код больше её не использует.
+- Статус — в Go 1.26 профиль включается через `GOEXPERIMENT=goroutineleakprofile`.
+
+**3. Зачем переписали go fix?**
+
+- Задача — применять современные idioms и API migrations через стандартный analysis framework.
+- Безопасность — transformations заявлены как сохраняющие поведение, но diff всё равно требует review и тестов.
+- Расширение — internal API может публиковать migration rule через `//go:fix inline`.
+
+**4. Что даёт new(expr)?**
+
+- Суть — выражение вычисляется, сохраняется в новой переменной, а `new` возвращает указатель на неё.
+- Применение — необязательные поля-указатели заполняются прямо в struct literal без временной переменной.
+- Ограничение — pointer semantics и отдельное состояние `nil` никуда не исчезают.
+
+---
 
 ## Источники
 
 - [Go 1.26 Release Notes](https://go.dev/doc/go1.26)
-- [Go Release History](https://go.dev/doc/devel/release)
+- [Go 1.26.0 в истории релизов](https://go.dev/doc/devel/release#go1.26.0)
+- [Документация go fix](https://pkg.go.dev/cmd/fix@go1.26.0)
+- [Документация runtime/secret](https://pkg.go.dev/runtime/secret@go1.26.0)
+- [Документация runtime/pprof](https://pkg.go.dev/runtime/pprof@go1.26.0)

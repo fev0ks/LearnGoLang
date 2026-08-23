@@ -1,184 +1,277 @@
-# Go 1.25
+# Go 1.25: контейнеры, диагностика и тестирование конкурентного кода
 
-Релиз: август 2025.
+## Содержание
 
-Главная идея релиза: акцент на runtime-поведение в контейнерах, диагностику и более сильный набор инструментов для concurrent/testing задач.
+- [Ментальная модель](#ментальная-модель)
+- [Краткий обзор](#краткий-обзор)
+- [Что изменилось](#что-изменилось)
+- [Практические последствия](#практические-последствия)
+- [Что проверить перед апгрейдом](#что-проверить-перед-апгрейдом)
+- [Типичные ошибки](#типичные-ошибки)
+- [Interview-ready answer](#interview-ready-answer)
+- [Источники](#источники)
 
-## Краткая сводка изменений
+Go 1.25.0 выпущен 12 августа 2025 года. Изменений языка в релизе нет; основные изменения находятся в runtime, компиляторе, диагностике и стандартной библиотеке.
 
-| Категория | Изменение | Влияние |
-|-----------|-----------|---------|
-| Runtime | Container-aware `GOMAXPROCS` через cgroup CPU bandwidth | Сервисы в Kubernetes больше не переиспользуют лишние OS-треды |
-| Runtime | Динамическое обновление `GOMAXPROCS` при изменении лимитов | Не нужен рестарт процесса при изменении cgroup limits |
-| Runtime | Experimental Green Tea GC (`GOEXPERIMENT=greenteagc`) | Потенциально ниже GC latency при большом heap |
-| Observability | `runtime/trace.FlightRecorder` | Лёгкий кольцевой буфер trace без постоянного overhead |
-| Testing | `testing/synctest` GA | Детерминированное тестирование concurrent кода с виртуальным временем |
-| Stdlib | Experimental `encoding/json/v2` | Строже по умолчанию, быстрее decoding |
-| Compiler | Исправлен nil check bug (Go 1.21-1.24) | Код, который "случайно работал", может начать паниковать |
-| Tooling | `go build -asan` включает leak detection | Автоматическое обнаружение утечек памяти при выходе |
-| Tooling | `go doc -http` поднимает локальный doc server | Документация прямо из CLI без godoc |
-| Tooling | `go.mod` поддерживает `ignore` directive | Проще исключить legacy-директории из `./...` |
+---
+
+## Ментальная модель
+
+Go 1.25 делает поведение процесса ближе к реальной среде выполнения и упрощает диагностику редких конкурентных проблем:
+
+- runtime учитывает CPU limit контейнера при выборе `GOMAXPROCS`;
+- `FlightRecorder` хранит недавний runtime trace в кольцевом буфере;
+- `testing/synctest` управляет виртуальным временем в конкурентных тестах;
+- Green Tea GC и JSON v2 доступны для проверки как эксперименты перед будущим включением по умолчанию.
+
+Главный риск обновления находится не в новом API, а в изменившихся defaults и исправлениях старых ошибок. Код может успешно собраться, но получить другой уровень параллелизма, новый panic в ранее некорректном месте или более строгую обработку внешних данных.
+
+---
+
+## Краткий обзор
+
+| Категория | Изменение | Практический эффект |
+| --- | --- | --- |
+| Язык | Нет изменений, влияющих на Go-программы | Директива `go 1.25` не открывает новый синтаксис |
+| Runtime | Container-aware и автоматически обновляемый `GOMAXPROCS` | Меньше лишнего параллелизма при cgroup CPU limit |
+| Runtime | Green Tea GC под `GOEXPERIMENT=greenteagc` | Можно заранее измерить новый collector на GC-heavy сервисах |
+| Диагностика | `runtime/trace.FlightRecorder` | Последние секунды trace можно сохранить после редкого инцидента |
+| Компилятор | Исправлена отложенная проверка `nil` | Ранее некорректный код теперь паникует в правильном месте |
+| Компилятор | DWARF 5 и дополнительные stack allocations для slices | Меньше debug info и быстрее linking; `unsafe`-ошибки могут проявиться сильнее |
+| Тестирование | `testing/synctest` стал стабильным API | Тесты таймеров и goroutines обходятся без реального ожидания |
+| JSON | Экспериментальные `encoding/json/v2` и `encoding/json/jsontext` | Можно проверить новую реализацию и более строгий v2 API |
+| Инструменты | `ignore` в `go.mod`, новые `vet` analyzers | Точнее package patterns и больше ошибок, найденных в CI |
+
+---
 
 ## Что изменилось
 
-### Язык
+### Container-aware GOMAXPROCS
 
-- Языковых изменений, влияющих на поведение программ, в Go 1.25 нет.
-- Это хороший пример релиза, где главная ценность не в синтаксисе, а в runtime, tooling и stdlib.
+До Go 1.25 значение `GOMAXPROCS` по умолчанию основывается на числе доступных логических CPU. В контейнере процесс может видеть много CPU хоста, хотя cgroup разрешает ему использовать только небольшую CPU bandwidth quota.
 
-### Tooling и `go` command
+Начиная с Go 1.25 runtime на Linux учитывает cgroup CPU bandwidth limit. Если он ниже числа логических CPU, значение `GOMAXPROCS` по умолчанию уменьшается. Kubernetes `limits.cpu` обычно превращается в такую квоту; `requests.cpu` в расчёте не участвует.
 
-- `go build -asan` теперь по умолчанию включает leak detection на выходе процесса.
-- В дистрибутиве стало меньше prebuilt tool binaries: редкие инструменты будут собираться `go tool` по мере необходимости.
-- В `go.mod` появился `ignore` directive для директорий, которые `go` command должен пропускать при `./...` и похожих pattern matches.
-- Появился `go doc -http`, который поднимает локальный documentation server.
-- `go version -m -json` упрощает машинный разбор embedded build info в бинарях.
+Модель выглядит так:
 
-### Runtime и observability
+```text
+доступные logical CPU: 16
+cgroup CPU limit:       2 CPU
 
-**Container-aware GOMAXPROCS**
-
-До Go 1.25 runtime устанавливал `GOMAXPROCS` равным числу CPU хоста, игнорируя cgroup CPU limits. Контейнер с квотой в 500m CPU запускался с `GOMAXPROCS=32` на 32-ядерном хосте, что приводило к избыточному числу OS-тредов, CPU throttling и неэффективной работе GC и scheduler.
-
-```go
-// До 1.25: GOMAXPROCS = число CPU хоста, игнорирует cgroup limits
-// Контейнер с limits: "500m" CPU запускался с GOMAXPROCS=32 (хост имеет 32 cores)
-// → GC и scheduler работали неэффективно
-
-// Go 1.25: runtime читает cgroup CPU bandwidth limit автоматически
-// Контейнер с limits: "500m" → GOMAXPROCS ≈ 1 (0.5 CPU → округление вверх)
-// Контейнер с limits: "2000m" → GOMAXPROCS = 2
-// Обновляется динамически при изменении лимитов
-
-// Проверить текущее значение:
-fmt.Println("GOMAXPROCS:", runtime.GOMAXPROCS(0))
-
-// Старый workaround (uber-go/automaxprocs) теперь менее нужен:
-// import _ "go.uber.org/automaxprocs"
+до Go 1.25: GOMAXPROCS по умолчанию = 16
+Go 1.25:    GOMAXPROCS учитывает limit и становится 2
 ```
 
-Runtime также умеет периодически обновлять `GOMAXPROCS`, если лимиты или доступные CPU изменились во время жизни процесса. Это важно для Go-сервисов в Kubernetes: поведение по умолчанию стало ближе к реальным CPU limits контейнера.
+Runtime также периодически проверяет изменения доступных CPU и cgroup limit и может обновить `GOMAXPROCS` без перезапуска процесса.
 
-**FlightRecorder**
+Оба автоматических механизма отключаются, если приложение задаёт переменную окружения `GOMAXPROCS` или вызывает `runtime.GOMAXPROCS`. Отдельно их можно отключить через `GODEBUG=containermaxprocs=0` и `GODEBUG=updatemaxprocs=0`.
 
-Полный `runtime/trace` имеет overhead 5-15% и пишет всё подряд. `FlightRecorder` — лёгкая кольцевая запись: держит последние N секунд в памяти и позволяет выгрузить их при инциденте.
+Это уменьшает избыточный параллелизм, но не отменяет CPU throttling. Квота cgroup ограничивает CPU time в периоде, а `GOMAXPROCS` ограничивает число одновременно исполняющих Go-код логических процессоров P. Это связанные, но разные механизмы.
+
+---
+
+### Green Tea GC как эксперимент
+
+Новый garbage collector улучшает locality и масштабирование marking/scanning небольших объектов. Он включается на этапе сборки:
+
+```bash
+GOEXPERIMENT=greenteagc go test ./...
+GOEXPERIMENT=greenteagc go test -bench=. -benchmem ./...
+```
+
+Команда Go оценивает уменьшение GC overhead в диапазоне 10–40% для реальных программ, которые интенсивно используют GC. Это не обещание уменьшить общую latency или CPU сервиса на 10–40%: если приложение редко собирает мусор или упирается в базу данных, сетевой ввод-вывод или lock contention, общий эффект будет существенно меньше.
+
+Эксперимент полезно сравнивать по нескольким сигналам: CPU profile, `/gc/cycles/*`, `/gc/heap/*`, pause distribution, RSS, throughput и tail latency. Одной средней паузы недостаточно.
+
+---
+
+### Runtime trace FlightRecorder
+
+Полный execution trace полезен для анализа scheduler, goroutines, GC и блокировок, но постоянная запись создаёт объём данных и нагрузку. `FlightRecorder` непрерывно держит недавнее окно trace в памяти и позволяет сохранить его после события:
 
 ```go
-import "runtime/trace"
-
-func setupFlightRecorder() *trace.FlightRecorder {
-    fr := trace.NewFlightRecorder()
-    fr.SetPeriod(10 * time.Second) // хранить последние 10 секунд
-    fr.Start()
-    return fr
-}
-
-// При инциденте: сохранить последние N секунд
-func captureOnIncident(fr *trace.FlightRecorder, w io.Writer) error {
-    return fr.WriteTo(w)
-}
-
-// В HTTP handler для on-demand capture:
-http.HandleFunc("/debug/trace/snapshot", func(w http.ResponseWriter, r *http.Request) {
-    if err := fr.WriteTo(w); err != nil {
-        http.Error(w, err.Error(), 500)
+func startFlightRecorder() (*trace.FlightRecorder, error) {
+    recorder := trace.NewFlightRecorder(trace.FlightRecorderConfig{
+        MinAge:   10 * time.Second,
+        MaxBytes: 64 << 20,
+    })
+    if err := recorder.Start(); err != nil {
+        return nil, err
     }
-})
-```
+    return recorder, nil
+}
 
-Такой подход позволяет всегда иметь свежий trace-буфер без постоянного overhead, и снимать его точечно — например, при spike latency или при первом сигнале об ошибке.
-
-Появился также experimental Green Tea GC через `GOEXPERIMENT=greenteagc`. Изменился текст unhandled panic при recover+repanic, а на Linux runtime теперь умеет помечать anonymous mappings более информативными именами.
-
-### Compiler и поведение кода
-
-В Go 1.21-1.24 существовал compiler bug: nil check мог откладываться позже, чем должен. Код, который разыменовывал указатель до проверки на `nil`, мог не паниковать в момент разыменования.
-
-```go
-// Go 1.21-1.24: компилятор мог откладывать nil check
-func process(p *Payload) string {
-    result := p.Value  // в 1.21-1.24 мог не паниковать здесь...
-    if p == nil {
-        return ""
+func writeSnapshot(recorder *trace.FlightRecorder, path string) error {
+    file, err := os.Create(path)
+    if err != nil {
+        return err
     }
-    return result     // ...а здесь или вообще не паниковать
-}
+    defer file.Close()
 
-// Go 1.25: корректное поведение — паника сразу на p.Value если p == nil
-// Если код "случайно работал" → после апгрейда можно получить новые паники
+    _, err = recorder.WriteTo(file)
+    return err
+}
 ```
 
-Это не regression релиза, а устранение некорректного поведения. Код, который раньше "случайно работал", в Go 1.25 может начать корректно падать с nil pointer panic.
+`MinAge` задаёт нижнюю границу возраста сохраняемых событий, а `MaxBytes` имеет приоритет и работает как hint, а не как жёсткий предел всей памяти или результата `WriteTo`. Одновременно активен не более чем один flight recorder.
 
-### Standard library
+Snapshot полезно привязывать к конкретному триггеру: всплеску tail latency, watchdog, росту очереди или диагностической команде. Если отдавать trace через HTTP endpoint, нужны аутентификация, rate limit и контроль размера: trace может содержать чувствительный operational context.
 
-**testing/synctest (GA)**
+---
 
-`testing/synctest` стал general availability. Пакет даёт изолированный bubble с виртуализированным временем: горутины внутри bubble блокируются на `time.Sleep` или channel без реального ожидания, а `synctest.Wait()` продвигает виртуальные часы вперёд.
+### Исправление проверки nil
+
+В Go 1.21–1.24 ошибка компилятора могла отложить nil check дальше места разыменования. Из-за этого некорректная программа иногда завершалась без ожидаемого panic:
 
 ```go
-// Проблема: тестирование time-based concurrent кода обычно медленное или flaky
-func TestWithTimeout_Flaky(t *testing.T) {
-    ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-    defer cancel()
-    // sleep делает тест медленным и потенциально flaky в CI
-    time.Sleep(200 * time.Millisecond)
-    assert.ErrorIs(t, ctx.Err(), context.DeadlineExceeded)
+file, err := os.Open("missing.txt")
+name := file.Name() // использование результата до проверки err
+if err != nil {
+    return
 }
+println(name)
+```
 
-// Go 1.25: testing/synctest — изолированный bubble с виртуальным временем
-func TestWithTimeout_Fast(t *testing.T) {
-    synctest.Run(func() {
-        ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+В Go 1.25 вызов `file.Name()` корректно паникует, если `file == nil`. Исправление — не обход panic, а проверка ошибки сразу после операции:
+
+```go
+file, err := os.Open("missing.txt")
+if err != nil {
+    return
+}
+defer file.Close()
+
+println(file.Name())
+```
+
+Новый panic после апгрейда означает, что обновление проявило существующую ошибку программы, а не изменило допустимый порядок обработки результата и `error`.
+
+---
+
+### DWARF 5 и размещение slices на стеке
+
+Компилятор и linker генерируют DWARF 5. Это уменьшает объём отладочной информации и ускоряет linking, особенно для крупных бинарников. Перед обновлением нужно проверить совместимость старых debugger, symbolizer и инструментов обработки аварийных завершений.
+
+Компилятор также может размещать базовый массив среза на стеке в большем числе случаев. Корректный Go-код от этого только выигрывает. Некорректный код, который сохраняет `unsafe.Pointer` на стековые данные после окончания их времени жизни, может ломаться заметнее; это ещё одна причина не считать решение escape analysis частью публичного контракта.
+
+---
+
+### testing/synctest
+
+Стабильный `testing/synctest` запускает тест в изолированном bubble. Когда все goroutines внутри него блокируются, виртуальные часы переходят к следующему timer event без реального ожидания:
+
+```go
+func TestContextTimeout(t *testing.T) {
+    synctest.Test(t, func(t *testing.T) {
+        ctx, cancel := context.WithTimeout(t.Context(), time.Hour)
         defer cancel()
-        // Виртуальное время — реального sleep нет, тест мгновенный
-        synctest.Wait() // продвинуть время пока все горутины не заблокируются
-        if ctx.Err() != context.DeadlineExceeded {
-            t.Fatal("expected deadline exceeded")
+
+        <-ctx.Done()
+        if !errors.Is(ctx.Err(), context.DeadlineExceeded) {
+            t.Fatalf("unexpected error: %v", ctx.Err())
         }
     })
 }
 ```
 
-Для команд с большим количеством flaky или медленных concurrent-тестов это значительное улучшение.
+Час виртуального времени проходит без часового `time.Sleep`. `synctest.Wait()` можно использовать, когда нужно дождаться, пока остальные goroutines станут устойчиво заблокированными, и затем проверить состояние.
 
-**encoding/json/v2 (experimental)**
+Пакет не исправляет неправильный concurrent design. Он делает расписание времени контролируемым, но тест всё равно должен завершать goroutines и явно проверять причинно-следственные связи.
 
-Появился experimental `encoding/json/v2` и низкоуровневый `encoding/json/jsontext`. При `GOEXPERIMENT=jsonv2` стандартный `encoding/json` использует новую реализацию, где decoding заметно быстрее во многих сценариях.
+---
 
-```go
-// json/v2: строже по умолчанию
-// В v1: unknown fields молча игнорируются
-// В v2: unknown fields → ошибка (или явно DisallowUnknownMembers: false)
+### Экспериментальный JSON v2
 
-// Включить эксперимент: GOEXPERIMENT=jsonv2
-// Тогда import "encoding/json" использует v2 реализацию
-```
+`GOEXPERIMENT=jsonv2` открывает два пакета:
 
-Ключевые отличия v2: ключи JSON сравниваются case-sensitive по умолчанию, неизвестные поля в JSON приводят к ошибке декодирования (в v1 молча игнорировались), производительность decoding выше за счёт новой внутренней реализации.
+- `encoding/json/v2` — новый high-level API с настраиваемыми options;
+- `encoding/json/jsontext` — низкоуровневая работа с JSON tokens и values.
 
-## Что это меняет на практике
+При включённом эксперименте обычный `encoding/json` использует новую реализацию, сохраняя поведение v1; может отличаться точный текст ошибок. Новый API v2 выбирает более строгие defaults, в том числе отвергает invalid UTF-8 и duplicate object names.
 
-- в Kubernetes можно реже тянуться к внешним библиотекам для автоматической настройки `GOMAXPROCS`;
-- для редких production-инцидентов trace можно собирать точечно, а не держать тяжелый continuous tracing;
-- команды, у которых много flaky/сложных concurrent tests, получают сильный новый инструмент через `testing/synctest`;
-- перед апгрейдом на 1.25 нужно прогнать тесты на скрытые nil dereference, которые раньше маскировались compiler bug.
+По данным release notes, marshal в целом сопоставим со старой реализацией, а unmarshal во многих сценариях существенно быстрее. Результат зависит от формы документов, custom marshalers, глубины вложенности и доли reflection, поэтому миграцию нужно измерять на реальных payloads.
+
+---
+
+### Изменения инструментов
+
+Директива `ignore` в `go.mod` исключает каталог из package patterns вроде `./...`, но не исключает его содержимое из module zip. Это различие важно: `ignore` управляет поиском packages, а не публикацией файлов как `.gitignore`.
+
+В `go vet` появляются анализаторы:
+
+- `waitgroup` находит `WaitGroup.Add` внутри новой goroutine, когда `Wait` может успеть выполниться раньше;
+- `hostport` предлагает `net.JoinHostPort` вместо форматирования `host:port`, которое ломается на IPv6.
+
+`go build -asan` теперь по умолчанию проверяет утечки памяти C при завершении программы. Это касается cgo и требует рабочей поддержки AddressSanitizer в toolchain и окружении.
+
+---
+
+## Практические последствия
+
+- **Kubernetes.** Внешний пакет вроде `automaxprocs` часто становится не нужен, но удалять его следует только после сравнения фактического `GOMAXPROCS` и поведения rollout.
+- **Редкие инциденты.** Flight recorder даёт контекст до события, которого нет в trace, запущенном уже после деградации.
+- **Тесты.** Таймеры, deadlines и конкурентные ожидания можно проверять быстро и без больших допусков по реальному времени.
+- **Миграции будущих defaults.** Green Tea GC и JSON v2 можно прогнать заранее, отделив несовместимость от обязательного обновления toolchain.
+- **Ошибки кода.** Исправленный nil check и новые `vet` analyzers проявляют проблемы, которые уже существовали до обновления.
+
+---
 
 ## Что проверить перед апгрейдом
 
-- нет ли сервисов, где логика неявно полагалась на старый default `GOMAXPROCS`;
-- не ломаются ли интеграции, которые ожидают старое panic output;
-- нет ли "случайно работающего" кода с обращением к результату до проверки `err` или до проверки на `nil`;
-- есть ли смысл экспериментально погонять сервисы с `GOEXPERIMENT=greenteagc` или `GOEXPERIMENT=jsonv2`.
+1. Зафиксировать текущее значение `GOMAXPROCS`, CPU limit, throttling metrics и throughput в контейнерах.
+2. Найти явные вызовы `runtime.GOMAXPROCS`, переменную `GOMAXPROCS` и подключение стороннего auto-tuning.
+3. Запустить модульные, интеграционные и race-тесты; отдельно проверить код, использующий результат до проверки `error`.
+4. Проверить debugger, profiler и symbolizer на DWARF 5.
+5. Если используется cgo, прогнать ASan jobs и проверить новые leak reports.
+6. Эксперименты Green Tea GC и JSON v2 включать отдельными вариантами сборки, чтобы измерить их независимо от остального обновления.
+7. Не публиковать FlightRecorder endpoint без защиты и ограничения частоты.
 
-## Что могут спросить на интервью
+---
 
-- как container-aware `GOMAXPROCS` влияет на CPU throttling и throughput в Kubernetes;
-- чем `FlightRecorder` лучше постоянной записи полного runtime trace;
-- чем `testing/synctest` полезнее обычных sleep-based тестов;
-- почему исправление compiler bug может проявиться как новый panic после апгрейда.
+## Типичные ошибки
+
+- Считать CPU request Kubernetes входом в расчёт `GOMAXPROCS`; runtime учитывает CPU bandwidth limit, а не request.
+- Ожидать, что container-aware `GOMAXPROCS` полностью устранит cgroup throttling.
+- Приписывать 10–40% выигрыша Green Tea GC всему приложению, хотя оценка относится к GC overhead в GC-heavy программах.
+- Использовать старый экспериментальный `synctest.Run`; стабильный API Go 1.25 использует `synctest.Test`.
+- Создавать `FlightRecorder` без `FlightRecorderConfig` или считать `MaxBytes` строгим пределом памяти.
+- Утверждать, что JSON v2 по умолчанию отвергает неизвестные поля: это отдельная настройка, а не заявленное поведение релиза.
+
+---
+
+## Interview-ready answer
+
+**1. Как Go 1.25 выбирает GOMAXPROCS в контейнере?**
+
+- Суть — на Linux runtime сравнивает доступные logical CPU с cgroup CPU bandwidth limit и учитывает меньшую границу.
+- Kubernetes — `limits.cpu` обычно участвует в расчёте, а `requests.cpu` не участвует.
+- Динамика — runtime периодически обновляет значение при изменении доступных CPU или квоты.
+- Исключение — явная настройка через environment или `runtime.GOMAXPROCS` отключает автоматику.
+
+**2. Зачем нужен runtime/trace.FlightRecorder?**
+
+- Задача — сохранить небольшой trace-интервал до редкого инцидента, а не начинать диагностику после него.
+- Механика — события непрерывно записываются в кольцевое окно в памяти, затем `WriteTo` создаёт snapshot.
+- Ограничение — это всё ещё runtime trace с overhead и чувствительными данными; размер и доступ нужно контролировать.
+
+**3. Что даёт testing/synctest?**
+
+- Суть — пакет изолирует группу goroutines и виртуализирует время.
+- Польза — deadlines и timers тестируются без реального `Sleep`, поэтому тесты быстрее и менее flaky.
+- Ограничение — пакет не доказывает корректность concurrent algorithm и не освобождает от завершения goroutines.
+
+**4. Почему после обновления до Go 1.25 может появиться новый nil panic?**
+
+- Причина — ошибка компилятора Go 1.21–1.24 иногда откладывала обязательный nil check.
+- Интерпретация — Go 1.25 проявляет уже некорректный код, который использует результат до проверки `error`.
+- Исправление — проверять ошибку сразу после вызова и только затем использовать остальные результаты.
+
+---
 
 ## Источники
 
 - [Go 1.25 Release Notes](https://go.dev/doc/go1.25)
-- [Go Release History](https://go.dev/doc/devel/release)
+- [Go 1.25.0 в истории релизов](https://go.dev/doc/devel/release#go1.25.0)
+- [Документация runtime/trace.FlightRecorder](https://pkg.go.dev/runtime/trace@go1.25.0#FlightRecorder)
+- [Документация testing/synctest](https://pkg.go.dev/testing/synctest@go1.25.0)
+- [Container-aware GOMAXPROCS](https://go.dev/blog/container-aware-gomaxprocs)

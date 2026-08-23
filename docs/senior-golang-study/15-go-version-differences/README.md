@@ -1,68 +1,68 @@
-# Go Version Differences
+# Различия между версиями Go
 
-Сюда собирай изменения между релизами Go, которые реально влияют на production-код, tooling и ожидания на senior-интервью.
+Раздел помогает оценивать обновления Go не как список новых API, а как изменение поведения приложения, инструментов разработки и требований к эксплуатации. Основной вопрос каждой статьи: что команда получает от новой версии и что нужно проверить до обновления production-сервисов.
 
-Этот модуль полезен для двух задач:
-- быстро понимать, что меняется при апгрейде toolchain;
-- уметь объяснить, какие изменения важны для runtime, CI, observability и backward compatibility.
+## Материалы
 
-Период:
-- [Go 1.24](./go1.24.md) — релиз февраля 2025;
-- [Go 1.25](./go1.25.md) — релиз августа 2025;
-- [Go 1.26](./go1.26.md) — релиз февраля 2026.
+- [Go 1.24](./go1.24.md) — generic type aliases, зависимости инструментов в `go.mod`, Swiss Tables, `os.Root`, `testing.B.Loop` и `runtime.AddCleanup`;
+- [Go 1.25](./go1.25.md) — container-aware `GOMAXPROCS`, Green Tea GC как эксперимент, `FlightRecorder`, `testing/synctest` и исправление отложенной проверки `nil`;
+- [Go 1.26](./go1.26.md) — `new(expr)`, новый `go fix`, Green Tea GC по умолчанию, ускорение cgo и экспериментальный профиль утечек горутин;
+- [Go 1.27](./go1.27.md) — generic methods, новая реализация `encoding/json`, профиль `goroutineleak`, пакет `uuid` и ускорение небольших аллокаций.
 
-## Как читать
+Рекомендуемый порядок чтения — хронологический: часть возможностей сначала появляется как эксперимент, а в следующем релизе становится поведением по умолчанию. Например, этот путь проходят Green Tea GC, `encoding/json/v2` и профиль `goroutineleak`.
 
-- сначала смотри на language/runtime/tooling изменения;
-- затем отмечай, что требует миграции, а что можно внедрять постепенно;
-- отдельно фиксируй, какие изменения затрагивают контейнеры, perf, security и debugging.
+---
 
-Что особенно важно уметь проговаривать:
-- какие изменения безопасны и почти прозрачны для приложения;
-- где изменилось поведение runtime или компилятора;
-- какие новые инструменты стоит внедрить в CI и локальную разработку;
-- какие фичи ещё экспериментальные и не должны попадать в критичный production без проверки.
+## Как читать статьи
 
-## Сравнительная таблица версий
+Для каждого релиза разделяйте четыре вида изменений:
 
-| Категория | Go 1.24 (фев 2025) | Go 1.25 (авг 2025) | Go 1.26 (фев 2026) |
-|---|---|---|---|
-| **Язык** | Generic type aliases | Нет изменений | `new(expr)`, self-referential generic constraints |
-| **Tooling** | `tool` directive в `go.mod`, `go build -json`, `GOCACHEPROG` GA | `go build -asan` leak detection, `ignore` directive в `go.mod`, `go doc -http` | `go fix` как modernizer platform, `go mod init` пишет N-1 версию, pprof flamegraph по умолчанию |
-| **Runtime** | Swiss Tables для maps, -2–3% CPU | Container-aware `GOMAXPROCS`, Green Tea GC (эксперимент) | Green Tea GC по умолчанию, cgo -30% overhead, heap address randomization |
-| **Observability** | — | `runtime/trace.FlightRecorder` | Goroutine leak profile (experimental) |
-| **Stdlib** | `os.Root`, `testing.B.Loop`, `runtime.AddCleanup`, FIPS 140-3 | `testing/synctest` GA, `encoding/json/v2` (experiment) | `crypto/hpke`, `bytes.Buffer.Peek`, `runtime/secret` (experiment) |
-| **Breaking / осторожно** | Swiss Tables: проверить `unsafe` map assumptions | Nil check bug fix: скрытые паники | `cmd/doc` удалён, cgo behavior changes, crypto random source |
+- **Контракт языка и API.** Новый синтаксис и экспортируемые API могут потребовать поднять директиву `go` в `go.mod`.
+- **Поведение по умолчанию.** Runtime и стандартная библиотека могут измениться без правок прикладного кода: пример — расчёт `GOMAXPROCS` или новая реализация JSON.
+- **Эксперименты.** Возможность под `GOEXPERIMENT` полезна для тестирования, но её API и поведение ещё могут измениться.
+- **Совместимость и эксплуатация.** Новые проверки, удалённые `GODEBUG`, поддерживаемые платформы и иной текст ошибок способны затронуть CI, мониторинг и интеграции.
 
-## Какую версию использовать сейчас
+Версия toolchain и языковая версия модуля — не одно и то же. Команда может собирать модуль компилятором Go 1.27, но оставить `go 1.26` в `go.mod`. Тогда новые возможности языка Go 1.27 в этом модуле недоступны, а часть поведения стандартной библиотеки выбирается с учётом директивы `go` и механизма `GODEBUG`.
 
-**Go 1.26** — текущая production-ready версия (февраль 2026). Это разумная цель для новых сервисов и планового апгрейда.
+---
 
-Если сервис работает на **Go 1.24 или 1.25** — апгрейд малорискованный: основные изменения либо прозрачны, либо дают выигрыш производительности без миграции кода. Тем не менее, перед апгрейдом стоит проверить три зоны риска:
+## Сравнение релизов
 
-- **Nil check bug fix (1.25):** компилятор исправил ошибку, при которой nil-разыменование в редких случаях не паниковало. После апгрейда такой код начнёт паниковать корректно — скрытые баги выйдут наружу.
-- **Container-aware `GOMAXPROCS` (1.25):** если сервис работает в Kubernetes с заданными CPU limits, `GOMAXPROCS` теперь выставляется автоматически по квоте контейнера, а не по числу ядер хоста. Поведение улучшается, но стоит убедиться, что явное выставление `GOMAXPROCS` в коде не конфликтует с новым поведением.
-- **Green Tea GC по умолчанию (1.26):** для GC-heavy нагрузок (большие кучи, частые аллокации) рекомендуется провести нагрузочное тестирование после апгрейда. Green Tea GC снижает tail latency, но профиль памяти может немного измениться.
+| Категория | Go 1.24 | Go 1.25 | Go 1.26 | Go 1.27 |
+| --- | --- | --- | --- | --- |
+| Язык | Generic type aliases | Нет изменений языка | `new(expr)`, self-referential constraints | Generic methods, promoted fields в struct literals, расширенный type inference |
+| Инструменты | `tool` в `go.mod`, структурированный вывод сборки | `ignore` в `go.mod`, новые анализаторы `vet` | `go fix` как платформа modernizers | `stdversion` запускается из `go test`, улучшены `go doc` и `go mod tidy` |
+| Runtime | Swiss Tables, суммарно 2–3% меньше CPU overhead в наборе тестов Go | Container-aware `GOMAXPROCS`, Green Tea GC как эксперимент | Green Tea GC по умолчанию, cgo overhead ниже примерно на 30% | Ускорение некоторых аллокаций меньше 80 байт, `goroutineleak` становится GA |
+| Диагностика | Структурированный вывод сборки и тестов | `runtime/trace.FlightRecorder` | Экспериментальный профиль утечек горутин | Метки горутин в traceback, `goroutineleak` без `GOEXPERIMENT` |
+| Стандартная библиотека | `os.Root`, `testing.B.Loop`, `runtime.AddCleanup` | `testing/synctest`, экспериментальный JSON v2 | `crypto/hpke`, `bytes.Buffer.Peek`, эксперименты `runtime/secret` и SIMD | JSON v2 в основе `encoding/json`, `crypto/mldsa`, `uuid`, экспериментальный переносимый SIMD |
+| Зоны риска | Новые проверки `vet`, изменения в crypto и внутреннем устройстве `map` | Новый `GOMAXPROCS`, исправленная проверка `nil`, более строгие crypto-парсеры | GC и cgo нужно перемерить, меняется смысл пользовательского источника случайности в crypto | Удалены старые `GODEBUG`, меняется точный вывод JSON/DEFLATE, macOS 12 больше не поддерживается |
 
-## Быстрый срез
+Цифры производительности в таблице — оценки команды Go для конкретных классов нагрузки, а не обещание ускорения любого сервиса. После смены toolchain нужны собственные benchmarks, профили и нагрузочные тесты.
 
-`1.24`: generic type aliases, `tool` directive, Swiss Tables maps, `os.Root`, `testing.B.Loop`, `runtime.AddCleanup`.
+---
 
-`1.25`: container-aware `GOMAXPROCS`, experimental Green Tea GC, `runtime/trace.FlightRecorder`, `testing/synctest` GA, experimental `encoding/json/v2`, `ignore` directive.
+## Какую версию выбирать
 
-`1.26`: `new(expr)` и self-referential generic constraints, `go fix` как платформа modernizers, Green Tea GC по умолчанию, goroutine leak profile, `crypto/hpke`, experimental `runtime/secret`.
+Go 1.27.0 выпущен 19 августа 2026 года. Для нового сервиса разумная отправная точка — последняя patch-версия Go 1.27, доступная на момент сборки образа. Для существующего сервиса обновление лучше проводить ступенчато: сначала новая toolchain со старой директивой `go`, затем обновление директивы и явное принятие нового языкового и совместимого поведения.
 
-## Подборка
+По политике Go major-релиз поддерживается, пока не выйдут две более новые major-версии. После выхода Go 1.27 поддерживаемыми ветками остаются Go 1.27 и Go 1.26; Go 1.25 больше не получает обычные исправления безопасности и критические bug fixes.
+
+Минимальный безопасный процесс обновления:
+
+1. Собрать и протестировать код новой toolchain без изменения директивы `go`.
+2. Запустить `go test`, `go vet`, race-тесты и критичные интеграционные тесты.
+3. Сравнить CPU, аллокации, GC, tail latency, размер бинарника и время сборки.
+4. Проверить release notes всех пропущенных версий и используемые `GODEBUG`/`GOEXPERIMENT`.
+5. Обновить директиву `go`, исправить новые диагностики и повторить проверки.
+6. Выпустить canary и сравнить его с контрольной группой до полного rollout.
+
+---
+
+## Официальные источники
 
 - [Go Release History](https://go.dev/doc/devel/release)
 - [Go 1.24 Release Notes](https://go.dev/doc/go1.24)
 - [Go 1.25 Release Notes](https://go.dev/doc/go1.25)
 - [Go 1.26 Release Notes](https://go.dev/doc/go1.26)
-
-## Вопросы
-
-- что из изменений в новой версии влияет на latency, memory и scheduler behavior;
-- что нужно проверить перед апгрейдом Go в Kubernetes-кластере;
-- какие новые возможности стоит добавить в тестовый стек команды;
-- какие фичи уже production-ready, а какие пока экспериментальные;
-- где после апгрейда возможны поведенческие регрессии, даже если код компилируется.
+- [Go 1.27 Release Notes](https://go.dev/doc/go1.27)
+- [Go и обратная совместимость через GODEBUG](https://go.dev/doc/godebug)
