@@ -18,7 +18,7 @@
 - [04 MongoDB](./04-mongodb.md)
 - [04a MongoDB: реальные сценарии](./04a-mongodb-real-scenarios.md)
 - [05 Cassandra](./05-cassandra.md)
-- [06 ClickHouse](./06-clickhouse.md)
+- [06 ClickHouse](./clickhouse/README.md)
 - [07 Couchbase](./07-couchbase.md)
 - [08 Redis](./08-redis.md)
 - [08a Redis: реальные сценарии](./08a-redis-real-scenarios.md)

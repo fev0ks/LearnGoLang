@@ -91,7 +91,7 @@ ORDER BY day, country;
 | Consistency | Обычно строгая | Часто eventual freshness |
 | Schema | Нормализованная | Денормализованная / star schema / event tables |
 | Storage | Row-oriented чаще удобнее | Column-oriented чаще эффективнее |
-| Примеры БД | PostgreSQL, MySQL | [ClickHouse](../database-systems-catalog/06-clickhouse.md), BigQuery, Snowflake, Redshift |
+| Примеры БД | PostgreSQL, MySQL | [ClickHouse](../database-systems-catalog/clickhouse/README.md), BigQuery, Snowflake, Redshift |
 | Риск | Locks, pool exhaustion, deadlocks | Дорогие сканы, ingestion lag, неверные агрегаты |
 
 Сводное сравнение конкретных СУБД — [01-comparison-table.md](../database-systems-catalog/01-comparison-table.md).
