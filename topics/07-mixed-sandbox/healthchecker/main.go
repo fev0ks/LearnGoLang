@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"math/rand/v2"
 	"net/http"
+	"slices"
 	"sync"
 	"time"
 )
@@ -22,6 +24,10 @@ func main() {
 	//checkAsync()
 	//checkAsyncWithResult()
 	checkWithLimit()
+
+	var a, b any
+	a, b = 1, 1
+	fmt.Println(a == b)
 }
 
 func checkSync() {
@@ -40,6 +46,9 @@ func checkSync() {
 }
 
 func checkAsync() {
+
+	slices.Clone()
+
 	wg := sync.WaitGroup{}
 	wg.Add(len(urls))
 	for _, url := range urls {
