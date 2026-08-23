@@ -78,6 +78,8 @@
 - [Идемпотентность запросов](./05-integration-patterns/02-idempotency.md) — заголовок `Idempotency-Key`, Redis `SET NX`, PostgreSQL `ON CONFLICT`, конкурентные повторы
 - [Ограничение частоты запросов](./05-integration-patterns/03-rate-limiting.md) — fixed window, sliding window, token bucket, реализация в Redis без гонок
 - [Рабочие реализации ограничителей](./05-integration-patterns/examples/README.md) — компилируемый Go: fixed window, sliding window, token bucket, тесты
+- [Telegram Bot API](./05-integration-patterns/telegram-bot-api/README.md) — webhook и long polling, дедупликация апдейтов, очереди и состояние диалога
+- [Stripe payments](./05-integration-patterns/stripe-payments/README.md) — lifecycle платежа, authorization/capture, booking saga, durable inbox и локальное тестирование
 
 ---
 

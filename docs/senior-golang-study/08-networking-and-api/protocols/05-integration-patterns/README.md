@@ -4,6 +4,11 @@
 
 Три материала образуют связку: webhooks порождают повторные доставки, идемпотентность делает повтор безопасным, ограничение частоты защищает от потока повторов.
 
+Отдельными подпапками лежат два прикладных случая. Telegram Bot API показывает,
+как все три паттерна работают одновременно на одном чужом API. Stripe добавляет
+к ним денежную машину состояний, authorization/capture, компенсации и
+reconciliation.
+
 ---
 
 ## Материалы
@@ -12,6 +17,8 @@
 - [02. Идемпотентность запросов](./02-idempotency.md) — заголовок `Idempotency-Key`, Redis `SET NX`, PostgreSQL `ON CONFLICT`, конкурентные повторы, дедупликация на потребителе
 - [03. Ограничение частоты запросов](./03-rate-limiting.md) — fixed window, sliding window, token bucket, реализация в Redis без гонок, fail-open против fail-closed
 - [Рабочие реализации ограничителей](./examples/README.md) — компилируемый Go с тестами: три алгоритма за одним интерфейсом
+- [Telegram Bot API](./telegram-bot-api/README.md) — приём апдейтов, дедупликация по `update_id`, лимиты отправки, состояние диалога: три паттерна выше в применении к конкретному API
+- [Stripe payments](./stripe-payments/README.md) — `PaymentIntent`, authorization/capture, booking saga, durable webhooks, локальное тестирование и code review реальной интеграции
 
 ---
 
