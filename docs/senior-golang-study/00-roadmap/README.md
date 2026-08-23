@@ -22,8 +22,10 @@
 | [10 DevOps & Observability](../10-devops-and-observability/README.md) | Linux, Docker, Kubernetes, metrics, traces, logs, profiling | ✅ 40+ файлов |
 | [11 Security](../11-security/README.md) | secrets, TLS/mTLS, CORS, DDoS protection | ✅ 8 файлов |
 | [12 Interview Practice](../12-interview-practice/README.md) | behavioral кейсы, system design drills | темы + ссылки |
-| [15 Go Version Differences](../15-go-version-differences/README.md) | Go 1.24, 1.25, 1.26 — что изменилось | ✅ 3 файла |
+| [15 Go Version Differences](../15-go-version-differences/README.md) | Go 1.24–1.27 — что изменилось и как обновляться | ✅ 4 файла |
 | [16 Algorithms And Data Structures](../16-algorithms-and-data-structures/README.md) | O-нотация, linear patterns, intervals, DP, weighted graphs, heap, backtracking | ✅ 13 файлов |
+| [17 LLM And AI Integration](../17-llm-and-ai-integration/README.md) | LLM API, structured outputs, agents, MCP, evals, RAG | вводный маршрут + материалы |
+| [18 Blockchain And Web3](../18-blockchain-and-web3/README.md) | blockchain, децентрализация, wallets, smart contracts, dApps и роль backend | ✅ 4 вводных файла |
 
 > **Разделы "темы + ссылки"** — содержат только README с темами и внешними ссылками; конспекты для них еще не написаны.
 
@@ -94,6 +96,7 @@
 | [go1.24.md](../15-go-version-differences/go1.24.md) | изменения в Go 1.24 | ★★ |
 | [go1.25.md](../15-go-version-differences/go1.25.md) | изменения в Go 1.25 | ★★ |
 | [go1.26.md](../15-go-version-differences/go1.26.md) | изменения в Go 1.26 | ★ |
+| [go1.27.md](../15-go-version-differences/go1.27.md) | generic methods, JSON v2, `goroutineleak`, `uuid` | ★★ |
 
 ---
 
@@ -185,7 +188,7 @@
 | [04-mongodb.md](../06-databases/database-systems-catalog/04-mongodb.md) | MongoDB, document model, aggregation pipeline | ★★ |
 | [04a-mongodb-real-scenarios.md](../06-databases/database-systems-catalog/04a-mongodb-real-scenarios.md) | реальные паттерны MongoDB | ★★ |
 | [05-cassandra.md](../06-databases/database-systems-catalog/05-cassandra.md) | Cassandra, wide-column, consistent hashing | ★★ |
-| [06-clickhouse.md](../06-databases/database-systems-catalog/06-clickhouse.md) | ClickHouse, columnar, MergeTree | ★★ |
+| [clickhouse/README.md](../06-databases/database-systems-catalog/clickhouse/README.md) | ClickHouse: MergeTree, дедупликация, мутации, Go | ★★ |
 | [09-elasticsearch-and-opensearch.md](../06-databases/database-systems-catalog/09-elasticsearch-and-opensearch.md) | inverted index, full-text search, relevance | ★★ |
 | [03-mysql.md](../06-databases/database-systems-catalog/03-mysql.md) | MySQL, InnoDB, отличия от PostgreSQL | ★ |
 | [07-couchbase.md](../06-databases/database-systems-catalog/07-couchbase.md) | Couchbase | ★ |
