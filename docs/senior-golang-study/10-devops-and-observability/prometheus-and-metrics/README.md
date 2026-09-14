@@ -20,7 +20,8 @@ production-сигналов.
 6. [Prometheus UI и Grafana](./04-prometheus-ui-and-grafana.md) — table-first
    диагностика, service/per-pod views и dashboards.
 7. [Практические паттерны метрик](./practical-metric-patterns/README.md) — HTTP
-   traffic/errors/latency, queues, connection pools, cache и вызовы хранилища.
+   traffic/errors/latency, queues, connection pools, cache, вызовы хранилища и
+   метрики Go runtime и процесса.
 
 Нумерация имён файлов историческая, поэтому рекомендуемый порядок чтения не
 совпадает с номерами.
@@ -39,6 +40,7 @@ production-сигналов.
 | Как выбрать buckets и посчитать SLO? | Latency histograms |
 | Когда queue depth нужно суммировать, а когда брать `max`? | Gauges |
 | Как связать HTTP p95 с pool wait и Postgres latency? | Storage metrics |
+| Чем Go heap отличается от RSS и container memory? | Go runtime/process metrics |
 
 ---
 
@@ -53,6 +55,7 @@ production-сигналов.
 - отделить отсутствие target, `up=0`, stale series и реальный ноль;
 - диагностировать путь discovery → relabeling → scrape → ingestion → query;
 - связать RED symptoms с USE/saturation и dependency metrics;
+- интерпретировать CPU, память, GC, goroutines и file descriptors Go-процесса;
 - объяснить, почему request ID, raw URL, SQL и тексты ошибок относятся в traces
   или logs, а не в metric labels.
 

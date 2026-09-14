@@ -11,11 +11,13 @@
 3. [Latency histograms: среднее, квантили и границы SLO](./03-latency-histograms.md)
 4. [Gauges: in-flight, queue depth и текущее состояние](./04-gauges-inflight-queue-depth.md)
 5. [Метрики операций с хранилищем](./05-storage-operation-metrics.md)
+6. [Метрики Go runtime и процесса в production](./06-go-runtime-and-process-metrics.md)
 
 Первые три статьи образуют RED-view для request-driven сервиса. Gauges
 добавляют saturation и capacity context. Storage metrics связывают
 пользовательский симптом с клиентским вызовом Postgres, Redis или другой
-зависимости.
+зависимости. Метрики runtime и процесса показывают, как Go-процесс тратит CPU и
+память, как ведут себя GC и goroutines и насколько близки системные лимиты.
 
 ---
 
@@ -40,5 +42,7 @@ flowchart LR
 - не усреднять percentiles и выбирать buckets рядом с SLO;
 - проверять владельца gauge перед `sum()`;
 - связывать HTTP latency с operation-level latency и saturation;
+- различать Go heap, RSS процесса и container memory;
+- читать CPU, allocation rate, GC, goroutines и file descriptors;
 - переходить от dashboard к traces и logs, не помещая request-level IDs в
   metric labels.
