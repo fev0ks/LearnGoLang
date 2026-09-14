@@ -6,6 +6,7 @@
 - [Исходный код](#исходный-код)
 - [Основные проблемы](#основные-проблемы)
 - [Исправленное решение](#исправленное-решение)
+- [Пример теста](#пример-теста)
 - [Что проверить тестами](#что-проверить-тестами)
 - [Interview-ready answer](#interview-ready-answer)
 - [Связанные материалы](#связанные-материалы)
@@ -216,6 +217,112 @@ func (s *OrderService) HandleBookingOrder(
 `defer` регистрируется сразу после успешного lock, поэтому unlock выполняется
 при любом последующем `return`. Если unlock тоже завершится ошибкой,
 `errors.Join` не даст потерять основную ошибку бронирования.
+
+---
+
+## Пример теста
+
+Стабы ниже выполняются синхронно, поэтому обычных счётчиков достаточно. Тест
+проверяет два связанных инварианта: retry использует прежний `orderID`, а после
+успешного lock всегда выполняется ровно один unlock.
+
+```go
+type bookingServiceFunc func(
+    context.Context,
+    string,
+) (string, error)
+
+func (function bookingServiceFunc) BookFlight(
+    ctx context.Context,
+    orderID string,
+) (string, error) {
+    return function(ctx, orderID)
+}
+
+type userServiceStub struct {
+    lock   func(context.Context, User) error
+    unlock func(context.Context, User) error
+}
+
+func (service userServiceStub) LockUser(
+    ctx context.Context,
+    user User,
+) error {
+    return service.lock(ctx, user)
+}
+
+func (service userServiceStub) UnlockUser(
+    ctx context.Context,
+    user User,
+) error {
+    return service.unlock(ctx, user)
+}
+
+func TestHandleBookingOrder_RetriesAndUnlocks(test *testing.T) {
+    const orderID = "order-42"
+    var lockCalls, unlockCalls int
+    var attemptedIDs []string
+
+    service := OrderService{
+        UserService: userServiceStub{
+            lock: func(context.Context, User) error {
+                lockCalls++
+                return nil
+            },
+            unlock: func(ctx context.Context, _ User) error {
+                unlockCalls++
+                if err := ctx.Err(); err != nil {
+                    test.Fatalf("unlock context: %v", err)
+                }
+                return nil
+            },
+        },
+        BookingService: bookingServiceFunc(func(
+            _ context.Context,
+            gotOrderID string,
+        ) (string, error) {
+            attemptedIDs = append(attemptedIDs, gotOrderID)
+            if len(attemptedIDs) == 1 {
+                return "", &BookingServiceError{
+                    Message:  "temporary failure",
+                    TryAgain: true,
+                }
+            }
+            return "BOOK-7", nil
+        }),
+    }
+
+    ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+    defer cancel()
+
+    receipt, err := service.HandleBookingOrder(
+        ctx,
+        User{ID: "user-7"},
+        orderID,
+    )
+    if err != nil {
+        test.Fatalf("HandleBookingOrder: %v", err)
+    }
+    if receipt.ID != orderID || receipt.BookingCode != "BOOK-7" {
+        test.Fatalf("receipt = %#v", receipt)
+    }
+    if lockCalls != 1 || unlockCalls != 1 {
+        test.Fatalf(
+            "lock calls = %d, unlock calls = %d",
+            lockCalls,
+            unlockCalls,
+        )
+    }
+    if !slices.Equal(attemptedIDs, []string{orderID, orderID}) {
+        test.Fatalf("attempted ids = %v", attemptedIDs)
+    }
+}
+```
+
+Тест проходит одну реальную задержку `retryDelay`. Для большого набора retry-
+сценариев ожидание стоит вынести из сервиса в интерфейс `Sleeper` или функцию и
+в тесте заменить управляемым каналом. Тогда можно отдельно проверить backoff и
+отмену, не замедляя suite.
 
 ---
 

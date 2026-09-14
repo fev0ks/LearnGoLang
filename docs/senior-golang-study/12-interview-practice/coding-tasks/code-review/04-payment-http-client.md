@@ -7,6 +7,7 @@
 - [Что нужно найти](#что-нужно-найти)
 - [Исправленное решение](#исправленное-решение)
 - [Повторы и идемпотентность](#повторы-и-идемпотентность)
+- [Пример теста](#пример-теста)
 - [Что проверить тестами](#что-проверить-тестами)
 - [Interview-ready answer](#interview-ready-answer)
 - [Связанные материалы](#связанные-материалы)
@@ -343,6 +344,112 @@ Retry должен быть ограничен числом попыток и о
 
 ---
 
+## Пример теста
+
+`httptest.Server` позволяет проверить реальный HTTP-запрос без внешнего
+платёжного сервиса. Handler сохраняет наблюдаемый wire-контракт в канал, а все
+assertions выполняются в goroutine самого теста.
+
+```go
+func TestClientSendPayment_SendsWireContract(test *testing.T) {
+    type observedRequest struct {
+        method      string
+        path        string
+        contentType string
+        accept      string
+        key         string
+        body        []byte
+    }
+
+    observed := make(chan observedRequest, 1)
+    server := httptest.NewServer(http.HandlerFunc(func(
+        response http.ResponseWriter,
+        request *http.Request,
+    ) {
+        body, err := io.ReadAll(request.Body)
+        if err != nil {
+            response.WriteHeader(http.StatusInternalServerError)
+            return
+        }
+        observed <- observedRequest{
+            method:      request.Method,
+            path:        request.URL.Path,
+            contentType: request.Header.Get("Content-Type"),
+            accept:      request.Header.Get("Accept"),
+            key:         request.Header.Get("Idempotency-Key"),
+            body:        body,
+        }
+
+        response.Header().Set("Content-Type", "application/json")
+        if _, err := io.WriteString(
+            response,
+            `{"payment_id":"pay-42","status":"ok"}`,
+        ); err != nil {
+            return
+        }
+    }))
+    defer server.Close()
+
+    client, err := NewClient(
+        &http.Client{Timeout: time.Second},
+        server.URL,
+    )
+    if err != nil {
+        test.Fatalf("NewClient: %v", err)
+    }
+
+    input := PaymentRequest{
+        UserID:         12345,
+        Amount:         json.Number("199.99"),
+        CurrencyCode:   "RUB",
+        IdempotencyKey: "payment-attempt-7",
+    }
+    result, err := client.SendPayment(context.Background(), input)
+    if err != nil {
+        test.Fatalf("SendPayment: %v", err)
+    }
+    if result.PaymentID != "pay-42" || result.Status != "ok" {
+        test.Fatalf("response = %#v", result)
+    }
+
+    got := <-observed
+    if got.method != http.MethodPost || got.path != "/process" {
+        test.Fatalf("request = %s %s", got.method, got.path)
+    }
+    if got.contentType != "application/json" ||
+        got.accept != "application/json" {
+        test.Fatalf(
+            "content type = %q, accept = %q",
+            got.contentType,
+            got.accept,
+        )
+    }
+    if got.key != input.IdempotencyKey {
+        test.Fatalf("idempotency key = %q", got.key)
+    }
+
+    var payload struct {
+        UserID       int64       `json:"user_id"`
+        Amount       json.Number `json:"amount"`
+        CurrencyCode string      `json:"currency"`
+    }
+    if err := json.Unmarshal(got.body, &payload); err != nil {
+        test.Fatalf("decode request: %v", err)
+    }
+    if payload.UserID != input.UserID ||
+        payload.Amount != input.Amount ||
+        payload.CurrencyCode != input.CurrencyCode {
+        test.Fatalf("payload = %#v", payload)
+    }
+}
+```
+
+`Fatal` нельзя вызывать из HTTP-handler: он работает в отдельной goroutine, а
+`FailNow` должен быть вызван goroutine самого теста. Поэтому handler только
+собирает факты, а проверка выполняется после `SendPayment`.
+
+---
+
 ## Что проверить тестами
 
 - Отправляются правильные метод, URL, точные сумма и валюта, а также три
@@ -353,8 +460,9 @@ Retry должен быть ограничен числом попыток и о
 - Отмена context и timeout завершают вызов.
 - Retry-обёртка сохраняет один `Idempotency-Key` и один payload.
 
-Для unit-тестов достаточно `httptest.Server`; реальный платёжный сервис не
-нужен.
+Для повторов удобно считать запросы и сохранять тела в handler. Чтобы такой тест
+не ждал реальные `100ms + 200ms`, backoff лучше передавать в клиент как
+зависимость и подменять функцией без ожидания.
 
 ---
 
