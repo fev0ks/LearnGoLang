@@ -28,6 +28,12 @@
 - [23. Можно ли собрать строку из доступных символов](#23-можно-ли-собрать-строку-из-доступных-символов)
 - [24. Наибольшая подстрока не более чем из двух символов](#24-наибольшая-подстрока-не-более-чем-из-двух-символов)
 - [25. Проверка валидности скобочной последовательности](#25-проверка-валидности-скобочной-последовательности)
+- [26. IDE-поиск по подпоследовательности](#26-ide-поиск-по-подпоследовательности)
+- [27. Проверка строк на изоморфность](#27-проверка-строк-на-изоморфность)
+- [28. Произведение массива кроме текущего элемента](#28-произведение-массива-кроме-текущего-элемента)
+- [29. Уникальные теги объявлений](#29-уникальные-теги-объявлений)
+- [30. Топ-3 продавцов по числу лайков](#30-топ-3-продавцов-по-числу-лайков)
+- [31. Проверка двух бинарных деревьев на равенство](#31-проверка-двух-бинарных-деревьев-на-равенство)
 - [Связанные материалы](#связанные-материалы)
 - [Interview-ready answer](#interview-ready-answer)
 
@@ -96,40 +102,40 @@ result = 1
 
 ```go
 func TotalDissatisfaction(goods, needs []int) int {
-	if len(goods) == 0 {
-		return 0
-	}
+    if len(goods) == 0 {
+        return 0
+    }
 
-	sort.Ints(goods)
+    sort.Ints(goods)
 
-	total := 0
-	for _, need := range needs {
-		index := sort.SearchInts(goods, need)
+    total := 0
+    for _, need := range needs {
+        index := sort.SearchInts(goods, need)
 
-		// Потребность меньше всех товаров.
-		if index == 0 {
-			total += goods[0] - need
-			continue
-		}
+        // Потребность меньше всех товаров.
+        if index == 0 {
+            total += goods[0] - need
+            continue
+        }
 
-		// Потребность больше всех товаров.
-		if index == len(goods) {
-			total += need - goods[len(goods)-1]
-			continue
-		}
+        // Потребность больше всех товаров.
+        if index == len(goods) {
+            total += need - goods[len(goods)-1]
+            continue
+        }
 
-		// Ближайший товар находится слева или справа от точки вставки.
-		leftDifference := need - goods[index-1]
-		rightDifference := goods[index] - need
+        // Ближайший товар находится слева или справа от точки вставки.
+        leftDifference := need - goods[index-1]
+        rightDifference := goods[index] - need
 
-		if leftDifference < rightDifference {
-			total += leftDifference
-		} else {
-			total += rightDifference
-		}
-	}
+        if leftDifference < rightDifference {
+            total += leftDifference
+        } else {
+            total += rightDifference
+        }
+    }
 
-	return total
+    return total
 }
 ```
 
@@ -162,7 +168,8 @@ champions = {userIDs: [2], steps: 2500}
 ```
 
 Если несколько участников набрали одинаковый максимум, вернуть их всех.
-Считаем, что в одном дне каждый `userID` встречается не более одного раза.
+Считаем, что количество шагов неотрицательное, а в одном дне каждый `userID`
+встречается не более одного раза.
 
 <details>
 <summary>Решение</summary>
@@ -183,64 +190,61 @@ champions = {userIDs: [2], steps: 2500}
 
 ```go
 type DayResult struct {
-	UserID int
-	Steps  int
+    UserID int
+    Steps  int
 }
 
 type Champions struct {
-	UserIDs []int
-	Steps   int
+    UserIDs []int
+    Steps   int
 }
 
 type participantTotal struct {
-	steps int
-	days  int
+    steps int
+    days  int
 }
 
 func FindChampions(statistics [][]DayResult) Champions {
-	if len(statistics) == 0 {
-		return Champions{}
-	}
+    if len(statistics) == 0 {
+        return Champions{}
+    }
 
-	totals := make(map[int]participantTotal)
-	for _, day := range statistics {
-		for _, result := range day {
-			total := totals[result.UserID]
-			total.steps += result.Steps
-			total.days++
-			totals[result.UserID] = total
-		}
-	}
+    totals := make(map[int]participantTotal)
+    for _, day := range statistics {
+        for _, result := range day {
+            total := totals[result.UserID]
+            total.steps += result.Steps
+            total.days++
+            totals[result.UserID] = total
+        }
+    }
 
-	var champions Champions
-	found := false
+    champions := Champions{}
 
-	for userID, total := range totals {
-		if total.days != len(statistics) {
-			continue
-		}
+    for userID, total := range totals {
+        if total.days != len(statistics) {
+            continue
+        }
 
-		switch {
-		case !found || total.steps > champions.Steps:
-			found = true
-			champions.Steps = total.steps
-			champions.UserIDs = []int{userID}
-		case total.steps == champions.Steps:
-			champions.UserIDs = append(champions.UserIDs, userID)
-		}
-	}
+        switch {
+        case total.steps > champions.Steps:
+            champions.Steps = total.steps
+            champions.UserIDs = []int{userID}
+        case total.steps == champions.Steps:
+            champions.UserIDs = append(champions.UserIDs, userID)
+        }
+    }
 
-	return champions
+    return champions
 }
 ```
 
 - ожидаемое время: `O(r + u)` благодаря hash map;
 - дополнительная память: `O(u)`.
 
-Максимум ищется через флаг `found`, а не через стартовое значение вроде `-1`.
-Число-сторож молча закладывается на неотрицательность шагов и ломается, если
-контракт допустит отрицательные или скорректированные значения. Если чемпионов
-нет, возвращается нулевая структура.
+Начальное значение `champions.Steps` равно нулю. Это корректно, потому что по
+условию число шагов неотрицательное. Участники с нулевой суммой попадут в ветку
+равенства. Если подходящих участников нет, возвращается нулевая структура.
 
 Порядок `UserIDs` не определён из-за обхода map. Если контракт требует
 стабильный порядок, идентификаторы нужно отсортировать за `O(c log c)`, где
@@ -295,40 +299,40 @@ result = [5, 0]
 
 ```go
 type MeetingDay struct {
-	Day      int
-	Meetings int
+    Day      int
+    Meetings int
 }
 
 func BestVacation(days []MeetingDay, periodLength, vacationLength int) (int, int) {
-	if vacationLength <= 0 || periodLength <= 0 || vacationLength > periodLength {
-		return 0, 0
-	}
+    if vacationLength <= 0 || periodLength <= 0 || vacationLength > periodLength {
+        return 0, 0
+    }
 
-	lastStart := periodLength - vacationLength + 1
-	left, right := 0, 0
-	current := 0
-	bestStart := 1
-	bestMeetings := math.MaxInt
+    lastStart := periodLength - vacationLength + 1
+    left, right := 0, 0
+    current := 0
+    bestStart := 1
+    bestMeetings := math.MaxInt
 
-	for start := 1; start <= lastStart; start++ {
-		end := start + vacationLength - 1
+    for start := 1; start <= lastStart; start++ {
+        end := start + vacationLength - 1
 
-		for right < len(days) && days[right].Day <= end {
-			current += days[right].Meetings
-			right++
-		}
-		for left < right && days[left].Day < start {
-			current -= days[left].Meetings
-			left++
-		}
+        for right < len(days) && days[right].Day <= end {
+            current += days[right].Meetings
+            right++
+        }
+        for left < right && days[left].Day < start {
+            current -= days[left].Meetings
+            left++
+        }
 
-		if current < bestMeetings {
-			bestMeetings = current
-			bestStart = start
-		}
-	}
+        if current < bestMeetings {
+            bestMeetings = current
+            bestStart = start
+        }
+    }
 
-	return bestStart, bestMeetings
+    return bestStart, bestMeetings
 }
 ```
 
@@ -378,56 +382,43 @@ deps = {
 ### Оптимальный подход: топологическая сортировка DFS
 
 При обходе библиотеки сначала рекурсивно обходим её зависимости и только затем
-добавляем саму библиотеку.
+добавляем саму библиотеку. Множество `visited` хранит уже обработанные библиотеки,
+чтобы общие зависимости не попадали в результат несколько раз. По условию
+циклов нет, поэтому отдельное состояние `visiting` и возврат ошибки не нужны.
 
 ```go
-func ImportOrder(deps map[string][]string) ([]string, error) {
-	const (
-		unvisited = iota
-		visiting
-		visited
-	)
+func ImportOrder(deps map[string][]string) []string {
+    visited := make(map[string]struct{})
+    order := make([]string, 0, len(deps))
 
-	state := make(map[string]int)
-	order := make([]string, 0, len(deps))
+    var visit func(string)
+    visit = func(lib string) {
+        if _, exists := visited[lib]; exists {
+            return
+        }
 
-	var visit func(string) error
-	visit = func(lib string) error {
-		switch state[lib] {
-		case visiting:
-			return fmt.Errorf("dependency cycle at %q", lib)
-		case visited:
-			return nil
-		}
+        for _, dependency := range deps[lib] {
+            visit(dependency)
+        }
 
-		state[lib] = visiting
-		for _, dependency := range deps[lib] {
-			if err := visit(dependency); err != nil {
-				return err
-			}
-		}
-		state[lib] = visited
-		order = append(order, lib)
-		return nil
-	}
+        visited[lib] = struct{}{}
+        order = append(order, lib)
+    }
 
-	for lib := range deps {
-		if err := visit(lib); err != nil {
-			return nil, err
-		}
-	}
+    for lib := range deps {
+        visit(lib)
+    }
 
-	return order, nil
+    return order
 }
 ```
 
 - время: `O(v + e)`;
-- дополнительная память: `O(v)` для состояний, результата и стека DFS.
+- дополнительная память: `O(v)` для множества `visited` и стека DFS;
+- память результата: `O(v)`.
 
 Порядок обхода Go map не определён. Если нужен воспроизводимый результат,
 ключи и списки зависимостей сортируют; тогда появляется цена сортировки.
-Проверка состояния `visiting` оставлена даже при обещании отсутствия циклов:
-она защищает функцию при нарушении входного контракта.
 
 </details>
 
@@ -454,7 +445,7 @@ func ImportOrder(deps map[string][]string) ([]string, error) {
 Можно идти справа налево и при каждом шаге вставлять новую цифру в начало
 результата. Однако каждая вставка сдвигает уже записанные элементы.
 
-- время: `O(n²)`, где `n = max(len(a), len(b))`;
+- время: `O(n²)`, где `n = max(len(firstDigits), len(secondDigits))`;
 - дополнительная память: `O(n)`.
 
 Преобразование массива в `int` не является корректным базовым решением: именно
@@ -466,37 +457,38 @@ func ImportOrder(deps map[string][]string) ([]string, error) {
 (`carry`) на следующую итерацию.
 
 ```go
-func AddDecimalDigits(a, b []int) []int {
-	n := len(a)
-	if len(b) > n {
-		n = len(b)
-	}
-	if n == 0 {
-		return []int{0}
-	}
+func AddDecimalDigits(firstDigits, secondDigits []int) []int {
+    maxDigits := len(firstDigits)
+    if len(secondDigits) > maxDigits {
+        maxDigits = len(secondDigits)
+    }
+    if maxDigits == 0 {
+        return []int{0}
+    }
 
-	result := make([]int, n+1)
-	i, j := len(a)-1, len(b)-1
-	carry := 0
+    result := make([]int, maxDigits+1)
+    firstIndex := len(firstDigits) - 1
+    secondIndex := len(secondDigits) - 1
+    addNum := 0 // Перенос в следующий разряд.
 
-	for k := n; k >= 0; k-- {
-		sum := carry
-		if i >= 0 {
-			sum += a[i]
-			i--
-		}
-		if j >= 0 {
-			sum += b[j]
-			j--
-		}
-		result[k] = sum % 10
-		carry = sum / 10
-	}
+    for resultIndex := maxDigits; resultIndex >= 0; resultIndex-- {
+        sum := addNum
+        if firstIndex >= 0 {
+            sum += firstDigits[firstIndex]
+            firstIndex--
+        }
+        if secondIndex >= 0 {
+            sum += secondDigits[secondIndex]
+            secondIndex--
+        }
+        result[resultIndex] = sum % 10
+        addNum = sum / 10
+    }
 
-	if result[0] == 0 {
-		return result[1:]
-	}
-	return result
+    if result[0] == 0 {
+        return result[1:]
+    }
+    return result
 }
 ```
 
@@ -552,35 +544,35 @@ result = [1, 2]
 
 ```go
 func TopKFrequent(nums []int, k int) []int {
-	if k <= 0 || len(nums) == 0 {
-		return nil
-	}
+    if k <= 0 || len(nums) == 0 {
+        return nil
+    }
 
-	frequency := make(map[int]int)
-	for _, number := range nums {
-		frequency[number]++
-	}
+    frequency := make(map[int]int)
+    for _, number := range nums {
+        frequency[number]++
+    }
 
-	buckets := make([][]int, len(nums)+1)
-	for number, count := range frequency {
-		buckets[count] = append(buckets[count], number)
-	}
+    buckets := make([][]int, len(nums)+1)
+    for number, count := range frequency {
+        buckets[count] = append(buckets[count], number)
+    }
 
-	if k > len(frequency) {
-		k = len(frequency)
-	}
-	result := make([]int, 0, k)
+    if k > len(frequency) {
+        k = len(frequency)
+    }
+    result := make([]int, 0, k)
 
-	for count := len(buckets) - 1; count > 0 && len(result) < k; count-- {
-		for _, number := range buckets[count] {
-			result = append(result, number)
-			if len(result) == k {
-				break
-			}
-		}
-	}
+    for count := len(buckets) - 1; count > 0 && len(result) < k; count-- {
+        for _, number := range buckets[count] {
+            result = append(result, number)
+            if len(result) == k {
+                break
+            }
+        }
+    }
 
-	return result
+    return result
 }
 ```
 
@@ -629,35 +621,32 @@ result = ["((()))", "(()())", "(())()", "()(())", "()()()"]
 
 ```go
 func GenerateParentheses(n int) []string {
-	if n < 0 {
-		return nil
-	}
+    if n < 0 {
+        return nil
+    }
 
-	result := make([]string, 0)
-	current := make([]byte, 0, 2*n)
+    var result []string
 
-	var generate func(opened, closed int)
-	generate = func(opened, closed int) {
-		if len(current) == 2*n {
-			result = append(result, string(current))
-			return
-		}
+    var generate func(current []byte, opened, closed int)
+    generate = func(current []byte, opened, closed int) {
+        if len(current) == 2*n {
+            result = append(result, string(current))
+            return
+        }
 
-		if opened < n {
-			current = append(current, '(')
-			generate(opened+1, closed)
-			current = current[:len(current)-1]
-		}
+        if opened < n {
+            generate(append(current, '('), opened+1, closed)
+        }
 
-		if closed < opened {
-			current = append(current, ')')
-			generate(opened, closed+1)
-			current = current[:len(current)-1]
-		}
-	}
+        if closed < opened {
+            generate(append(current, ')'), opened, closed+1)
+        }
+    }
 
-	generate(0, 0)
-	return result
+    current := make([]byte, 0, 2*n)
+    generate(current, 0, 0)
+
+    return result
 }
 ```
 
@@ -723,13 +712,16 @@ func GenerateParentheses(n int) []string {
 последовательности выходят от самой вложенной `((()))` к самой плоской
 `()()()` — ровно в том порядке, что записан в условии задачи.
 
-**Откат — это и есть «back» в backtracking.** Буфер `current` один на весь
-обход и не копируется. Строка `current = current[:len(current)-1]` после
-рекурсивного вызова стирает только что добавленный символ и возвращает буфер в
-то состояние, в котором его увидел текущий вызов. Без отката второй `if` в том
-же вызове дописывал бы `')'` к чужому хвосту. Копирование происходит один раз
-на лист, в `string(current)` — отсюда `O(n)` дополнительной памяти на всю
-глубину при `O(Cₙ * n)` памяти результата.
+**Возврат из функции выполняет откат.** `current` передаётся явно, поэтому
+каждый рекурсивный вызов получает свой заголовок slice со своей длиной. Вызов с
+добавленной `'('` не меняет длину `current` у родителя; после возврата родитель
+может передать в другую ветку тот же путь с добавленной `')'`.
+
+Backing-массив при этом переиспользуется: ветки выполняются последовательно и
+могут записывать новые символы в одни и те же свободные позиции. Готовый путь
+сохраняется отдельной строкой в `string(current)`, поэтому последующая запись
+его не меняет. Отсюда `O(n)` дополнительной памяти на буфер и стек при
+`O(Cₙ * n)` памяти результата.
 
 </details>
 
@@ -768,19 +760,19 @@ output = [7, 3, 2, 4, 5, 19, 0, 0, 0, 0]
 
 ```go
 func MoveZeroes(nums []int) {
-	write := 0
-	for _, number := range nums {
-		if number == 0 {
-			continue
-		}
-		nums[write] = number
-		write++
-	}
+    write := 0
+    for _, number := range nums {
+        if number == 0 {
+            continue
+        }
+        nums[write] = number
+        write++
+    }
 
-	for write < len(nums) {
-		nums[write] = 0
-		write++
-	}
+    for write < len(nums) {
+        nums[write] = 0
+        write++
+    }
 }
 ```
 
@@ -820,26 +812,30 @@ result = [1, 1, 2, 2, 3, 4, 5, 6]
 ### Оптимальный подход: два указателя
 
 Сравниваем текущие элементы двух массивов и переносим меньший. Когда один
-массив закончится, копируем остаток второго.
+массив закончится, на каждой следующей итерации берём элемент из оставшегося.
 
 ```go
 func MergeSorted(a, b []int) []int {
-	result := make([]int, 0, len(a)+len(b))
-	i, j := 0, 0
+    idxA, idxB := 0, 0
 
-	for i < len(a) && j < len(b) {
-		if a[i] <= b[j] {
-			result = append(result, a[i])
-			i++
-		} else {
-			result = append(result, b[j])
-			j++
-		}
-	}
+    maxLen := len(a) + len(b)
 
-	result = append(result, a[i:]...)
-	result = append(result, b[j:]...)
-	return result
+    result := make([]int, len(a)+len(b))
+
+    for i := range maxLen {
+        if idxB == len(b) || idxA < len(a) && a[idxA] <= b[idxB] {
+            result[i] = a[idxA]
+            idxA++
+            continue
+        }
+        if idxA == len(a) || idxB < len(b) && b[idxB] < a[idxA] {
+            result[i] = b[idxB]
+            idxB++
+            continue
+        }
+    }
+
+    return result
 }
 ```
 
@@ -895,63 +891,57 @@ difference = 0
 минимум не изменится, а максимум может только вырасти.
 
 ```go
-func MostBalancedTeam(backend, frontend, qa, design []int) ([4]int, int, bool) {
-	levels := [4][]int{backend, frontend, qa, design}
+func MostBalancedTeam(backend, frontend, qa, design []int) ([4]int, int) {
+    backendIndex := 0
+    frontendIndex := 0
+    qaIndex := 0
+    designIndex := 0
 
-	// Без хотя бы одного кандидата в каждой роли команда не собирается.
-	for _, role := range levels {
-		if len(role) == 0 {
-			return [4]int{}, 0, false
-		}
-	}
+    bestTeam := [4]int{}
+    bestDifference := math.MaxInt
 
-	indexes := [4]int{}
-	bestTeam := [4]int{}
-	bestDifference := math.MaxInt
+    for backendIndex < len(backend) &&
+        frontendIndex < len(frontend) &&
+        qaIndex < len(qa) &&
+        designIndex < len(design) {
 
-	for {
-		current := [4]int{
-			levels[0][indexes[0]],
-			levels[1][indexes[1]],
-			levels[2][indexes[2]],
-			levels[3][indexes[3]],
-		}
+        team := [4]int{
+            backend[backendIndex],
+            frontend[frontendIndex],
+            qa[qaIndex],
+            design[designIndex],
+        }
 
-		minValue, maxValue := current[0], current[0]
-		minRole := 0
+        minLevel := min(team[0], team[1], team[2], team[3])
+        maxLevel := max(team[0], team[1], team[2], team[3])
 
-		for role := 1; role < len(current); role++ {
-			if current[role] < minValue {
-				minValue = current[role]
-				minRole = role
-			}
-			if current[role] > maxValue {
-				maxValue = current[role]
-			}
-		}
+        if maxLevel-minLevel < bestDifference {
+            bestDifference = maxLevel - minLevel
+            bestTeam = team
+        }
 
-		if maxValue-minValue < bestDifference {
-			bestDifference = maxValue - minValue
-			bestTeam = current
-		}
+        switch minLevel {
+        case team[0]:
+            backendIndex++
+        case team[1]:
+            frontendIndex++
+        case team[2]:
+            qaIndex++
+        case team[3]:
+            designIndex++
+        }
+    }
 
-		indexes[minRole]++
-		if indexes[minRole] == len(levels[minRole]) {
-			break
-		}
-	}
-
-	return bestTeam, bestDifference, true
+    return bestTeam, bestDifference
 }
 ```
 
 - время: `O(n₁ + n₂ + n₃ + n₄)`;
 - дополнительная память: `O(1)`.
 
-По условию все четыре массива непустые, но проверка стоит внутри функции:
-без неё первое же обращение `levels[0][indexes[0]]` к пустому слайсу вызовет
-panic. Флаг `ok` в возвращаемых значениях — обычный для Go способ сказать
-«результата нет», не занимая под это число.
+Решение опирается на условие, что все четыре массива непустые. Если пустой
+массив нужно считать допустимым входом, контракт функции следует расширить
+ошибкой или флагом `ok`.
 
 </details>
 
@@ -992,40 +982,40 @@ func (h intMinHeap) Less(i, j int) bool { return h[i] < h[j] }
 func (h intMinHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
 
 func (h *intMinHeap) Push(value any) {
-	*h = append(*h, value.(int))
+    *h = append(*h, value.(int))
 }
 
 func (h *intMinHeap) Pop() any {
-	old := *h
-	last := len(old) - 1
-	value := old[last]
-	*h = old[:last]
-	return value
+    old := *h
+    last := len(old) - 1
+    value := old[last]
+    *h = old[:last]
+    return value
 }
 
 func KLargest(nums []int, k int) []int {
-	if k <= 0 || len(nums) == 0 {
-		return nil
-	}
-	if k > len(nums) {
-		k = len(nums)
-	}
+    if k <= 0 || len(nums) == 0 {
+        return nil
+    }
+    if k > len(nums) {
+        k = len(nums)
+    }
 
-	// Пустая куча уже упорядочена, heap.Init для неё не нужен.
-	h := &intMinHeap{}
+    // Пустая куча уже упорядочена, heap.Init для неё не нужен.
+    h := &intMinHeap{}
 
-	for _, number := range nums {
-		if h.Len() < k {
-			heap.Push(h, number)
-			continue
-		}
-		if number > (*h)[0] {
-			(*h)[0] = number
-			heap.Fix(h, 0)
-		}
-	}
+    for _, number := range nums {
+        if h.Len() < k {
+            heap.Push(h, number)
+            continue
+        }
+        if number > (*h)[0] {
+            (*h)[0] = number
+            heap.Fix(h, 0)
+        }
+    }
 
-	return append([]int(nil), (*h)...)
+    return append([]int(nil), (*h)...)
 }
 ```
 
@@ -1076,18 +1066,18 @@ result = [[2, 5], [4, 3]]
 
 ```go
 func PairsWithSum(nums []int, target int) [][2]int {
-	seen := make(map[int]struct{}, len(nums))
-	result := make([][2]int, 0)
+    seen := make(map[int]struct{}, len(nums))
+    result := make([][2]int, 0)
 
-	for _, number := range nums {
-		complement := target - number
-		if _, ok := seen[complement]; ok {
-			result = append(result, [2]int{complement, number})
-		}
-		seen[number] = struct{}{}
-	}
+    for _, number := range nums {
+        complement := target - number
+        if _, ok := seen[complement]; ok {
+            result = append(result, [2]int{complement, number})
+        }
+        seen[number] = struct{}{}
+    }
 
-	return result
+    return result
 }
 ```
 
@@ -1129,8 +1119,8 @@ func PairsWithSum(nums []int, target int) [][2]int {
 
 ```go
 type CategoryNode struct {
-	Text     string
-	Children []*CategoryNode
+    Text     string
+    Children []*CategoryNode
 }
 ```
 
@@ -1149,34 +1139,37 @@ type CategoryNode struct {
 ### Оптимальный подход: DFS с текущим путём
 
 Во время обхода в глубину поддерживаем путь от корня до текущего узла. При
-достижении листа сразу превращаем путь в строку.
+достижении листа сразу превращаем путь в строку. Текущий путь передаём
+аргументом, поэтому вручную удалять последний элемент после рекурсивного вызова
+не нужно.
 
 ```go
 func LeafPaths(roots []*CategoryNode) []string {
-	result := make([]string, 0)
-	path := make([]string, 0)
+    var result []string
 
-	var walk func(*CategoryNode)
-	walk = func(node *CategoryNode) {
-		if node == nil {
-			return
-		}
+    var walk func(*CategoryNode, []string)
+    walk = func(node *CategoryNode, path []string) {
+        if node == nil {
+            return
+        }
 
-		path = append(path, node.Text)
-		if len(node.Children) == 0 {
-			result = append(result, strings.Join(path, " > "))
-		} else {
-			for _, child := range node.Children {
-				walk(child)
-			}
-		}
-		path = path[:len(path)-1]
-	}
+        path = append(path, node.Text)
 
-	for _, root := range roots {
-		walk(root)
-	}
-	return result
+        if len(node.Children) == 0 {
+            result = append(result, strings.Join(path, " > "))
+            return
+        }
+
+        for _, child := range node.Children {
+            walk(child, path)
+        }
+    }
+
+    for _, root := range roots {
+        walk(root, nil)
+    }
+
+    return result
 }
 ```
 
@@ -1205,6 +1198,7 @@ v11.22.44,   v11.22.45   ->  1
 v11.22.44,   v11.22.44   ->  0
 v11.22.44,   v11.22.44.0 ->  0
 v1.12.3,     v1.3.4      -> -1
+v1.0002,     v1.2        ->  0
 ```
 
 Последовательность отсутствующих компонентов считается последовательностью
@@ -1231,47 +1225,60 @@ v1.12.3,     v1.3.4      -> -1
 
 ### Оптимальный подход: сравнение компонентов слева направо
 
-Удаляем префикс `v`, разделяем версии по точкам и сравниваем соответствующие
-числа. Отсутствующие компоненты считаем нулями, поэтому `v1.2` и `v1.2.0`
-равны.
+Удаляем префикс `v` и разделяем версии по точкам. В каждом компоненте убираем
+ведущие нули. Сначала сравниваем длину оставшихся строк, а при равной длине —
+сами строки. Так компоненты сравниваются как числа, но не ограничиваются
+размером `int`.
+
+Отсутствующие компоненты считаем нулями, поэтому `v1.2`, `v1.2.0` и
+`v1.0002` сравниваются корректно.
 
 ```go
 func CompareVersions(first, second string) int {
-	firstParts := strings.Split(strings.TrimPrefix(first, "v"), ".")
-	secondParts := strings.Split(strings.TrimPrefix(second, "v"), ".")
+    firstParts := strings.Split(strings.TrimPrefix(first, "v"), ".")
+    secondParts := strings.Split(strings.TrimPrefix(second, "v"), ".")
 
-	partsCount := len(firstParts)
-	if len(secondParts) > partsCount {
-		partsCount = len(secondParts)
-	}
+    partsCount := max(len(firstParts), len(secondParts))
 
-	for i := 0; i < partsCount; i++ {
-		firstNumber, secondNumber := 0, 0
-		if i < len(firstParts) {
-			firstNumber, _ = strconv.Atoi(firstParts[i])
-		}
-		if i < len(secondParts) {
-			secondNumber, _ = strconv.Atoi(secondParts[i])
-		}
+    for partIndex := 0; partIndex < partsCount; partIndex++ {
+        firstPart := normalizedVersionPart(firstParts, partIndex)
+        secondPart := normalizedVersionPart(secondParts, partIndex)
 
-		switch {
-		case firstNumber < secondNumber:
-			return 1
-		case firstNumber > secondNumber:
-			return -1
-		}
-	}
+        switch {
+        case len(firstPart) < len(secondPart):
+            return 1
+        case len(firstPart) > len(secondPart):
+            return -1
+        case firstPart < secondPart:
+            return 1
+        case firstPart > secondPart:
+            return -1
+        }
+    }
 
-	return 0
+    return 0
+}
+
+func normalizedVersionPart(parts []string, index int) string {
+    if index >= len(parts) {
+        return "0"
+    }
+
+    part := strings.TrimLeft(parts[index], "0")
+    if part == "" {
+        return "0"
+    }
+
+    return part
 }
 ```
 
 - время: `O(a + b)`;
 - дополнительная память: `O(a + b)` для частей строк.
 
-Код предполагает валидный формат и компоненты, помещающиеся в `int`. Если
-версии приходят из недоверенного источника, ошибки `Atoi` нужно возвращать
-вызывающему коду.
+Код предполагает валидный формат, но компоненты могут иметь любую длину. Если
+версии приходят из недоверенного источника, проверку префикса, точек и
+десятичных цифр нужно добавить отдельно.
 
 </details>
 
@@ -1316,40 +1323,40 @@ result = [
 
 ```go
 type Ticket struct {
-	From string
-	To   string
+    From string
+    To   string
 }
 
 func RestoreRoute(tickets []Ticket) []Ticket {
-	if len(tickets) == 0 {
-		return nil
-	}
+    if len(tickets) == 0 {
+        return nil
+    }
 
-	byFrom := make(map[string]Ticket, len(tickets))
-	destinations := make(map[string]struct{}, len(tickets))
+    byFrom := make(map[string]Ticket, len(tickets))
+    destinations := make(map[string]struct{}, len(tickets))
 
-	for _, ticket := range tickets {
-		byFrom[ticket.From] = ticket
-		destinations[ticket.To] = struct{}{}
-	}
+    for _, ticket := range tickets {
+        byFrom[ticket.From] = ticket
+        destinations[ticket.To] = struct{}{}
+    }
 
-	start := ""
-	for from := range byFrom {
-		if _, isDestination := destinations[from]; !isDestination {
-			start = from
-			break
-		}
-	}
+    start := ""
+    for from := range byFrom {
+        if _, isDestination := destinations[from]; !isDestination {
+            start = from
+            break
+        }
+    }
 
-	result := make([]Ticket, 0, len(tickets))
-	current := start
-	for len(result) < len(tickets) {
-		ticket := byFrom[current]
-		result = append(result, ticket)
-		current = ticket.To
-	}
+    result := make([]Ticket, 0, len(tickets))
+    current := start
+    for len(result) < len(tickets) {
+        ticket := byFrom[current]
+        result = append(result, ticket)
+        current = ticket.To
+    }
 
-	return result
+    return result
 }
 ```
 
@@ -1404,18 +1411,18 @@ result = {
 
 ```go
 func FilterSellersByCity(sellers map[int]string, cities []string) map[int]string {
-	wanted := make(map[string]struct{}, len(cities))
-	for _, city := range cities {
-		wanted[city] = struct{}{}
-	}
+    wanted := make(map[string]struct{}, len(cities))
+    for _, city := range cities {
+        wanted[city] = struct{}{}
+    }
 
-	result := make(map[int]string)
-	for sellerID, city := range sellers {
-		if _, ok := wanted[city]; ok {
-			result[sellerID] = city
-		}
-	}
-	return result
+    result := make(map[int]string)
+    for sellerID, city := range sellers {
+        if _, ok := wanted[city]; ok {
+            result[sellerID] = city
+        }
+    }
+    return result
 }
 ```
 
@@ -1463,24 +1470,24 @@ Unicode-символы в одинаковых количествах, но, в�
 
 ```go
 func AreAnagrams(first, second string) bool {
-	counts := make(map[rune]int)
-	for _, symbol := range first {
-		counts[symbol]++
-	}
+    counts := make(map[rune]int)
+    for _, symbol := range first {
+        counts[symbol]++
+    }
 
-	for _, symbol := range second {
-		count, ok := counts[symbol]
-		if !ok {
-			return false
-		}
-		if count == 1 {
-			delete(counts, symbol)
-		} else {
-			counts[symbol] = count - 1
-		}
-	}
+    for _, symbol := range second {
+        count, ok := counts[symbol]
+        if !ok {
+            return false
+        }
+        if count == 1 {
+            delete(counts, symbol)
+        } else {
+            counts[symbol] = count - 1
+        }
+    }
 
-	return len(counts) == 0
+    return len(counts) == 0
 }
 ```
 
@@ -1528,21 +1535,23 @@ result = [0, 0, 0, 0]
 
 ```go
 func CountParticipantsBehind(sales []int) []int {
-	sorted := append([]int(nil), sales...)
-	sort.Ints(sorted)
+    sorted := make([]int, len(sales)) // O(n) дополнительной памяти.
+    copy(sorted, sales)               // O(n) времени.
+    sort.Ints(sorted)                 // O(n log n) времени.
 
-	lessCount := make(map[int]int, len(sorted))
-	for index, value := range sorted {
-		if index == 0 || value != sorted[index-1] {
-			lessCount[value] = index
-		}
-	}
+    // Индекс первого вхождения равен числу строго меньших результатов.
+    firstIndex := make(map[int]int, len(sorted)) // До O(n) памяти.
+    for index, value := range sorted {           // O(n) времени.
+        if _, exists := firstIndex[value]; !exists {
+            firstIndex[value] = index
+        }
+    }
 
-	result := make([]int, len(sales))
-	for index, value := range sales {
-		result[index] = lessCount[value]
-	}
-	return result
+    result := make([]int, len(sales)) // O(n) памяти под результат.
+    for index, value := range sales { // O(n) времени.
+        result[index] = firstIndex[value]
+    }
+    return result
 }
 ```
 
@@ -1600,33 +1609,33 @@ result = {
 
 ```go
 type Category struct {
-	Name     string
-	Children []*Category
+    Name     string
+    Children []*Category
 }
 
 func CountSubcategories(roots []*Category) map[string]int {
-	result := make(map[string]int, len(roots))
+    result := make(map[string]int, len(roots))
 
-	var subtreeSize func(*Category) int
-	subtreeSize = func(node *Category) int {
-		if node == nil {
-			return 0
-		}
+    var subtreeSize func(*Category) int
+    subtreeSize = func(node *Category) int {
+        if node == nil {
+            return 0
+        }
 
-		size := 1
-		for _, child := range node.Children {
-			size += subtreeSize(child)
-		}
-		return size
-	}
+        size := 1
+        for _, child := range node.Children {
+            size += subtreeSize(child)
+        }
+        return size
+    }
 
-	for _, root := range roots {
-		if root == nil {
-			continue
-		}
-		result[root.Name] = subtreeSize(root) - 1
-	}
-	return result
+    for _, root := range roots {
+        if root == nil {
+            continue
+        }
+        result[root.Name] = subtreeSize(root) - 1
+    }
+    return result
 }
 ```
 
@@ -1947,49 +1956,48 @@ func CanBuildString(source, target string) bool {
 
 ### Оптимальный подход: скользящее окно
 
-Храним последнюю позицию каждого символа текущего окна. Когда появляется
-третий символ, удаляем символ с самой ранней последней позицией и переносим
-левую границу сразу за неё.
+Храним количество вхождений каждого символа в текущем окне. Расширяем окно
+вправо на один символ. Если разных символов стало больше двух, убираем символы
+слева, пока условие снова не выполнится. После этого обновляем максимальную
+длину.
 
 ```go
 func LongestSubstringAtMostTwoDistinct(value string) int {
-    lastPosition := make(map[rune]int, 3)
-    left, best, position := 0, 0, 0
+    symbols := []rune(value) // O(n) памяти: индексы обозначают руны, а не байты.
+    counts := make(map[rune]int)
+    left := 0
+    bestLength := 0
 
-    for _, symbol := range value {
-        lastPosition[symbol] = position
+    for right, symbol := range symbols {
+        counts[symbol]++
 
-        if len(lastPosition) > 2 {
-            oldestSymbol := symbol
-            oldestPosition := position
-
-            for candidate, candidatePosition := range lastPosition {
-                if candidatePosition < oldestPosition {
-                    oldestSymbol = candidate
-                    oldestPosition = candidatePosition
-                }
+        for len(counts) > 2 {
+            leftSymbol := symbols[left]
+            counts[leftSymbol]--
+            if counts[leftSymbol] == 0 {
+                // Символ полностью вышел из окна — больше не считаем его.
+                delete(counts, leftSymbol)
             }
-
-            delete(lastPosition, oldestSymbol)
-            left = oldestPosition + 1
+            left++
         }
 
-        currentLength := position - left + 1
-        if currentLength > best {
-            best = currentLength
+        currentLength := right - left + 1
+        if currentLength > bestLength {
+            bestLength = currentLength
         }
-        position++
     }
 
-    return best
+    return bestLength
 }
 ```
 
-Map содержит не более трёх записей: два символа старого окна и один новый.
-Поиск самой ранней позиции поэтому занимает константное время.
+Несмотря на вложенный цикл, каждый символ добавляется в окно один раз и
+удаляется не более одного раза. Обе границы двигаются только вправо, поэтому
+суммарно делают не более `2n` шагов.
 
 - ожидаемое время: `O(n)` по числу Unicode-символов;
-- дополнительная память: `O(1)`.
+- дополнительная память: `O(n)` для `[]rune`; map содержит не более трёх
+  записей и занимает `O(1)` памяти.
 
 Для пустой строки функция возвращает `0`.
 
@@ -2072,6 +2080,497 @@ func IsValidBrackets(value string) bool {
 Линейное время оптимально: в худшем случае нужно проверить каждый символ.
 Использование `byte` корректно, потому что по условию строка состоит только из
 однобайтовых ASCII-скобок.
+
+</details>
+
+---
+
+## 26. IDE-поиск по подпоследовательности
+
+Представьте, что разработчик примерно помнит название файла и ищет его в IDE.
+Нужно определить, является ли строка запроса подпоследовательностью имени
+файла.
+
+Символы запроса должны встречаться в том же порядке, но необязательно подряд:
+
+```text
+IDESearch("crdle",   "crocodile.txt") -> true
+IDESearch("le",      "crocodile.txt") -> true
+IDESearch("el",      "crocodile.txt") -> false
+IDESearch("coco",    "crocodile.txt") -> true
+IDESearch("crdleee", "crocodile.txt") -> false
+IDESearch("crkdl",   "crocodile.txt") -> false
+
+IDESearch("кдл", "крокодил.txt") -> true
+IDESearch("лик", "крокодил.txt") -> false
+```
+
+Пустая строка запроса считается подпоследовательностью любого имени. Поиск
+регистрозависимый.
+
+<details>
+<summary>Решение</summary>
+
+### Неоптимальный подход: искать через LCS
+
+Можно найти длину наибольшей общей подпоследовательности запроса и имени файла,
+а затем сравнить её с длиной запроса. Это решает более общую задачу, чем нужно.
+
+- время: `O(q * n)`;
+- дополнительная память: до `O(q * n)`;
+
+где `q` и `n` — количество Unicode-символов в запросе и имени файла.
+
+### Оптимальный подход: два указателя
+
+Идём по имени файла слева направо. Указатель запроса двигаем только тогда,
+когда нашли ожидаемый символ. Если дошли до конца запроса, все его символы
+встретились в правильном порядке.
+
+```go
+func IDESearch(query, fileName string) bool {
+    // Индексировать UTF-8 строку напрямую нельзя: русская буква занимает
+    // несколько байт. []rune представляет строку Unicode-символами.
+    queryRunes := []rune(query)
+
+    // Пустой запрос является подпоследовательностью любой строки.
+    if len(queryRunes) == 0 {
+        return true
+    }
+
+    // Индекс символа запроса, который нужно найти следующим.
+    queryIndex := 0
+
+    // range перебирает имя файла по рунам, а не по отдельным байтам UTF-8.
+    for _, fileRune := range fileName {
+        if fileRune != queryRunes[queryIndex] {
+            continue
+        }
+
+        queryIndex++
+        if queryIndex == len(queryRunes) {
+            return true
+        }
+    }
+
+    return false
+}
+```
+
+- время: `O(q + n)` по числу Unicode-символов;
+- дополнительная память: `O(q)` для `[]rune(query)`.
+
+Для контракта только с ASCII можно использовать индексы байтов и получить
+`O(1)` дополнительной памяти. В именах файлов возможны кириллица и другие
+Unicode-символы, поэтому вариант с рунами безопаснее и понятнее.
+
+</details>
+
+---
+
+## 27. Проверка строк на изоморфность
+
+Даны две строки из букв латинского алфавита. Нужно определить, являются ли
+они изоморфными.
+
+Строки изоморфны, если каждый символ первой строки можно заменить одним
+символом второй строки так, чтобы получить вторую строку. Замена должна
+соблюдать два правила:
+
+- все вхождения одного символа заменяются одинаково;
+- разные символы первой строки не могут заменяться одним символом второй.
+
+Символ может соответствовать самому себе. Сравнение регистрозависимое.
+
+```text
+AreIsomorphic("core",    "rock")     -> true
+AreIsomorphic("coffee",  "dollar")   -> false
+AreIsomorphic("egg",     "add")      -> true
+AreIsomorphic("foo",     "bar")      -> false
+AreIsomorphic("paper",   "title")    -> true
+AreIsomorphic("example", "aaaaaaaa") -> false
+```
+
+<details>
+<summary>Решение</summary>
+
+### Неоптимальный подход: сравнить все пары позиций
+
+Для каждой пары индексов `i` и `j` проверяем одинаковое отношение между
+символами обеих строк:
+
+```text
+first[i] == first[j] должно совпадать с second[i] == second[j]
+```
+
+Если в первой строке символы равны, а во второй различаются, замена
+непоследовательна. Если в первой строке символы различаются, а во второй равны,
+два разных символа заменяются одним.
+
+- время: `O(n²)`;
+- дополнительная память: `O(1)`.
+
+### Оптимальный подход: два отображения
+
+Во время одного прохода храним соответствия в обе стороны. Отображение
+`firstToSecond` проверяет, что символ первой строки всегда заменяется одинаково.
+Отображение `secondToFirst` не позволяет двум разным символам первой строки
+соответствовать одному символу второй.
+
+```go
+func AreIsomorphic(first, second string) bool {
+    if len(first) != len(second) {
+        return false
+    }
+
+    firstToSecond := make(map[byte]byte)
+    secondToFirst := make(map[byte]byte)
+
+    for i := 0; i < len(first); i++ {
+        firstChar := first[i]
+        secondChar := second[i]
+
+        if mapped, exists := firstToSecond[firstChar]; exists && mapped != secondChar {
+            return false
+        }
+        if mapped, exists := secondToFirst[secondChar]; exists && mapped != firstChar {
+            return false
+        }
+
+        firstToSecond[firstChar] = secondChar
+        secondToFirst[secondChar] = firstChar
+    }
+
+    return true
+}
+```
+
+- время: `O(n)`;
+- дополнительная память: `O(1)`, потому что размер латинского алфавита
+  ограничен.
+
+Для произвольного алфавита память составит `O(k)`, где `k` — число различных
+символов. По условию допустимы только латинские буквы, поэтому обход по байтам
+корректен. Для Unicode понадобятся отображения `map[rune]rune`.
+
+</details>
+
+---
+
+## 28. Произведение массива кроме текущего элемента
+
+Дан массив целых чисел `nums`. Нужно вернуть массив той же длины, где
+`result[i]` — произведение всех элементов `nums`, кроме элемента с индексом `i`.
+
+```text
+nums   = [1, 2, 3, 4]
+result = [24, 12, 8, 6]
+
+result[0] = 2 * 3 * 4 = 24
+result[1] = 1 * 3 * 4 = 12
+result[2] = 1 * 2 * 4 = 8
+result[3] = 1 * 2 * 3 = 6
+```
+
+Нужно решить задачу за `O(n)` времени без деления. Входной массив менять
+нельзя; нули и отрицательные числа допустимы:
+
+```text
+[1, 0, 3, 4] -> [0, 12, 0, 0]
+[0, 2, 0]    -> [0, 0, 0]
+[-1, 2, -3]  -> [-6, 3, -2]
+```
+
+Для этого варианта задачи считаем, что все промежуточные произведения и
+ответы помещаются в `int`. Для пустого массива возвращаем пустой результат,
+для одного элемента — `[1]`: произведение пустого набора чисел равно единице.
+
+<details>
+<summary>Решение</summary>
+
+### Неоптимальный подход: отдельный обход для каждого элемента
+
+Для каждого индекса `i` перемножаем все элементы, пропуская индекс `i`.
+
+- время: `O(n²)`, где `n` — длина массива;
+- память результата: `O(n)`;
+- дополнительная память сверх результата: `O(1)`.
+
+### Оптимальный подход: произведения слева и справа
+
+Ответ для каждой позиции — произведение элементов слева от неё, умноженное
+на произведение элементов справа. Сам текущий элемент в эти произведения
+не входит.
+
+За первый проход записываем в `result` произведения слева. За второй проход
+идём справа налево и домножаем каждую позицию на произведение справа.
+
+```go
+func ProductExceptSelf(nums []int) []int {
+    result := make([]int, len(nums)) // O(n) памяти под результат.
+
+    leftProduct := 1
+    for index := 0; index < len(nums); index++ { // O(n) времени.
+        result[index] = leftProduct
+        // Текущий элемент понадобится для следующей позиции.
+        leftProduct *= nums[index]
+    }
+
+    rightProduct := 1
+    for index := len(nums) - 1; index >= 0; index-- { // O(n) времени.
+        result[index] *= rightProduct
+        rightProduct *= nums[index]
+    }
+
+    return result
+}
+```
+
+Для `[1, 2, 3, 4]` вычисления выглядят так:
+
+```text
+Элементы:            [1,  2, 3, 4]
+Произведения слева:  [1,  1, 2, 6]  // result после первого прохода
+Произведения справа: [24, 12, 4, 1]  // значения rightProduct для этих позиций
+Результат:           [24, 12, 8, 6]  // перемножаем значения в каждой позиции
+```
+
+Начинаем с `1`, потому что слева от первого и справа от последнего элемента
+ничего нет. Единица при умножении не меняет ответ. Отдельный массив
+произведений справа не создаём — достаточно переменной `rightProduct`.
+
+- время: `O(n)` — два прохода по массиву;
+- память результата: `O(n)`;
+- дополнительная память сверх результата: `O(1)`.
+
+Нули обрабатываются теми же умножениями, отдельные условия для них не нужны.
+Линейное время оптимально: нужно заполнить все `n` позиций результата.
+
+</details>
+
+---
+
+## 29. Уникальные теги объявлений
+
+Продавцы добавляют к объявлениям теги. Нужно вернуть все уникальные теги в
+порядке их первого появления.
+
+```text
+ads = [
+  {title: "Квартира", tags: ["срочно", "ремонт"]},
+  {title: "Машина",   tags: ["срочно", "новая"]},
+  {title: "Телефон",  tags: ["б/у", "ремонт"]}
+]
+
+result = ["срочно", "ремонт", "новая", "б/у"]
+```
+
+```go
+type Ad struct {
+    Title string
+    Tags  []string
+}
+```
+
+<details>
+<summary>Решение</summary>
+
+### Неоптимальный подход: искать тег в результате
+
+Для каждого тега линейно проверяем, добавляли ли его раньше. В худшем случае
+результат приходится просматривать почти целиком для каждого входного тега.
+
+- время: `O(t * u)`, где `t` — общее число тегов, `u` — число уникальных;
+- память результата: `O(u)`;
+- дополнительная память сверх результата: `O(1)`.
+
+### Оптимальный подход: множество просмотренных тегов
+
+Map позволяет за ожидаемое `O(1)` проверить, встречался ли тег. Новый тег сразу
+добавляем и в множество, и в результат. Второй проход по map не нужен: порядок
+обхода map в Go не определён и не сохранил бы порядок первого появления.
+
+```go
+func UniqueTags(ads []Ad) []string {
+    seen := make(map[string]struct{})
+    var result []string
+
+    for _, ad := range ads {
+        for _, tag := range ad.Tags {
+            if _, exists := seen[tag]; exists {
+                continue
+            }
+
+            seen[tag] = struct{}{}
+            result = append(result, tag)
+        }
+    }
+
+    return result
+}
+```
+
+- ожидаемое время: `O(t)`;
+- память результата: `O(u)`;
+- дополнительная память: `O(u)` для множества `seen`.
+
+</details>
+
+---
+
+## 30. Топ-3 продавцов по числу лайков
+
+Даны два массива одинаковой длины: имена продавцов и количество полученных
+ими лайков. Нужно вернуть имена трёх продавцов с наибольшим числом лайков.
+
+Если лайков поровну, выше располагается продавец, который раньше встречается
+во входном массиве. Если продавцов меньше трёх, возвращаем их всех.
+
+```text
+names = ["Анна", "Борис", "Виктор", "Галина", "Дмитрий"]
+likes = [10, 30, 20, 30, 5]
+
+result = ["Борис", "Галина", "Виктор"]
+```
+
+<details>
+<summary>Решение</summary>
+
+### Простой подход: стабильная сортировка
+
+Объединяем имя и число лайков в одну структуру, а затем стабильно сортируем по
+убыванию лайков. Стабильность сохраняет исходный порядок продавцов с равным
+числом лайков.
+
+- время: `O(n log n)`;
+- дополнительная память: `O(n)` для копии продавцов.
+
+### Оптимальный подход для фиксированного топ-3
+
+Храним отсортированный список не более чем из трёх лучших продавцов. Для
+каждого нового продавца находим место среди текущих лидеров, вставляем его и
+удаляем четвёртого. Размер списка постоянный, поэтому вставка занимает `O(1)`.
+
+```go
+type sellerScore struct {
+    name  string
+    likes int
+}
+
+func TopSellers(names []string, likes []int) []string {
+    const topSize = 3
+
+    top := make([]sellerScore, 0, topSize+1)
+
+    for index, name := range names {
+        candidate := sellerScore{
+            name:  name,
+            likes: likes[index],
+        }
+
+        insertAt := len(top)
+        for insertAt > 0 && candidate.likes > top[insertAt-1].likes {
+            insertAt--
+        }
+
+        top = append(top, candidate)
+        copy(top[insertAt+1:], top[insertAt:])
+        top[insertAt] = candidate
+
+        if len(top) > topSize {
+            top = top[:topSize]
+        }
+    }
+
+    result := make([]string, len(top))
+    for index, seller := range top {
+        result[index] = seller.name
+    }
+
+    return result
+}
+```
+
+При равенстве лайков кандидат не двигается перед уже просмотренным продавцом,
+потому что в условии вставки используется `>`, а не `>=`. Так сохраняется
+порядок исходного массива.
+
+- время: `O(n)`, поскольку размер `top` не превышает четырёх элементов во
+  время вставки;
+- память результата: `O(1)` для фиксированного размера три;
+- дополнительная память: `O(1)`.
+
+Если размер топа задаётся переменной `k`, тот же подход работает за `O(n * k)`.
+Для большого `k` используют min-heap размера `k` и получают `O(n log k)`.
+
+</details>
+
+---
+
+## 31. Проверка двух бинарных деревьев на равенство
+
+Даны корни двух бинарных деревьев. Нужно проверить, совпадают ли их структура
+и значения соответствующих узлов.
+
+```text
+first:          second:
+    1               1
+   / \             / \
+  2   3           2   3
+
+result = true
+```
+
+Если в одной и той же позиции одного дерева находится узел, а другого — `nil`,
+деревья различаются. Два пустых дерева считаются равными.
+
+```go
+type TreeNode struct {
+    ID    int
+    Left  *TreeNode
+    Right *TreeNode
+}
+```
+
+<details>
+<summary>Решение</summary>
+
+### Неоптимальный подход: сериализовать оба дерева
+
+Можно преобразовать деревья в последовательности, обязательно записывая
+маркеры `nil`, а затем сравнить последовательности. Маркеры нужны, чтобы
+различать деревья с одинаковыми значениями, но разной структурой.
+
+- время: `O(n + m)`;
+- дополнительная память: `O(n + m)` для двух последовательностей.
+
+### Оптимальный подход: одновременный обход
+
+Сравниваем соответствующие узлы сразу во время обхода. Если оба узла равны
+`nil`, эта часть деревьев совпадает. Если только один равен `nil` или
+различаются идентификаторы, деревья различаются.
+
+```go
+func EqualTrees(first, second *TreeNode) bool {
+    if first == nil || second == nil {
+        return first == second
+    }
+
+    if first.ID != second.ID {
+        return false
+    }
+
+    return EqualTrees(first.Left, second.Left) &&
+        EqualTrees(first.Right, second.Right)
+}
+```
+
+- время: `O(n)` в худшем случае, когда оба дерева содержат `n` узлов и равны;
+- дополнительная память: `O(h)` для стека рекурсии, где `h` — высота дерева.
+
+Обход завершится раньше, если найдётся первое различие. В вырожденном дереве
+глубина рекурсии достигает `O(n)`; итеративный обход заменит стек вызовов явным
+стеком, но не улучшит асимптотическую оценку памяти.
 
 </details>
 
