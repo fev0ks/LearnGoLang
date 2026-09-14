@@ -65,6 +65,7 @@ sequenceDiagram
 - [05. Приложение и доступ к данным](./05-backend-application-and-data-access.md) — модель горутин в `net/http`, проброс контекста, пул соединений, параллельные вызовы, порядок middleware
 - [06. Ответ, кэширование и отрисовка](./06-response-return-caching-and-browser-rendering.md) — директивы `Cache-Control`, ETag и условные запросы, `Vary`, инвалидация, критический путь отрисовки и Core Web Vitals
 - [07. Сквозная временная шкала и точки отказа](./07-end-to-end-timeline-and-where-it-breaks.md) — сводная раскладка по фазам с числами, диагностика снаружи внутрь, типовые точки отказа
+- [08. CDN deep dive](./08-cdn-deep-dive.md) — pull и предварительное размещение, edge/regional/shield/origin, cache key, инвалидация, stampede, signed URL/cookie, multi-region и расчёт offload
 
 ---
 
@@ -74,6 +75,7 @@ sequenceDiagram
 2. Файл 03 (`TCP, TLS`) — ключевой: TLS 1.2 vs 1.3 RTT cost, HTTP/1.1 vs HTTP/2 vs HTTP/3; глубокий разбор версий HTTP — [02-http/01-http-versions.md](../protocols/02-http/01-http-versions.md).
 3. Файл 05 (`Backend`) — Go-специфика: goroutine model, middleware chain, context propagation, pool exhaustion.
 4. Файл 07 (`End-to-End`) — практика: `curl -w` для измерения фаз, `dig +trace` для DNS, интерпретация Chrome DevTools Timing.
+5. Файл 08 (`CDN deep dive`) — отдельный разбор иерархии кэшей, защиты origin, доступа к приватному контенту и расчёта request/byte hit ratio.
 
 Что важно уметь объяснить после чтения:
 - почему один запрос не равен "просто сходили по HTTP";
@@ -84,3 +86,6 @@ sequenceDiagram
 - `curl -w time_starttransfer` = TTFB = всё что делает сервер до первого байта;
 - `Cache-Control: s-maxage` управляет CDN, `max-age` — browser и CDN;
 - `stale-while-revalidate` = отдай stale, обнови в фоне.
+- request hit ratio и byte hit ratio отвечают на разные вопросы: сколько запросов и сколько байтов не дошло до origin;
+- versioned URL надёжнее распределённого purge для неизменяемой статики;
+- request coalescing и origin shield ограничивают волну промахов по одному горячему ключу.
