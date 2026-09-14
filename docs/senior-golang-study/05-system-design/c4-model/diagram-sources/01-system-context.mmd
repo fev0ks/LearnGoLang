@@ -1,0 +1,19 @@
+flowchart LR
+    U(["Покупатель<br/>[Person]"])
+    M["Marketplace App<br/>[Software System]<br/>карточки товаров и подписки"]
+    S["Low Price Alerts<br/>[Software System]<br/>находит низкую цену и создаёт оповещение"]
+    P["Price Service<br/>[External System]<br/>актуальная цена и наличие"]
+    N["Push Provider<br/>[External System]<br/>доставка на устройство"]
+
+    U -->|"управляет подписками"| M
+    M -->|"создаёт подписку; читает оповещения"| S
+    P -->|"публикует изменения цен"| S
+    S -->|"отправляет push"| N
+    N -.->|"показывает оповещение"| U
+
+    classDef person fill:#fef3c7,stroke:#b45309,color:#78350f,stroke-width:2px
+    classDef focus fill:#dbeafe,stroke:#1d4ed8,color:#1e3a8a,stroke-width:3px
+    classDef system fill:#f3f4f6,stroke:#4b5563,color:#111827,stroke-width:2px
+    class U person
+    class S focus
+    class M,P,N system

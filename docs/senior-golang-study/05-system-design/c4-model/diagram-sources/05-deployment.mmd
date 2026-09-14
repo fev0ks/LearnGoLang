@@ -1,0 +1,38 @@
+flowchart LR
+    CLIENT["Web / Mobile<br/>[Device]"]
+    PUSH["Push Provider<br/>[External]"]
+
+    subgraph REGION["Production region"]
+        EDGE["Edge / Load Balancer<br/>[Infrastructure Node]"]
+
+        subgraph AZA["Availability Zone A"]
+            COMPA["API pods + worker pods<br/>[Container Instances]"]
+            PGL[("PostgreSQL Leader<br/>[Database Instance]")]
+        end
+
+        subgraph AZB["Availability Zone B"]
+            COMPB["API pods + worker pods<br/>[Container Instances]"]
+            PGR[("Synchronous Replica<br/>[Database Instance]")]
+        end
+
+        BROKER["Broker cluster<br/>[Infrastructure Nodes]<br/>replicas across zones"]
+
+        EDGE --> COMPA
+        EDGE --> COMPB
+        COMPA --> PGL
+        COMPB --> PGL
+        COMPA <--> BROKER
+        COMPB <--> BROKER
+        PGL -->|"synchronous replication"| PGR
+    end
+
+    CLIENT --> EDGE
+    COMPA --> PUSH
+    COMPB --> PUSH
+
+    classDef external fill:#f3f4f6,stroke:#4b5563,color:#111827,stroke-width:2px
+    classDef compute fill:#dbeafe,stroke:#1d4ed8,color:#1e3a8a,stroke-width:2px
+    classDef data fill:#ede9fe,stroke:#6d28d9,color:#4c1d95,stroke-width:2px
+    class CLIENT,PUSH external
+    class EDGE,COMPA,COMPB compute
+    class PGL,PGR,BROKER data

@@ -1,0 +1,24 @@
+flowchart LR
+    BROKER["Event Broker<br/>[Container]"]
+    DB[("PostgreSQL<br/>[Container]")]
+
+    subgraph MATCHER["Matcher Workers [Container: Go]"]
+        CONSUMER["Price Event Consumer<br/>[Component]<br/>читает price.changed"]
+        GUARD["Version Guard<br/>[Component]<br/>отбрасывает старые версии"]
+        PLANNER["Fan-out Planner<br/>[Component]<br/>создаёт диапазоны работы"]
+        READER["Subscription Reader<br/>[Component]<br/>страницы по индексу"]
+        CREATOR["Alert Creator<br/>[Component]<br/>одно срабатывание + outbox"]
+
+        CONSUMER --> GUARD --> PLANNER --> READER --> CREATOR
+    end
+
+    BROKER -->|"price.changed"| CONSUMER
+    GUARD -->|"обновить current_prices"| DB
+    PLANNER -->|"fanout_jobs"| DB
+    READER -->|"SELECT page"| DB
+    CREATOR -->|"transaction: alert + state + outbox"| DB
+
+    classDef support fill:#f3f4f6,stroke:#4b5563,color:#111827,stroke-width:2px
+    classDef comp fill:#dcfce7,stroke:#15803d,color:#14532d,stroke-width:2px
+    class BROKER,DB support
+    class CONSUMER,GUARD,PLANNER,READER,CREATOR comp

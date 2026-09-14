@@ -1,0 +1,22 @@
+flowchart LR
+    PUSH["Push Provider<br/>[External System]"]
+
+    subgraph SYS["Low Price Alerts [Software System] — delivery"]
+        DB[("PostgreSQL<br/>[Container: Database]<br/>alerts, deliveries, outbox")]
+        RELAY["Outbox Relay<br/>[Container: Go]<br/>публикует события после commit"]
+        BROKER["Event Broker<br/>[Container: Kafka]<br/>буфер заданий доставки"]
+        DELIVERY["Delivery Workers<br/>[Container: Go]<br/>квоты, TTL и retry"]
+
+        DB -->|"неопубликованный outbox"| RELAY
+        RELAY -->|"alert.created"| BROKER
+        BROKER -->|"задание доставки"| DELIVERY
+    end
+
+    DELIVERY -->|"HTTPS push с TTL"| PUSH
+
+    classDef external fill:#f3f4f6,stroke:#4b5563,color:#111827,stroke-width:2px
+    classDef worker fill:#dcfce7,stroke:#15803d,color:#14532d,stroke-width:2px
+    classDef data fill:#ede9fe,stroke:#6d28d9,color:#4c1d95,stroke-width:2px
+    class PUSH external
+    class RELAY,DELIVERY worker
+    class DB,BROKER data

@@ -1,0 +1,26 @@
+flowchart LR
+    APP["Marketplace App<br/>[External System]"]
+    PRICE["Price Service<br/>[External System]"]
+
+    subgraph SYS["Low Price Alerts [Software System] — subscriptions and matching"]
+        API["Subscription API<br/>[Container: Go]<br/>управляет подписками"]
+        DB[("PostgreSQL<br/>[Container: Database]<br/>subscriptions, prices,<br/>jobs, alerts, outbox")]
+        BROKER["Event Broker<br/>[Container: Kafka]<br/>буфер изменений цен"]
+        MATCH["Matcher Workers<br/>[Container: Go]<br/>находит подходящие подписки"]
+
+        API -->|"читает и пишет SQL"| DB
+        BROKER -->|"price.changed"| MATCH
+        MATCH -->|"цена, alert и outbox<br/>одним commit"| DB
+    end
+
+    APP -->|"HTTPS/JSON"| API
+    PRICE -->|"публикует изменения цен"| BROKER
+
+    classDef external fill:#f3f4f6,stroke:#4b5563,color:#111827,stroke-width:2px
+    classDef app fill:#dbeafe,stroke:#1d4ed8,color:#1e3a8a,stroke-width:2px
+    classDef worker fill:#dcfce7,stroke:#15803d,color:#14532d,stroke-width:2px
+    classDef data fill:#ede9fe,stroke:#6d28d9,color:#4c1d95,stroke-width:2px
+    class APP,PRICE external
+    class API app
+    class MATCH worker
+    class DB,BROKER data

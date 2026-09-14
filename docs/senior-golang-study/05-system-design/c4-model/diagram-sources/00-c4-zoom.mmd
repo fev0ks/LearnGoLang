@@ -1,0 +1,18 @@
+flowchart TB
+    C1["1. System Context<br/><small>люди и внешние системы</small>"]
+    C2["2. Container<br/><small>приложения и хранилища внутри системы</small>"]
+    C3["3. Component<br/><small>части одного приложения</small>"]
+    C4["4. Code<br/><small>классы, пакеты, функции</small>"]
+
+    C1 -->|"приближаем систему"| C2
+    C2 -->|"выбираем один container"| C3
+    C3 -->|"приближаем компонент"| C4
+
+    classDef context fill:#e0f2fe,stroke:#0369a1,color:#0c4a6e,stroke-width:2px
+    classDef container fill:#ede9fe,stroke:#6d28d9,color:#4c1d95,stroke-width:2px
+    classDef component fill:#dcfce7,stroke:#15803d,color:#14532d,stroke-width:2px
+    classDef code fill:#f3f4f6,stroke:#4b5563,color:#111827,stroke-width:2px
+    class C1 context
+    class C2 container
+    class C3 component
+    class C4 code

@@ -1,0 +1,19 @@
+sequenceDiagram
+    autonumber
+    participant Price as Price Service
+    participant Matcher as Matcher Workers
+    participant DB as PostgreSQL
+    participant Delivery as Delivery Workers
+    participant Push as Push Provider
+
+    Price->>Matcher: price.changed через broker
+    Matcher->>DB: принять новую version и создать fanout job
+    loop порциями по 500 подписок
+        Matcher->>DB: выбрать подходящую страницу
+        Matcher->>DB: alert + TRIGGERED + outbox одним commit
+    end
+    DB-->>Delivery: alert.created через relay и queue
+    Delivery->>DB: проверить revision, consent и deadline
+    Delivery->>Push: отправить push с остаточным TTL
+    Push-->>Delivery: accepted / retryable error / timeout
+    Delivery->>DB: сохранить известный или UNKNOWN исход
