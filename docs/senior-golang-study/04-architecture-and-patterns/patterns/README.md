@@ -16,6 +16,8 @@ Go-specific паттерны на уровне кода и архитектур�
 - [08. Graceful Shutdown](./08-graceful-shutdown.md) — перехват SIGTERM, `signal.NotifyContext`, HTTP + gRPC + worker shutdown, оркестрация компонентов, таймауты, частые ошибки
 - [09. Saga и Outbox: distributed transactions](./09-saga-and-outbox.md) — dual write проблема, transactional outbox с Go-реализацией, inbox dedup, CDC (Debezium), choreography vs orchestration saga, compensation logic, Temporal.io
 - [10. DRY, KISS, YAGNI](./10-dry-kiss-yagni.md) — три принципа дизайна с senior-акцентом: когда каждый из них вредит, конфликты между собой и с SOLID/OCP, rule of three, AHA, необратимые решения
+- [11. Распределённые транзакции: 2PC, 3PC, TCC и Saga](./11-distributed-transactions-2pc-3pc-tcc.md) — подготовка и журнал 2PC, блокировка и восстановление, допущения 3PC, бизнес-резервы TCC, отличие от компенсаций Saga
+- [12. DB-backed jobs](./12-db-backed-jobs.md) — production-схема draining workers без `time.Ticker`: атомарный claim, lease token, retry, heartbeat, bounded concurrency и Go-код
 
 ---
 
@@ -31,6 +33,8 @@ Go-specific паттерны на уровне кода и архитектур�
 8. `08` — Graceful shutdown: как корректно остановить сервис под K8s, не теряя запросы и задачи
 9. `09` — Saga и Outbox: distributed transactions через надёжную доставку событий и компенсирующие действия
 10. `10` — DRY/KISS/YAGNI: не лозунги, а где принципы вредят и как разрешать их конфликты с SOLID
+11. `11` — 2PC/3PC/TCC: строгий атомарный коммит, бизнес-резервы и критерии выбора относительно Saga
+12. `12` — DB-backed jobs: как безопасно масштабировать draining workers вместе с числом pod
 
 ---
 
@@ -57,6 +61,10 @@ Go-specific паттерны на уровне кода и архитектур�
 - разница choreography vs orchestration saga, когда что
 - зачем нужен inbox pattern на стороне consumer'а
 - как комбинировать saga и outbox в production-системах
+- почему участник 2PC блокируется после голоса `YES` и как восстанавливается по журналу
+- при каких допущениях 3PC считается неблокирующим и почему они редко выполняются
+- чем TCC-резерв отличается от подготовленной транзакции 2PC и компенсации Saga
+- как несколько pod атомарно делят DB-backed jobs и почему lease не заменяет idempotency
 
 ---
 
