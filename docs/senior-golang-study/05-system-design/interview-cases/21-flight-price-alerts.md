@@ -528,6 +528,7 @@ Scheduler выбирает ячейки с next_poll_at <= now() в предел
 
 ## Связанные материалы
 
+- [33. Оповещения о низких ценах](./33-low-price-alerts.md) — вариант с собственным потоком цен: индекс подписок, массовый fan-out и доставка без устаревших push
 - [02. Notification Service](./02-notification-service.md) — доставка уведомлений, каналы, ретраи, дедупликация
 - [13. Avito / Classifieds](./13-avito-classifieds.md) — поиск по своим данным, для сравнения с поиском по чужим
 - [15. TMS / Transport Management](./15-tms-transport-management.md) — нормализация разнородных внешних источников

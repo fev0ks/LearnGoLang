@@ -273,14 +273,15 @@ Relay публикует события с partition key `conversation_id`. Те
 дают запас на рост без перепартиционирования
 ```
 
-Пропускная способность здесь не ограничитель: пары экземпляров хватает уже
-сегодня, а шесть держат ради отказоустойчивости и запаса по consumer lag.
+Для целевого пика расчёт даёт минимум четыре активных consumer'а. В примере
+разворачиваем шесть экземпляров: четыре закрывают расчётный поток, два дают запас
+на отказ и рост consumer lag. Это sizing-допущение нужно подтвердить benchmark.
 
 Партиционирование событий и размещение сокетов совместить нельзя: события
 разложены по `conversation_id` ради порядка, а сокеты лежат там, куда клиент
 случайно подключился, и два участника чата могут сидеть на разных Gateway.
 Поэтому каждый экземпляр Delivery обязан доставать до любого Gateway, что даёт
-`12 Delivery × 40 Gateway = 480` gRPC-соединений — величина незаметная. Разбор
+`6 Delivery × 40 Gateway = 240` gRPC-соединений — небольшая величина. Разбор
 самого механизма — в [WebSocket](../../08-networking-and-api/protocols/04-realtime/01-websocket.md),
 раздел про таблицу маршрутизации.
 
@@ -337,75 +338,47 @@ Listing удалён:
 
 ## Фаза 3: высокоуровневый дизайн
 
-### Основной request path
+### Приём сообщения и durable commit
 
 ```mermaid
 flowchart LR
-    subgraph Clients["Клиенты"]
-        Mobile["iOS / Android"]
-        Web["Web / Desktop"]
-    end
-
-    Edge["Cloudflare / Edge<br/>WAF + DDoS protection"]
-    Gateway["Load Balancer<br/>API Gateway"]
-
-    subgraph Messenger["Messenger"]
-        WS["WebSocket Gateway"]
-        ConversationAPI["Conversation API"]
-        MessageAPI["Message Command API"]
-        HistoryAPI["History Query API"]
-        Relay["Outbox Relay"]
-        ArchiveWorker["Archive Worker"]
-    end
-
-    Listing["Listing Service<br/>snapshot при создании чата"]
-    Routing[("Redis<br/>user → gateway connections")]
-    DB[("Conversation + Message Shards<br/>leader + replicas")]
-    ChatList[("Conversation List Store<br/>key = user_id")]
-    Archive[("Object Storage<br/>immutable history blocks")]
-    Broker[("Event Broker<br/>domain events")]
-
-    Mobile --> Edge
-    Web --> Edge
-    Edge --> Gateway
-    Gateway --> WS
-    Gateway --> ConversationAPI
-    Gateway --> HistoryAPI
-    WS --> MessageAPI
-    WS <--> Routing
-    ConversationAPI --> Listing
-    ConversationAPI -->|"conversation + outbox<br/>leader"| DB
-    ConversationAPI -->|"read projected list"| ChatList
-    MessageAPI -->|"message / receipts + outbox<br/>leader"| DB
-    HistoryAPI -->|"recent: leader / replicas"| DB
-    HistoryAPI --> Archive
-    Relay -->|"poll outbox / mark published"| DB
-    Relay -->|"publish domain event"| Broker
-    DB -->|"closed time partitions"| ArchiveWorker
-    ArchiveWorker -->|"immutable blocks"| Archive
-    ArchiveWorker -->|"archive index"| DB
+    Sender["Клиент-отправитель"] --> Entry["Edge + Load Balancer<br/>WebSocket Gateway"]
+    Entry --> Command["Message Command API"]
+    Command -->|"message + outbox<br/>durable commit"| DB[("Conversation + Message Shard<br/>leader + replicas")]
 ```
 
-### Потребители событий
+`SENT` возвращается отправителю сразу после durable commit; доставка до
+получателя не входит в latency ответа.
+
+### Асинхронная доставка
 
 ```mermaid
 flowchart LR
-    Broker[("Restricted Domain Topic<br/>message text + metadata")]
+    DB[("Message Shard<br/>outbox")] -.->|"outbox rows"| Relay["Ordered Outbox Relay"]
+    Relay --> Broker[("Restricted Domain Topic")]
+    Broker --> Delivery["Realtime Delivery"]
+    Delivery --> Online["Redis routing → Gateway<br/>Online-устройство"]
+    Delivery --> Offline["Notification Service → Push provider<br/>Offline-устройство"]
+```
 
-    Broker -->|"MessageCreated<br/>DeliveryAdvanced<br/>ReadAdvanced"| Delivery["Realtime Delivery / Status"]
-    Delivery --> Routing[("Redis connection routing")]
-    Delivery --> WS["WebSocket Gateway"]
+Блок online-доставки сворачивает
+три последовательных шага: lookup connections в Redis, адресный вызов нужного
+WebSocket Gateway и запись события в сокет получателя. Отправитель и получатель
+могут попасть на разные поды одного Gateway fleet.
 
-    Delivery -->|"MessageCreated:<br/>offline / no client ACK"| Push["Notification Service"]
-    Push --> Providers["APNs / FCM / Web Push"]
+### Чтение, проекции и архив
 
-    Broker -->|"ConversationCreated<br/>MessageCreated<br/>ReadAdvanced"| Projector["Chat List Projector"]
-    Projector --> ChatList[("Conversations by user<br/>last message + unread")]
+```mermaid
+flowchart LR
+    Client["Web / Mobile"] --> Query["Conversation API<br/>History Query API"]
+    Query -->|"seller + snapshot"| Listing["Listing Service"]
+    Query -->|"recent"| DB[("Conversation + Message Shards")]
+    Query -->|"old ranges"| Archive[("Object Storage<br/>immutable blocks")]
+    DB --> Archiver["Archive Worker"]
+    Archiver --> Archive
 
-    Broker --> Sanitizer["Analytics Metadata Projector<br/>удаляет text и push token"]
-    Sanitizer --> AnalyticsTopic[("Analytics Topic<br/>только метаданные")]
-    AnalyticsTopic --> Analytics["Analytics Consumer"]
-    Analytics --> DWH[("Аналитическое хранилище<br/>DWH / Data Lake, без текста")]
+    Broker[("Event Broker<br/>из схемы выше")] --> Projectors["Chat List Projector<br/>Metadata Projector"]
+    Projectors --> Projections[("Conversation List<br/>Analytics Topic / DWH")]
 ```
 
 ### Роль компонентов
@@ -420,7 +393,7 @@ flowchart LR
 | History Query API | Читает recent и archive history единым cursor API | Горячие и старые данные имеют разные latency и storage |
 | Conversation List Store | Отдаёт список чатов по `user_id`, last message и unread | Async projection избегает cross-shard scan по `conversation_id` |
 | DB shards | Хранят conversation, recent messages, idempotency, outbox и archive index | Routing по `conversation_id` оставляет порядок и транзакцию на одном шарде |
-| Outbox Relay | Публикует сохранённые domain events | Убирает dual-write между DB и broker |
+| Ordered Outbox Relay | Публикует domain events через ordered lanes | Убирает dual-write и не позволяет нескольким relay переставить версии одного чата |
 | Archive Worker | Переносит проверенные закрытые диапазоны в Object Storage | Архивирование масштабируется независимо и не блокирует history reads |
 | Redis routing | Хранит connections пользователя с отдельным `expires_at` | Потеря Redis рвёт realtime routing, но не историю |
 | Event Broker | Делает fan-out событий независимым consumers | Push, realtime, chat list и аналитика не блокируют send ACK; topic с текстом закрыт ACL |
@@ -500,7 +473,7 @@ message_idempotency:
 
 outbox:
   event_id, aggregate_id=conversation_id,
-  event_type, payload, created_at, published_at
+  aggregate_version, event_type, payload, created_at, published_at
 
 archive_index:
   conversation_id, first_seq, last_seq →
@@ -519,6 +492,10 @@ conversations_by_user (async projection):
 вычисляется относительно watermark получателя: `seq <= last_delivered_seq`
 означает `DELIVERED`, а `seq <= last_read_seq` — `READ`. Это превращает ACK
 диапазона из тысяч updates в одну монотонную запись.
+
+`seq` нумерует только сообщения. `aggregate_version` увеличивается при каждом
+изменении conversation aggregate, включая delivery/read watermark, и задаёт
+порядок всех его outbox events. Эти два счётчика нельзя использовать как синонимы.
 
 ### 4.3 Транзакция отправки
 
@@ -558,8 +535,33 @@ Outbox relay доставляет событие `at-least-once`. Realtime Deliv
 Service и projector дедуплицируют его по `event_id` или `message_id`. Metadata
 Projector удаляет text и секретные delivery-поля, после чего публикует отдельное
 событие в analytics topic. Обычный Analytics Consumer читает только этот topic.
-События публикуются с partition key `conversation_id`, чтобы изменения одного
-чата обрабатывались по `seq`; при обнаружении gap клиент дочитывает History API.
+
+Один только partition key `conversation_id` не гарантирует бизнес-порядок. Kafka
+сохраняет порядок записей уже внутри partition, но два независимых relay могут
+опубликовать `seq=11` раньше `seq=10`. Поэтому outbox содержит монотонный
+`aggregate_version`, а relay устроен как набор ordered lanes:
+
+```text
+lane = hash(conversation_id) mod N
+
+для одной lane:
+  - в каждый момент работает один владелец с lease и fencing token
+  - события одной conversation публикуются по aggregate_version
+  - relay не проходит мимо неотправленного предыдущего события этой conversation
+  - Kafka producer использует idempotence; повтор event всё равно допустим
+```
+
+`N` — заранее выбранное большое число виртуальных lanes. При масштабировании
+воркеры перераспределяют ownership готовых lanes, но не меняют формулу hash и не
+создают второй параллельный путь для той же conversation.
+
+После этого key `conversation_id` направляет события одного чата в одну Kafka
+partition. Consumers всё равно проверяют `event_id` и `aggregate_version`, потому
+что порядок не заменяет идемпотентность. Дубликат версии игнорируется, а gap
+запускает catch-up или перестроение проекции до продвижения сохранённой версии.
+Realtime-клиент упорядочивает сообщения по `seq` и при разрыве дочитывает History
+API. Таким образом, строгий порядок broker path ускоряет проекции, но источником
+восстановления остаётся durable history.
 
 ### 4.4 Leader, replicas и read-after-write
 
@@ -754,6 +756,7 @@ read из Object Storage → декодируется только нужная 
 | Retry пришёл после idempotency window | Старый UUIDv7 отклоняется с `IDEMPOTENCY_WINDOW_EXPIRED`; клиент синхронизирует историю и не делает автоматический resend с новым ID |
 | Broker недоступен | Send продолжает писать outbox; доставка задерживается, relay повторяет публикацию |
 | Event доставлен дважды | Consumers дедуплицируют по `event_id` / `message_id` |
+| Владелец relay lane упал | Lease истекает, новый владелец продолжает с последней подтверждённой версии; fencing token блокирует старого владельца, повтор события допустим |
 | Delivery/read ACK повторился или пришёл не по порядку | `max(current, incoming)` не создаёт новый переход и не уменьшает watermark |
 | WebSocket Gateway упал | Клиент reconnect'ится, missed messages читает после последнего `seq` |
 | Redis routing потерян | История цела; клиенты reconnect'ятся, push служит запасным сигналом |
@@ -770,6 +773,7 @@ read из Object Storage → декодируется только нужная 
 | Выбор | Альтернатива | Почему и чем платим |
 | --- | --- | --- |
 | DB-first + outbox | Kafka-first acceptance | History read-after-write проще; send зависит от DB latency |
+| Ordered relay lanes + version checks | Только Kafka key | Сохраняют бизнес-порядок при нескольких relay ценой lease, fencing и контроля gap |
 | Текст в закрытом delivery event | В broker только `message_id`, затем DB read | Ниже realtime latency ценой до 174 MB/с сырого event payload в целевой пик |
 | Shard по conversation_id | Shard по user_id | Весь чат и порядок локальны; список чатов требует async per-user projection |
 | Conversation row sequence | Временная метка клиента | Строгий порядок ценой короткой row lock, приемлемой для 2 участников |
@@ -821,9 +825,17 @@ WebSocket с heartbeat раз в 30 с:
 - **Число одновременных пользователей.** При 50 тысячах онлайн опрос раз в 2 секунды даёт 25 000 запросов/с — это одна небольшая группа подов, а 50 тысяч соединений и так помещаются на один узел. Инфраструктура маршрутизации соединений не нужна ни там, ни там, и выигрывает более простой вариант. Разница появляется на миллионах.
 - **Доля непустых ответов.** 0,5% полезных ответов — свойство именно этого профиля: 15 чатов на человека и 30 сообщений в день. В нагрузке, где сообщения идут постоянно, опрос почти всегда возвращает данные, и его накладные расходы перестают быть заметными.
 
-Длинный опрос (long polling) промежуточным вариантом не является: он удерживает соединение так же, как WebSocket, то есть платит той же памятью, но не даёт двусторонности и хуже переживает промежуточные прокси.
+Длинный опрос (long polling) тоже удерживает соединение, но не даёт полноценной
+двусторонности: клиент отправляет сообщения отдельными HTTP-запросами. Он может
+быть рабочим промежуточным вариантом, если инфраструктура WebSocket пока не
+оправдана, однако на миллионах соединений остаются те же вопросы connection
+lifecycle, таймаутов прокси и reconnect storms.
 
-Отдельно: push-уведомления не заменяют ни то, ни другое. У них нет гарантии по задержке, они не работают в вебе и служат способом разбудить офлайн-клиента, а не каналом доставки.
+Отдельно: push-уведомления не заменяют ни то, ни другое. У APNs, FCM и
+[Web Push](https://firebase.google.com/docs/cloud-messaging/get-started?platform=web)
+нет гарантии по задержке; браузерный push также зависит от разрешения пользователя
+и фоновой работы service worker. Это способ разбудить offline-клиента, а не
+источник истории и не основной канал realtime-доставки.
 
 ---
 
@@ -848,9 +860,11 @@ WebSocket с heartbeat раз в 30 с:
 > message, idempotency result и outbox, затем отправитель получает `SENT`.
 > Conversation row выдаёт строгий seq; при двух участниках и десяти сообщениях в
 > чат в день её contention невелик. `DELIVERED` и `READ` вычисляются через
-> монотонные member watermarks. Relay публикует события at-least-once; realtime,
-> push и chat-list projector дедуплицируют их, а аналитика получает отдельный
-> metadata event без текста.
+> монотонные member watermarks. Несколько relay делят outbox на ordered lanes и
+> публикуют одну conversation по `aggregate_version`; Kafka key продолжает этот
+> порядок внутри partition. Доставка остаётся at-least-once, поэтому realtime,
+> push и chat-list projector дедуплицируют события и проверяют версии, а аналитика
+> получает отдельный metadata event без текста.
 >
 > До двух миллионов условных peak WebSocket connections сейчас и 6,67 миллиона
 > через три года обслуживают stateless gateways. Redis хранит только routing
@@ -882,6 +896,9 @@ WebSocket с heartbeat раз в 30 с:
 
 - Локальность — все сообщения чата маршрутизируются по `conversation_id` на один shard.
 - Sequence — короткая conversation row выдаёт следующий `seq` внутри транзакции.
+- Relay — один владелец ordered lane публикует версии conversation последовательно.
+- Broker — key `conversation_id` сохраняет принятый порядок внутри одной partition.
+- Восстановление — consumers проверяют версии, а клиент закрывает gap через History API.
 - Допущение — два участника и около 10 сообщений в чат в день не создают hot row.
 
 **3. Как обрабатывается retry отправителя?**
@@ -932,6 +949,7 @@ WebSocket с heartbeat раз в 30 с:
 - [Avito / Classifieds](./13-avito-classifieds.md) — жизненный цикл объявлений
 - [Notification Service](./02-notification-service.md) — push, retry и dead letter queue
 - [Kafka](../../07-message-brokers-and-streaming/01-kafka.md)
+- [Apache Kafka: producer ordering and idempotence](https://kafka.apache.org/43/configuration/producer-configs/)
 - [WebSocket](../../08-networking-and-api/protocols/04-realtime/01-websocket.md)
 - [Redis](../../06-databases/database-systems-catalog/08-redis.md)
 - [Object Storage в AWS core services](../../10-devops-and-observability/cloud/01-aws-core-services.md)

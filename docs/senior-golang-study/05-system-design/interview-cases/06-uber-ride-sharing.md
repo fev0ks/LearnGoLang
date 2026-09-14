@@ -4,14 +4,20 @@
 
 - [Фаза 1: Уточнение требований](#фаза-1-уточнение-требований)
 - [Фаза 2: Оценка нагрузки](#фаза-2-оценка-нагрузки)
+- [Ключевая модель: Ride Order и Trip](#ключевая-модель-ride-order-и-trip)
 - [Фаза 3: Высокоуровневый дизайн](#фаза-3-высокоуровневый-дизайн)
 - [Фаза 4: Deep Dive](#фаза-4-deep-dive)
 - [Сквозные потоки](#сквозные-потоки)
 - [Трейдоффы](#трейдоффы)
 - [Что если Location Service падает?](#что-если-location-service-падает)
-- [Interview-ready ответ (2 минуты)](#interview-ready-ответ-2-минуты)
+- [Фаза 5: финал](#фаза-5-финал)
+- [Interview-ready answer](#interview-ready-answer)
 
-Разбор задачи "Спроектируй Uber". Проверяет знание geospatial индексирования, real-time обновлений, matching алгоритмов и работы с geo-distributed системой.
+Разбор задачи «Спроектируй Uber». В центре находятся два независимых потока:
+поиск и назначение водителя до поездки, затем tracking уже созданной поездки.
+Если назвать оба объекта `trip`, retry старого matching способен вмешаться в
+активную поездку, а координаты всех свободных водителей смешиваются с историей
+конкретного заказа.
 
 ---
 
@@ -29,9 +35,10 @@
 ```
 
 **Договорились (scope):**
-- Пассажир запрашивает поездку → система находит ближайшего водителя → matching → поездка
+- Пассажир создаёт `Ride Order`, система находит и атомарно назначает водителя.
+- После принятия предложения создаётся отдельный `Trip`.
 - Real-time location tracking (водитель видит пассажира, пассажир видит водителя)
-- Статусы: поиск → подтверждение → в пути → завершено
+- Независимые state machines заказа и поездки.
 - ETA calculation
 - Surge pricing (базовая логика)
 
@@ -41,7 +48,8 @@
 
 ```
 - DAU: 30M пассажиров, 3M водителей
-- Активных поездок одновременно: 1M
+- Завершённых поездок: 10M/день; средняя длительность: 30 минут
+- Активных поездок: около 208K в среднем, до 500K в условный пик
 - Location update: каждые 5 секунд от каждого активного водителя
 - Matching latency: < 2 секунд от запроса до предложения водителю
 - Availability: 99.99% (downtime = потери для водителей и компании)
@@ -60,72 +68,159 @@ Location updates от водителей:
   → Это основная write нагрузка
 
 Location reads (пассажир ищет водителей рядом):
-  30M users × 2 поиска/час = 60M queries/час ≈ 17K geo queries/sec
+  30M users × 2 поиска/день = 60M queries/день
+  60M / 86 400 ≈ 694 geo queries/sec в среднем
+  commuting peak ×10 ≈ 6 940/sec
 
-Matching events:
-  1M поездок/day / 86400 = 12 match operations/sec (очень мало)
-  Peak = 5x ≈ 60/sec
+Ride orders и matching:
+  10M поездок/day / 86 400 ≈ 116 новых заказов/sec в среднем
+  Peak ×5 ≈ 580 orders/sec
+
+  если проверяем до 5 кандидатов:
+  580 × 5 ≈ 2 900 попыток claim/sec в пике
+
+Проверка одновременности по закону Литтла:
+  116 поездок/sec × 1 800 sec ≈ 208K активных поездок в среднем
+  условный пик ≈ 500K активных поездок
 
 Storage для location:
   Нужно только текущее положение: 600K × 50 bytes = 30MB → Redis
-  История location (для поездки): 1M trips × 1h × 12 points/min × 50B = 36GB/day
+  История location:
+  10M trips × 30 min × 12 points/min × 50B ≈ 180GB/day raw
 ```
+
+Число `500K` — допущение пикового одновременного tracking, а не ещё одно
+независимое продуктовое требование. Оно согласуется с потоком поездок и средней
+длительностью; прежняя комбинация `1M trips/day` и `1M concurrent trips` была бы
+математически невозможна при получасовой поездке.
+
+---
+
+## Ключевая модель: Ride Order и Trip
+
+`Ride Order` — намерение пассажира найти машину. Он существует до того, как
+какой-либо водитель согласился:
+
+```text
+SEARCHING ⇄ OFFERED → MATCHED
+     │          │
+     └──────────┴──→ CANCELED / EXPIRED
+```
+
+`Trip` — фактическое исполнение уже согласованной поездки. Он создаётся только в
+момент успешного `MATCHED`:
+
+```text
+DRIVER_EN_ROUTE → DRIVER_WAITING → IN_PROGRESS → COMPLETED
+       │                 │              │
+       └─────────────────┴──────────────┴──→ CANCELED
+```
+
+Разделение даёт практические гарантии:
+
+- retry поиска работает с тем же `order_id` и не создаёт второй Trip;
+- отменённый order не засоряет историю поездок;
+- assignment водителя принадлежит order до принятия и Trip после принятия;
+- поток всех доступных водителей обслуживает matching, а `trip.location.updates`
+  содержит только tracking активных поездок.
 
 ---
 
 ## Фаза 3: Высокоуровневый дизайн
 
+### Поиск и назначение водителя
+
 ```mermaid
-flowchart TB
-    Driver[Driver App<br/>location update 5s]
-    Passenger[Passenger App<br/>request ride]
-    GW[API Gateway]
+flowchart LR
+    Passenger["Passenger App"]
+    Gateway["Edge / API Gateway"]
+    Order["Ride Order API"]
+    Matching["Matching Service"]
+    Locations[("Location Store<br/>available drivers by H3")]
+    Authority[("Regional PostgreSQL<br/>orders + assignments + trips + outbox")]
+    Broker[("Event Broker")]
+    Offers["Offer Delivery<br/>push / WebSocket"]
+    Driver["Driver App"]
 
-    LocSvc[Location Service]
-    MatchSvc[Matching Service]
-    TripSvc[Trip Service]
+    Passenger -->|"create order"| Gateway --> Order
+    Order -->|"start matching"| Matching
+    Matching -->|"nearby candidates"| Locations
+    Matching -->|"conditional driver claim"| Authority
+    Authority -->|"outbox relay"| Broker --> Offers --> Driver
+    Driver -->|"accept / decline"| Gateway
+    Gateway --> Order -->|"match and create Trip"| Authority
+```
 
-    LocStore[(Redis<br/>H3-indexed locations)]
-    TripStore[(PostgreSQL<br/>trips)]
+### Активная поездка и tracking
 
-    Driver --> GW
-    Passenger --> GW
-    GW --> LocSvc
-    GW --> MatchSvc
-    GW --> TripSvc
+```mermaid
+flowchart LR
+    Driver["Driver App<br/>location every 5s"]
+    Gateway["Edge / API Gateway"]
+    Location["Location Service"]
+    Current[("Current Location Store<br/>H3 + freshness")]
+    Stream[("trip.location.updates<br/>key = trip_id")]
+    Realtime["Realtime Gateway"]
+    Passenger["Passenger App"]
+    Trip["Trip Service"]
+    TripDB[("Regional PostgreSQL<br/>Trip state machine")]
 
-    LocSvc --> LocStore
-    MatchSvc -->|find nearby drivers| LocStore
-    TripSvc --> TripStore
+    Driver --> Gateway --> Location
+    Location --> Current
+    Location -->|"только active Trip"| Stream --> Realtime --> Passenger
+    Driver -->|"arrive / start / complete"| Trip --> TripDB
 ```
 
 ### Роль каждого компонента
 
-Сквозная идея — **разделение по типу нагрузки**: write-heavy волатильные координаты (Redis, 120K/сек) полностью отделены от strong-consistent booking (PostgreSQL); геопоиск сведён к O(1) lookup по H3-ячейкам, а не сканированию.
+Сквозная идея — разделение по типу нагрузки: write-heavy волатильные координаты
+(120K/сек) полностью отделены от точного assignment. Геоиндекс быстро даёт
+кандидатов, но только условная запись в regional PostgreSQL решает, свободен ли
+водитель на самом деле.
 
 **Location Service.**
-*Зачем:* принимает обновления координат каждые 5 сек, поддерживает H3-индекс в Redis (перенос водителя между ячейками), стримит координаты активных поездок в Kafka.
-*Почему отдельно:* это доминирующая write-нагрузка (120K/сек) со своими требованиями (volatile, eventual) — нельзя смешивать с booking.
+*Зачем:* принимает обновления координат каждые 5 секунд, поддерживает H3-индекс и
+публикует координаты активных поездок в один partitioned topic по `trip_id`.
+*Почему отдельно:* это доминирующая write-нагрузка со своей eventual consistency;
+она не должна создавать транзакцию в Trip DB на каждую точку.
+
+**Ride Order API.**
+*Зачем:* идемпотентно создаёт заказ, принимает cancel/accept и владеет state
+machine до `MATCHED`.
+*Почему отдельно:* поиск может повторяться и менять кандидатов, но не должен
+плодить новые поездки при retry одного намерения пассажира.
 
 **Matching Service.**
-*Зачем:* по запросу находит топ-5 ближайших свободных водителей (H3 GridDisk) и проводит matching с distributed lock.
-*Почему отдельно:* matching редкий (~60/сек), но требует атомарности «занять водителя» — изолируем от потока координат.
+*Зачем:* находит ближайших кандидатов через H3 и пытается атомарно перевести
+assignment водителя `AVAILABLE → OFFERED`, а Ride Order `SEARCHING → OFFERED`.
+*Почему отдельно:* поиск приблизительный, а до 2,9K пиковых попыток claim/с требуют
+короткого точного пути без внешнего push внутри транзакции.
 
 **Trip Service.**
-*Зачем:* state machine поездки (PENDING→…→COMPLETED), real-time tracking пассажиру через WebSocket.
-*Почему отдельно + Postgres:* переходы статусов финансово значимы, нужен ACID. Протокол трекинга — [networking / WebSocket](../../08-networking-and-api/protocols/04-realtime/01-websocket.md).
+*Зачем:* создаёт Trip после принятия предложения и выполняет переходы от подачи
+машины до завершения.
+*Почему отдельно + PostgreSQL:* order можно отменять и переназначать до match, а
+Trip уже является финансово значимым фактом исполнения.
 
-**Redis (H3-indexed locations).**
-*Зачем:* текущие позиции водителей по H3-ячейкам, booking-локи, surge-значения.
-*Почему Redis:* данные волатильны и нужны за < 1 мс; GEO/Hash-операции и `SET NX` — нативно. Профиль — [Redis](../../06-databases/database-systems-catalog/08-redis.md), сценарии гео/локов — [Redis real scenarios](../../06-databases/database-systems-catalog/08a-redis-real-scenarios.md). Шардинг по `driver_id` — [sharding](../../06-databases/database-systems-catalog/postgresql/12-sharding.md).
+**Current Location Store.**
+*Зачем:* текущие позиции и freshness водителей по H3-ячейкам, а также surge
+projection.
+*Почему Redis:* данные волатильны, а `GEOSEARCH`, Hash/ZSET и atomic scripts
+подходят для регионального geo-index. Это candidate source, но не authority
+занятости водителя. Профиль — [Redis](../../06-databases/database-systems-catalog/08-redis.md).
 
-**PostgreSQL (trips).**
-*Зачем:* durable state машины поездки.
-*Почему реляционка:* нельзя двойной booking и нужны консистентные переходы — [transactions & locking](../../06-databases/database-systems-catalog/postgresql/04-transactions-and-locking.md).
+**Regional PostgreSQL.**
+*Зачем:* хранит `ride_orders`, активный assignment водителя, `trips` и outbox на
+одном региональном shard.
+*Почему реляционка:* accept одной транзакцией завершает Order, сохраняет ровно
+один active assignment и создаёт Trip. Это exact barrier против double booking —
+[transactions & locking](../../06-databases/database-systems-catalog/postgresql/04-transactions-and-locking.md).
 
-**Kafka (location streaming).**
-*Зачем:* транспорт координат активной поездки от водителя к пассажиру и другим консьюмерам.
-*Почему через брокер, а не прямой WebSocket:* водитель и пассажир на разных серверах; decoupling + лёгкое добавление консьюмеров (диспетчер, аналитика). Профиль — [Kafka](../../07-message-brokers-and-streaming/01-kafka.md).
+**Event Broker.**
+*Зачем:* доставляет domain events и один поток `trip.location.updates`,
+partitioned по `trip_id`.
+*Почему не topic на поездку:* миллионы динамических topics операционно дороже
+одного масштабируемого topic; partition key сохраняет порядок координат поездки.
 
 ---
 
@@ -159,8 +254,8 @@ Geohash: кодирует координаты в строку
 
 ```
 H3 (Hexagonal Hierarchical Spatial Index):
-  Uber использует шестиугольные ячейки (hexagons)
-  Преимущество: у шестиугольника все соседи на одинаковом расстоянии (у квадрата нет)
+  пространство делится преимущественно на шестиугольные ячейки
+  соседство и расстояния до центров равномернее, чем у квадратной сетки
   
   Resolution 9: ~0.1 km² на ячейку (для поиска водителей в городе)
   Resolution 7: ~5 km² (для surge pricing зон)
@@ -176,7 +271,9 @@ H3 (Hexagonal Hierarchical Spatial Index):
   → объединить, вернуть N ближайших по реальному расстоянию
 ```
 
-**Выбор: H3** — Uber сам разработал и открыл, лучше обрабатывает границы, поддерживает иерархию для разных масштабов.
+**Выбор: H3.** Иерархические resolution удобны для matching и surge. H3 не
+устраняет границы: поиск всё равно включает `GridDisk` соседних ячеек и затем
+фильтрует кандидатов по настоящему расстоянию.
 
 ---
 
@@ -248,67 +345,104 @@ SET  driver:{id}:cell {new_cell}        ← запомнили, где он те
 120K updates/sec → Redis Cluster, шардинг по географии
   (город/регион в hash tag — иначе индекс и позиция разъедутся по слотам)
 
-Read (geo queries): 17K/sec — в семь раз меньше записи.
+Read (geo queries): около 7K/sec в условный пик.
 ```
 
-Реплики для гео-запросов брать **не нужно и вредно**:
+Exact matching читает master выбранного geo-shard:
 
 ```
-Нагрузка чтения (17K/с) на порядок ниже записи (120K/с) —
-масштабировать чтение просто нечего.
+Нагрузка чтения (~7K/с) намного ниже записи (120K/с), поэтому сначала
+масштабируется partitioning по городу/региону, а не replica reads.
 
-А главное, реплики Redis асинхронные: matching прочитает позиции
-с лагом и предложит поездку водителю, который уже уехал или уже занят.
-Растёт доля неудачных предложений, а лок на водителя всё равно
-придётся брать на мастере.
+Асинхронная реплика может показать старую позицию. Это не ломает инвариант —
+точный claim всё равно проверит Regional PostgreSQL, — но увеличивает число
+бесполезных предложений и ухудшает ETA.
 
-Читаем с мастера того шарда, где лежит ячейка.
+Replica допустима для приблизительной heatmap и аналитики, но не нужна в
+основном candidate path при данной нагрузке.
 ```
 
 ---
 
 ### Matching Service: водитель → пассажир
 
+Geo-index отвечает только «кто выглядит подходящим». Authority назначения
+находится в regional PostgreSQL рядом с Ride Order и Trip:
+
 ```
 Алгоритм:
-  1. Пассажир запрашивает поездку
-  2. Matching Service: найти TOP-5 ближайших свободных водителей
-     → H3 geo query
-  3. Отправить каждому водителю запрос (timeout 15 сек)
-  4. Первый водитель кто принял → match confirmed
-  5. Остальным — cancel
-
-Booking lock (предотвратить двойной booking):
-  SET driver:{id}:booking {trip_id} EX 30 NX  // атомарно
-  Если key уже есть → водитель занят → пропустить
-
-State machine поездки:
-  PENDING → DRIVER_FOUND → DRIVER_EN_ROUTE → IN_PROGRESS → COMPLETED/CANCELLED
-  Хранить в PostgreSQL (ACID нужен для финансово-значимых переходов)
+  1. Ride Order API идемпотентно создаёт order в SEARCHING.
+  2. Matching читает кандидатов из H3 projection.
+  3. Локальная транзакция делает conditional claim водителя AVAILABLE → OFFERED,
+     переводит order SEARCHING → OFFERED и пишет outbox.
+  4. Outbox доставляет предложение водителю с deadline 15 секунд.
+  5. Decline/timeout освобождает claim и возвращает order в SEARCHING, только
+     если совпадают order, driver и offer version.
+  6. Accept одной транзакцией переводит order в MATCHED,
+     assignment в ACTIVE и создаёт ровно один Trip.
 ```
 
-**Короткий лок закрывает только окно принятия, но не поездку.** Здесь легко ошибиться: `EX 30` истечёт через полминуты, а поездка длится 20 минут — и водитель снова попадёт в выдачу matching, находясь с пассажиром в машине.
+Минимальное состояние authority:
 
-Поэтому «занятость» водителя — это два разных состояния с разным временем жизни:
+```text
+ride_orders:
+  order_id, rider_id, region_id, state, offered_driver_id,
+  offer_version, request_hash, version
 
-```
-1. Лок на время принятия предложения (секунды).
-   SET driver:{id}:booking {trip_id} EX 30 NX
-   Нужен, чтобы двое пассажиров не забрали одного водителя,
-   пока тот думает. Победил первый — остальным cancel.
+driver_assignment_state:
+  driver_id PRIMARY KEY,
+  state AVAILABLE | OFFERED | ACTIVE | OFFLINE,
+  order_id, trip_id, offer_expires_at, version
 
-2. Статус водителя на время поездки (минуты-часы).
-   driver:{id}:status = AVAILABLE | OFFERED | ON_TRIP | OFFLINE
-   Меняется вместе с переходами state machine поездки в PostgreSQL,
-   а не по таймеру.
-
-Matching отбирает только AVAILABLE. Истёкший лок из пункта 1
-никого не освобождает — освобождает завершение поездки.
+trips:
+  trip_id, order_id UNIQUE, driver_id, rider_id, state, version
 ```
 
-Отсюда же требование к восстановлению: статус водителя выводится из состояния поездки в PostgreSQL, поэтому потеря Redis не «отпускает» занятых водителей — после рестарта статусы перестраиваются по активным поездкам.
+Claim выполняется локальной транзакцией. Первый условный update пытается занять
+водителя:
 
-Тот же гео-подбор + `NX`-лок против двойного назначения применяется для назначения исполнителя на маршрут в [15. TMS](./15-tms-transport-management.md).
+```sql
+UPDATE driver_assignment_state
+SET state = 'OFFERED',
+    order_id = $order_id,
+    offer_expires_at = $deadline,
+    version = version + 1
+WHERE driver_id = $driver_id
+  AND state = 'AVAILABLE';
+```
+
+Затем в той же транзакции Ride Order переводится `SEARCHING → OFFERED` с
+`offered_driver_id` и новой `offer_version`, после чего пишется outbox. Если
+любой conditional update изменил ноль строк, вся транзакция откатывается. Поэтому
+нельзя занять водителя, но забыть, какому Order он предложен.
+
+Освобождение после timeout также одной транзакцией проверяет `order_id`, driver и
+полученную offer version: запоздавший sweeper не имеет права стереть более новый
+assignment или вернуть уже `MATCHED` Order в поиск.
+
+Accept выполняет локальную транзакцию:
+
+```text
+BEGIN
+1. Проверить Ride Order: OFFERED, тот же driver и не истёкший deadline.
+2. Проверить assignment: OFFERED, тот же order и version.
+3. Order → MATCHED.
+4. INSERT Trip с UNIQUE(order_id).
+5. Assignment → ACTIVE и записать trip_id.
+6. INSERT outbox TripCreated.
+COMMIT
+```
+
+Короткий offer deadline закрывает только окно принятия. После accept assignment
+становится `ACTIVE` без TTL и освобождается только финальным переходом Trip. Иначе
+таймер на 15 секунд истёк бы посреди получасовой поездки.
+
+Location Store получает availability projection через outbox. Его lag может
+оставить занятого водителя среди кандидатов, но conditional claim отклонит его.
+Потеря Redis поэтому ухудшает matching, но не освобождает активных водителей.
+
+Тот же принцип «быстрый approximate candidate source + exact conditional claim»
+используется для назначения исполнителя на маршрут в [15. TMS](./15-tms-transport-management.md).
 
 ---
 
@@ -361,7 +495,8 @@ Matching отбирает только AVAILABLE. Истёкший лок из �
 
 ```
 Когда поездка активна (IN_PROGRESS):
-  Водитель → Location updates → Kafka topic: trip.{trip_id}.location
+  Водитель → Location updates
+  → Kafka topic trip.location.updates, key = trip_id
   
 Пассажир подключён по WebSocket:
   Trip Service → консьюмер Kafka → WebSocket push → пассажир видит движение
@@ -400,15 +535,21 @@ Routing:
 
 **1. Обновление позиции водителя.**
 Driver App каждые 5 сек → Location Service → `HSET` координат + пересчёт H3-ячейки; при смене ячейки атомарно `HDEL` из старой и `HSET` в новую. Если поездка активна — координаты в Kafka.
-*Итог:* индекс всегда отражает актуальное положение; geo-запрос видит водителя в правильной ячейке.
+*Итог:* индекс атомарно отражает последнюю принятую позицию; запоздавшие точки
+отсекаются по sequence и timestamp.
 
 **2. Запрос поездки и matching.**
-Пассажир → Matching Service → `GridDisk(cell, k=1)` (7 ячеек) → топ-5 по реальному расстоянию → каждому предложение (timeout 15 сек) → первый принявший фиксируется через `SET driver:{id}:booking NX`.
-*Итог:* O(1) поиск без сканирования; `NX`-лок исключает двойной booking, проигравшие получают cancel.
+Пассажир идемпотентно создаёт Ride Order → Matching читает H3-кандидатов →
+локальная conditional-транзакция переводит водителя и Order в `OFFERED` → outbox
+доставляет предложение → accept одной транзакцией создаёт Trip.
+*Итог:* фиксированное число H3-ячеек ограничивает область поиска, а DB authority
+исключает двойное назначение даже при stale geo projection.
 
 **3. Трекинг во время поездки.**
-Водитель → координаты в `trip.{id}.location` (Kafka) → Trip Service-консьюмер → WebSocket-push пассажиру.
-*Итог:* пассажир и водитель на разных серверах связаны через брокер; легко подключить ещё консьюмеров.
+Водитель → координаты в общий `trip.location.updates`, ключ `trip_id` → Realtime
+Gateway → WebSocket пассажиру.
+*Итог:* порядок одной поездки сохраняет partition key, а число topics не растёт
+вместе с числом поездок.
 
 **4. Surge pricing.**
 Каждые 5 мин по H3-ячейкам (res 7): `demand/supply` → коэффициент → `SET surge:{cell} EX 300`.
@@ -420,13 +561,14 @@ Driver App каждые 5 сек → Location Service → `HSET` координ�
 
 | Компонент | Выбор | Альтернатива | Причина |
 |---|---|---|---|
-| Geo index | H3 | Geohash, QuadTree, Redis GEO | Нет граничного эффекта, иерархия; но Redis GEO даёт атомарное перемещение из коробки |
+| Geo index | H3 + соседние ячейки | Geohash, QuadTree, Redis GEO | Удобная иерархия и равномерное соседство; границы всё равно требуют `GridDisk` |
 | Обновление индекса | Один Lua-скрипт / общий hash tag | Три отдельные команды | Иначе призраки в ячейках и исчезнувшие из индекса водители |
 | Протухание позиций | ZSET со score = временем | TTL на поле хеша | У полей хеша нет TTL (до Redis 7.4) |
 | Location store | Redis | Cassandra | Volatile data, < 1ms latency |
 | Чтение гео-запросов | С мастера шарда | Read replicas | Асинхронные реплики дают устаревшие позиции в matching |
-| Занятость водителя | Статус из state machine поездки | Только Redis-лок с TTL | Лок на 30 с истечёт посреди 20-минутной поездки |
-| Trip store | PostgreSQL | MongoDB | ACID для state transitions |
+| Назначение водителя | Conditional DB state | Redis-лок с TTL | Authority переживает restart и не освобождает водителя по истёкшему offer timer |
+| Order и Trip | Две state machines | Один объект `trip` с `PENDING` | Retry matching не вмешивается в уже начатую поездку |
+| Order/Trip store | Regional PostgreSQL | Документное хранилище | Accept атомарно завершает Order, фиксирует assignment и создаёт Trip |
 | Location streaming | Kafka | Direct WebSocket | Decoupling, multiple consumers |
 
 ### Почему не QuadTree?
@@ -438,7 +580,7 @@ QuadTree: рекурсивное деление пространства на 4 
   - Для однородных данных (водители по городу) H3 проще
 
 H3 лучше для Uber потому что:
-  - Все соседние ячейки equidistant (у квадрата — нет)
+  - Соседство регулярнее, чем в квадратной сетке
   - Простой поиск соседей: GridDisk(cell, k)
   - Легко маппится на Redis ключи
   - Открытый стандарт с готовыми библиотеками
@@ -448,37 +590,99 @@ H3 лучше для Uber потому что:
 
 ## Что если Location Service падает?
 
-```
-Водители продолжают отправлять обновления → 503
-Matching Service не может найти водителей → поездки не назначаются
-  
-Mitigation:
-  1. Location Service за LB с несколькими репликами
-  2. Redis Cluster: автоматический failover < 30 сек
-  3. Driver App: буферизовать updates, retry при ошибке
-  4. Matching Service: fallback на last known location (< 30 сек стale)
-  
-Circuit breaker:
-  Если Location Service отвечает > 500ms → matching service использует stale data
-  Alert инженерам немедленно
-```
+| Сбой | Поведение |
+| --- | --- |
+| Один Location Service упал | Балансировщик исключает instance, клиенты повторяют запрос с jitter |
+| Geo-shard недоступен | Новые Ride Orders в зоне временно fail closed; уже созданные Trips продолжают state transitions |
+| Осталась позиция моложе 30 секунд | Её можно использовать как candidate hint, но assignment всё равно проверяет DB authority |
+| Driver App повторяет накопленные точки | `driver_seq` и timestamp не позволяют старой точке откатить новую позицию |
+| Redis failover | Время восстановления измеряется failure test; фиксированное обещание «меньше 30 секунд» без конфигурации не даётся |
+| Location stream отстаёт | Карта временно отстаёт, но Trip state и назначение не меняются из координат |
 
 Паттерн размыкания при деградации — [reliability / circuit breaker](../reliability-patterns/03-circuit-breaker.md).
 
 ---
 
-## Interview-ready ответ (2 минуты)
+## Фаза 5: финал
 
-> "Uber — это три ключевые challenge: real-time геопространственный поиск при 120K location updates/sec, быстрый matching без двойного booking, и глобальное geo-распределение с sub-100ms latency.
+### Двухминутное резюме
+
+> Я разделяю Ride Order и Trip. Order описывает повторяемый поиск водителя и
+> может пройти через несколько offers. Trip создаётся ровно один раз после
+> accept; уникальность `order_id` и одна локальная транзакция связывают Order,
+> assignment водителя, Trip и outbox.
 >
-> Геоиндекс: H3 (Uber's own hexagonal grid). Драйверы хранятся в Redis, сгруппированные по H3 ячейкам (resolution 9, ~0.1km²). При запросе поездки — получаем ячейку пассажира + 6 соседей, сортируем по расстоянию, берём топ-5. Это O(1) lookup, не сканирование.
+> При учебных допущениях Location Service принимает около 120 тысяч updates/с.
+> Десять миллионов поездок в сутки дают 116 стартов/с в среднем и около 580/с в
+> пике. При средней длительности 30 минут закон Литтла даёт 208 тысяч активных
+> Trips в среднем; условный пик в 500 тысяч согласуется с числом водителей.
 >
-> Matching: Distributed lock через Redis SET NX на время принятия предложения. Первый принявший из топ-5 выигрывает, остальные получают cancel. Но отдельно оговорю: этот лок живёт секунды и закрывает только окно выбора. Занятость на время самой поездки держит статус водителя, который меняется вместе с state machine в PostgreSQL — иначе лок на 30 секунд истечёт посреди двадцатиминутной поездки и водитель снова попадёт в выдачу.
+> H3/Redis быстро возвращает кандидатов из соседних ячеек, но это только
+> projection. Exact claim выполняется условным update в regional PostgreSQL.
+> Stale geo state может породить лишнюю попытку, но не двойное назначение.
+> Offer deadline освобождает только `OFFERED`; после accept assignment становится
+> `ACTIVE` без TTL и заканчивается вместе с Trip.
 >
-> Location updates: 120K/sec. Ключевая деталь — перемещение водителя между H3-ячейками обязано быть атомарным: три отдельные команды (убрать из старой, добавить в новую, запомнить ячейку) при сбое между ними оставляют либо водителя вне индекса, либо призрака в ячейке, где его нет. Либо один Lua-скрипт с общим hash tag, либо Redis GEO, где перемещение — это перезапись одного элемента.
->
-> Протухание позиций делаю через ZSET со score-временем, а не TTL на полях хеша: per-field TTL в Redis появился только в 7.4, и устаревшие записи иначе продолжают попадать в выдачу.
->
-> Multi-region: GeoDNS routing, каждый регион независим. Location data не реплицируется — нет смысла, московский водитель не нужен в US.
->
-> WebSocket для real-time tracking во время поездки: через Kafka, не прямое соединение — decoupling и multiple consumers."
+> До match используется общий поток доступных `driver.location`, после match —
+> `trip.location.updates` с ключом `trip_id`. Один topic сохраняет порядок внутри
+> поездки и не создаёт topic на каждого пользователя. Регионы независимы в hot
+> path; глобальная аналитика получает события асинхронно.
+
+### За пределами scope и рост ×10
+
+- Payment и payout добавят отдельную financial saga после `TripCompleted`.
+- Scheduled rides потребуют reservations водителей и другой matching horizon.
+- Pool/shared rides превратят matching в задачу маршрутизации нескольких заказов.
+- При росте сначала делятся города и H3 ranges; assignment shards сохраняют
+  региональную локальность Order, Driver и Trip.
+
+---
+
+## Interview-ready answer
+
+**1. Почему Ride Order и Trip — разные объекты?**
+
+- Order — намерение пассажира, которое может пережить несколько offers и отмену до match.
+- Trip — уже согласованное исполнение с водителем и отдельной state machine.
+- Retry — тот же `order_id` не создаёт второй Trip благодаря idempotency и `UNIQUE(order_id)`.
+
+**2. Как не назначить одного водителя двум пассажирам?**
+
+- Candidate source — H3 projection только предлагает ближайших водителей.
+- Authority — одна транзакция переводит водителя `AVAILABLE → OFFERED`, а Order
+  `SEARCHING → OFFERED`; частичный claim откатывается.
+- Accept — одна транзакция фиксирует Order, assignment, Trip и outbox.
+
+**3. Почему Redis-лок с TTL недостаточен?**
+
+- Время жизни — offer длится секунды, а поездка десятки минут.
+- Ошибка — истёкший TTL может показать активного водителя свободным.
+- Решение — после accept durable assignment остаётся `ACTIVE` до финала Trip.
+
+**4. Как масштабировать координаты?**
+
+- Partitioning — geo-index делится по городу или региону.
+- Write path — 120K updates/с распределяются независимо от Order/Trip DB.
+- Freshness — sequence и timestamp отбрасывают запоздавшие точки.
+
+**5. Зачем два location stream?**
+
+- До match — позиции доступных водителей нужны Matching Service.
+- После match — координаты конкретного Trip нужны пассажиру и диспетчеру.
+- Partition key — `trip_id` сохраняет порядок без topic на каждую поездку.
+
+**6. Что происходит при stale location?**
+
+- UX — ETA и список кандидатов могут быть хуже.
+- Correctness — exact DB claim всё равно отклоняет занятого водителя.
+- Degradation — слишком старые точки исключаются по freshness threshold.
+
+---
+
+## Связанные материалы
+
+- [Как проходить System Design Interview](./00-how-to-approach.md)
+- [Redis](../../06-databases/database-systems-catalog/08-redis.md)
+- [PostgreSQL: транзакции и блокировки](../../06-databases/database-systems-catalog/postgresql/04-transactions-and-locking.md)
+- [Kafka](../../07-message-brokers-and-streaming/01-kafka.md)
+- [WebSocket](../../08-networking-and-api/protocols/04-realtime/01-websocket.md)

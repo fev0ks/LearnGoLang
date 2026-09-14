@@ -608,6 +608,8 @@ notification, но запрет дальнейших записей обеспе
 
 ## Связанные материалы
 
+- [Music Streaming Delivery](./17.1-music-streaming-delivery.md) — где хранятся
+  аудиофайлы, как устроены ingestion, transcode, rights check, CDN и offline mode
 - [Как проходить System Design Interview](./00-how-to-approach.md)
 - [Idempotency](../reliability-patterns/06-idempotency.md)
 - [WebSocket](../../08-networking-and-api/protocols/04-realtime/01-websocket.md)
