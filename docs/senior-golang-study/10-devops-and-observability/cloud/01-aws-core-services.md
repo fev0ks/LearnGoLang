@@ -1,236 +1,757 @@
-# AWS: основные сервисы
-
-AWS — самый распространённый облачный провайдер, и хотя GCP/Azure тоже популярны, AWS остаётся "лингва франка" cloud-инфраструктуры. Senior backend должен ориентироваться в основных сервисах: что они делают, когда нужны, какие альтернативы, какие подводные камни.
-
-Этот файл — **обзор сервисов**, не туториал по каждому. Цель — дать карту, чтобы знать на что смотреть в задаче.
+# AWS: практический обзор для backend-разработчика
 
 ## Содержание
 
-- [Региональность и AZ](#региональность-и-az)
-- [EC2 — виртуальные машины](#ec2-виртуальные-машины)
-- [VPC — сетевая изоляция](#vpc-сетевая-изоляция)
-- [Security Groups vs NACL](#security-groups-vs-nacl)
-- [IAM — управление доступом](#iam-управление-доступом)
-- [S3 — объектное хранилище](#s3-объектное-хранилище)
-- [RDS — managed реляционные БД](#rds-managed-реляционные-бд)
-- [DynamoDB — managed NoSQL](#dynamodb-managed-nosql)
-- [SQS — очереди сообщений](#sqs-очереди-сообщений)
-- [SNS — pub/sub и notifications](#sns-pubsub-и-notifications)
-- [Lambda — serverless](#lambda-serverless)
-- [EKS / ECS — оркестрация контейнеров](#eks-ecs-оркестрация-контейнеров)
-- [CloudWatch — мониторинг](#cloudwatch-мониторинг)
-- [Route 53 — DNS](#route-53-dns)
-- [CloudFront — CDN](#cloudfront-cdn)
-- [ELB / ALB / NLB — load balancers](#elb-alb-nlb-load-balancers)
-- [Secrets Manager и Parameter Store](#secrets-manager-и-parameter-store)
-- [Managed vs self-hosted](#managed-vs-self-hosted)
-- [AWS SDK в Go](#aws-sdk-в-go)
-- [Полезные команды AWS CLI](#полезные-команды-aws-cli)
+- [Ментальная модель AWS](#ментальная-модель-aws)
+- [С чего начать новый проект](#с-чего-начать-новый-проект)
+- [Карта выбора сервисов](#карта-выбора-сервисов)
+- [Запуск приложений](#запуск-приложений)
+- [Хранение данных](#хранение-данных)
+- [Асинхронная работа и интеграции](#асинхронная-работа-и-интеграции)
+- [Сеть и внешний трафик](#сеть-и-внешний-трафик)
+- [IAM, аутентификация и секреты](#iam-аутентификация-и-секреты)
+- [Сборка и доставка](#сборка-и-доставка)
+- [Наблюдаемость и аудит](#наблюдаемость-и-аудит)
+- [Три типовые архитектуры](#три-типовые-архитектуры)
+- [Стоимость и границы ответственности](#стоимость-и-границы-ответственности)
+- [Типичные ошибки](#типичные-ошибки)
+- [Практический чек-лист](#практический-чек-лист)
+- [Interview-ready answer](#interview-ready-answer)
+- [Официальная документация](#официальная-документация)
+
+AWS — набор облачных сервисов, из которых команда собирает среду выполнения
+приложения. Backend-разработчику не требуется помнить весь каталог продуктов.
+Важнее уметь пройти от задачи к минимально сложной архитектуре, безопасно дать
+приложению доступ и понимать, какая эксплуатационная ответственность остаётся у
+команды.
+
+Основной вопрос этой статьи: как запустить Go-сервис в AWS, подключить данные,
+очереди и наблюдаемость, не превращая первый production deployment в собственную
+облачную платформу.
 
 ---
 
-## Региональность и AZ
+## Ментальная модель AWS
 
-AWS разделён на **регионы** (Region) — отдельные географические локации. Внутри каждого региона — несколько **Availability Zones (AZ)** — изолированных датацентров.
+### Account, Region и Availability Zone
 
+**AWS account** — основная граница владения ресурсами, IAM, квотами и счётом.
+Production и non-production часто разделяют по разным accounts, объединённым в
+AWS Organizations. Это уменьшает blast radius и упрощает раздельный контроль
+прав и расходов.
+
+**Region** — географическая область, например `eu-west-1`. Большинство ресурсов
+создаются в конкретном регионе: VPC, EC2 instance, RDS database, Lambda function.
+
+**Availability Zone (AZ)** — изолированная локация внутри региона. Одна AZ может
+состоять из одного или нескольких дата-центров. Зоны соединены низколатентной
+сетью, но отказ AZ всё равно считается отдельным сценарием отказа.
+
+```text
+AWS Organization
+└── production account
+    └── Region: eu-west-1
+        ├── AZ: eu-west-1a
+        │   ├── public subnet
+        │   └── private subnet
+        ├── AZ: eu-west-1b
+        │   ├── public subnet
+        │   └── private subnet
+        └── regional services: S3, SQS, DynamoDB, Lambda
 ```
-AWS глобально
-├── us-east-1 (N. Virginia)        ← регион
-│   ├── us-east-1a                 ← AZ
-│   ├── us-east-1b
-│   ├── us-east-1c
-│   └── ...
-├── eu-west-1 (Ireland)
-│   ├── eu-west-1a
-│   ├── eu-west-1b
-│   └── eu-west-1c
-└── ap-southeast-1 (Singapore)
-    └── ...
-```
 
-**Что нужно знать:**
+Не все сервисы имеют одинаковую область действия. IAM является глобальным
+сервисом аккаунта, VPC — региональным, subnet — зональным, а S3 bucket
+создаётся в регионе. Имя bucket должно быть уникально в пределах AWS partition.
 
-- **AZ — это независимые датацентры** в одном регионе, с low-latency связью (<2 мс) друг к другу
-- **Multi-AZ deployment** — стандарт для production: если одна AZ упала, другие продолжают
-- **Cross-region trafic** — платный и медленный (десятки-сотни мс)
-- **us-east-1** исторически "первый", иногда падает целиком (как 7 дек 2021) — критичные сервисы лучше держать в нескольких регионах
-- **Сервисы как S3, DynamoDB, IAM** — региональные (или глобальные), некоторые сервисы доступны не во всех регионах
+### Data plane и control plane
+
+У облачного ресурса полезно различать два пути:
+
+- **Control plane** — создание и изменение ресурса через Console, AWS CLI,
+  Terraform или API: создать bucket, изменить security group, задать autoscaling.
+- **Data plane** — рабочие запросы приложения: прочитать object из S3, записать
+  item в DynamoDB, получить message из SQS.
+
+Права deployer и runtime-приложения поэтому не совпадают. CI может обновлять ECS
+service, но запущенному контейнеру обычно не нужно право изменять собственную
+инфраструктуру. Приложению нужны только операции data plane на его ресурсах.
+
+### Shared responsibility
+
+Managed-сервис снимает часть работы, но не всю ответственность.
+
+| Уровень | AWS обычно делает | Команда всё ещё решает |
+| --- | --- | --- |
+| EC2 | оборудование и гипервизор | ОС, patches, процессы, scaling |
+| ECS/Fargate | размещение containers | image, task, scaling, rollout |
+| RDS | СУБД, backups, часть failover | schema, queries, pools, RPO/RTO |
+| S3 | durability и storage fleet | IAM, lifecycle, versioning |
+| SQS | хранение и доставка | idempotency, retry, DLQ, alerts |
+
+Слово `managed` означает изменение границы ответственности, а не отсутствие
+архитектурных решений.
 
 ---
 
-## EC2 — виртуальные машины
+## С чего начать новый проект
 
-**EC2 (Elastic Compute Cloud)** — VM в облаке. Запускаешь instance, получаешь Linux/Windows машину.
+До первого deployment полезно создать минимальный фундамент.
 
-### Типы instance
+### 1. Разделить accounts и окружения
 
-Категории:
-- **t** (burstable) — экономичные, для маленькой/непостоянной нагрузки. CPU credits.
-- **m** (general purpose) — баланс CPU/memory
-- **c** (compute optimized) — много CPU, для тяжёлой обработки
-- **r** (memory optimized) — много RAM, для in-memory БД, caches
-- **i** / **d** — много локального storage (SSD/HDD)
-- **g** / **p** — GPU для ML, графики
+Для небольшого проекта достаточно как минимум отделить production от
+non-production. В более крупной организации добавляют accounts для security,
+centralized logging и shared services.
 
-Размер: `nano`, `micro`, `small`, `medium`, `large`, `xlarge`, `2xlarge`, ..., `24xlarge` — пропорционально удваивается.
+AWS Organizations и Service Control Policies (SCP) задают внешнюю границу: какие
+действия вообще разрешены в дочернем account. SCP не выдаёт право сам по себе, а
+ограничивает права, которые могут выдать IAM policies внутри account.
 
-Примеры: `t3.medium`, `m6i.xlarge`, `c7g.4xlarge`, `r6i.16xlarge`.
+### 2. Настроить доступ людей через федерацию
 
-### Pricing model
+Для сотрудников рекомендуемый путь — IAM Identity Center или внешний identity
+provider. Пользователь получает временные credentials и assume role, а не
+постоянный access key IAM user.
 
-- **On-Demand** — почасовая оплата, можешь остановить когда хочешь. Самый дорогой вариант.
-- **Reserved Instances (RI)** — обязательство на 1-3 года, скидка 30-72%.
-- **Savings Plans** — гибче RI: обязательство на $/час, можешь менять instance types.
-- **Spot** — "лишние" мощности AWS, скидка до 90%. AWS может забрать в любой момент с предупреждением 2 мин.
+Root user нужен только для ограниченного набора account-level операций. Для него
+включают MFA, не создают access keys и не используют в ежедневной работе.
 
-**Стратегия:** baseline на RI/Savings, burst на on-demand, batch jobs на Spot.
+### 3. Выбрать основной регион
 
-### EBS — disks для EC2
+Регион выбирают по нескольким факторам:
 
-EBS (Elastic Block Store) — block storage attach'ивающийся к EC2. Не путать с S3 (object storage).
+- близость к пользователям и зависимым системам;
+- требования к размещению данных;
+- доступность нужных сервисов и instance families;
+- стоимость compute, storage и network transfer;
+- disaster recovery strategy.
 
-- **gp3 / gp2** — general purpose SSD, $0.08-0.1/GB-month
-- **io2** — high-IOPS SSD, для БД
-- **st1** — HDD throughput, для batch обработки
-- **sc1** — cold HDD, дёшево, медленно
+Самый дешёвый регион не обязательно даёт самый дешёвый сервис целиком. Если база
+далеко от пользователей или соседней системы, экономия на instance может
+превратиться в latency и сетевой счёт.
 
-Снапшоты EBS — в S3 (incremental, дёшево).
+### 4. Включить audit и cost controls
 
-### Когда использовать EC2
+До production traffic настраивают:
 
-- Когда нужен **полный контроль** над OS (custom kernel, специфические настройки)
-- Stateful workloads, не помещающиеся в managed service
-- Legacy software, требующий специфической среды
+- CloudTrail для аудита API-вызовов;
+- AWS Budgets и Cost Anomaly Detection;
+- cost allocation tags или account-level attribution;
+- владельца уведомлений и процедуру реакции;
+- ограничения autoscaling и service quotas там, где бесконечный рост опасен.
 
-**Когда НЕ использовать:** для веб-серверов и API сейчас часто лучше ECS/EKS (контейнеры) или Lambda — меньше operational overhead.
+Budget уведомляет о расходе, но не является жёстким spending cap. Подробнее
+про контроль стоимости — в
+[Cloud cost и архитектурные решения](./02-cloud-cost-and-architecture.md).
+
+### 5. Управлять инфраструктурой как кодом
+
+VPC, IAM roles, databases, queues и alarms лучше создавать через Terraform,
+CloudFormation или AWS CDK. Воспроизводимая конфигурация позволяет сравнить
+окружения, провести review и восстановить ресурс без ручного поиска console
+settings.
+
+CI/CD при этом обычно владеет версией приложения, а IaC — долгоживущей
+инфраструктурой. Если Terraform и deployment pipeline одновременно меняют image
+tag ECS service, инструменты начинают откатывать изменения друг друга.
 
 ---
 
-## VPC — сетевая изоляция
+## Карта выбора сервисов
 
-**VPC (Virtual Private Cloud)** — изолированная виртуальная сеть в AWS. Здесь живут EC2, RDS и другие ресурсы.
+| Задача | Отправная точка | Когда смотреть дальше |
+| --- | --- | --- |
+| Container API | ECS + Fargate | EKS для Kubernetes; EC2 для ОС |
+| Короткий event handler | Lambda | ECS для долгой или постоянной нагрузки |
+| Kubernetes workload | EKS | ECS, если Kubernetes API не нужен |
+| Виртуальная машина | EC2 + ASG | ECS/EKS для containers |
+| Объекты и файлы | S3 | EFS для POSIX; EBS для диска VM |
+| SQL OLTP-база | RDS | Aurora для отдельных HA/scale требований |
+| Key-value/document | DynamoDB | RDS для joins и гибких транзакций |
+| Cache | ElastiCache | Durable DB, если значение нельзя потерять |
+| Очередь задач | SQS | Kafka/MSK, если нужны replay и потоковая история |
+| Fan-out | SNS + SQS | EventBridge для routing по правилам |
+| Долгий workflow | Step Functions | Код для короткой атомарной операции |
+| Секрет | Secrets Manager | Parameter Store для простой конфигурации |
+| Метрики, логи, alarms | CloudWatch | OpenTelemetry и общий backend |
 
-### Структура
+Таблица задаёт старт, а не окончательный ответ. Выбор меняют access patterns,
+пиковая нагрузка, команда, RPO/RTO, compliance и стоимость отказа.
 
+---
+
+## Запуск приложений
+
+### EC2
+
+Amazon Elastic Compute Cloud (EC2) предоставляет виртуальные машины. Команда
+выбирает AMI, instance type, диск, сеть и способ обновления ОС.
+
+EC2 подходит, когда нужны:
+
+- контроль операционной системы, kernel settings или специальных daemons;
+- legacy software, которое трудно упаковать в managed runtime;
+- GPU, специальные accelerator или local instance storage;
+- предсказуемая постоянно загруженная машина;
+- собственный container runtime или Kubernetes nodes.
+
+Для production одну вручную созданную VM заменяют связкой:
+
+```text
+Launch Template
+      │
+      ▼
+Auto Scaling Group across 2+ AZ
+      │
+      ▼
+Application Load Balancer
 ```
-VPC: 10.0.0.0/16  (приватная сеть)
-├── Public subnet:  10.0.1.0/24 (AZ: a)    ← с интернетом
-├── Public subnet:  10.0.2.0/24 (AZ: b)
-├── Private subnet: 10.0.10.0/24 (AZ: a)   ← без прямого интернета
-├── Private subnet: 10.0.11.0/24 (AZ: b)
-└── Private subnet: 10.0.12.0/24 (AZ: c)
+
+Launch Template фиксирует AMI, instance type, IAM instance profile, storage и
+network settings. Auto Scaling Group поддерживает нужное количество instances и
+заменяет unhealthy nodes. ALB распределяет HTTP(S)-трафик.
+
+Выбор семейства начинается с профиля нагрузки:
+
+- `t` — burstable CPU для небольших и нерегулярных нагрузок;
+- `m` — общий баланс CPU и памяти;
+- `c` — CPU-intensive обработка;
+- `r` — memory-intensive рабочая нагрузка;
+- `i` и другие storage families — локальный высокий I/O;
+- `g`, `p`, `inf`, `trn` — GPU и accelerators.
+
+Размер instance нельзя выбирать только по среднему CPU. Проверяют p95/p99,
+память, GC, network, disk I/O, latency приложения, сезонность и запас на отказ
+части fleet.
+
+### ECS и Fargate
+
+Amazon Elastic Container Service (ECS) — AWS-native оркестратор контейнеров.
+
+Основные сущности:
+
+- **Task definition** — версия описания контейнеров, CPU, памяти, ports, roles и
+  logging.
+- **Task** — запущенный экземпляр task definition.
+- **Service** — поддерживает заданное число tasks, выполняет rollout и связывает
+  их с load balancer.
+- **Cluster** — логическая группа capacity, на которой запускаются tasks.
+
+Fargate предоставляет compute для ECS tasks без управления EC2 nodes. Команда
+оплачивает запрошенные vCPU и память task, а AWS выбирает и обслуживает host.
+
+Практический путь для обычного Go API:
+
+```text
+Container image in ECR
+        │
+        ▼
+ECS service on Fargate across 2+ AZ
+        │
+        ▼
+Application Load Balancer
+        │
+        ├── health checks
+        ├── autoscaling by CPU/request count
+        └── CloudWatch logs and metrics
 ```
 
-**Public subnet** — имеет роут в **Internet Gateway (IGW)**, instance в нём может быть доступен из интернета (если есть public IP).
+ECS + Fargate — хорошая отправная точка, если приложение уже контейнеризировано,
+но команде не нужны Kubernetes API, operators и собственная cluster platform.
 
-**Private subnet** — без IGW. Instance не доступен снаружи. Для исходящего трафика — **NAT Gateway** в public subnet.
+Fargate не делает приложение автоматически stateless. Локальный файл принадлежит
+одной task и исчезает вместе с ней; постоянные данные выносят в S3, database или
+подходящую shared file system.
 
-### Типичная архитектура
+### Lambda
 
+AWS Lambda запускает функцию по событию без постоянного fleet. Типичные triggers:
+
+- HTTP через API Gateway или Application Load Balancer;
+- S3 event;
+- SQS messages;
+- EventBridge event или schedule;
+- DynamoDB Streams и Kinesis.
+
+Lambda подходит для коротких event-driven операций, нерегулярной нагрузки и
+интеграционного glue code. Максимальная длительность одного invocation — 15
+минут. Длительность тарифицируется с округлением до 1 миллисекунды, а квоты
+concurrency задаются для account и region.
+
+Cold start зависит от runtime, package, initialization, VPC settings и выбранной
+памяти. Его нельзя оценивать универсальным числом. Для latency-sensitive пути
+измеряют распределение cold/warm latency и при необходимости рассматривают
+Provisioned Concurrency или постоянно запущенный container service.
+
+Lambda не подходит как автоматический выбор, если:
+
+- обработка дольше лимита invocation;
+- процесс должен постоянно держать соединение или локальное состояние;
+- нагрузка стабильна и выделенная capacity оказывается дешевле;
+- приложению нужен нестандартный host-level runtime;
+- большое число функций усложняет локальную разработку и observability flow.
+
+### EKS
+
+Amazon Elastic Kubernetes Service (EKS) предоставляет managed Kubernetes control
+plane. Worker capacity остаётся на EC2 managed node groups, Fargate или смешанной
+модели.
+
+EKS оправдан, когда команда действительно использует возможности Kubernetes:
+
+- единая platform model для многих сервисов;
+- operators и Custom Resource Definitions;
+- service mesh, admission policies и сложное размещение;
+- переносимые Helm charts и общий Kubernetes toolchain;
+- специальные DaemonSets, sidecars или node pools.
+
+Цена выбора — cluster upgrades, node lifecycle, add-ons, network policies,
+capacity planning и диагностика нескольких уровней. Managed control plane не
+убирает эту работу.
+
+Для доступа pod к AWS API используют EKS Pod Identity, когда он подходит. AWS
+рекомендует его как более простой путь для EKS. IAM Roles for Service Accounts
+(IRSA) остаётся альтернативой, в том числе для сценариев, где нужна основанная на
+OIDC модель или совместимость за пределами обычного EKS.
+
+### Как выбрать compute
+
+| Вопрос | Lambda | ECS + Fargate | EKS | EC2 |
+| --- | --- | --- | --- | --- |
+| Единица | invocation | task | pod | VM |
+| Управление nodes | нет | нет | зависит от режима | да |
+| Долгий процесс | ограничен | да | да | да |
+| Kubernetes API | нет | нет | да | только если поставить самостоятельно |
+| Контроль ОС | нет | нет | частично через nodes | полный |
+| Первый выбор | событие | container API | platform | host-specific ПО |
+
+Если требований мало, выбирают минимально сложный runtime. Возможность перенести
+контейнер между платформами сама по себе не окупает постоянную эксплуатацию EKS.
+
+---
+
+## Хранение данных
+
+### S3
+
+Amazon Simple Storage Service (S3) хранит objects в buckets. Это не POSIX file
+system: приложение работает с object key и API `PutObject/GetObject`, а не с
+обычными файловыми блокировками и произвольной записью в середину файла.
+
+S3 подходит для:
+
+- пользовательских uploads;
+- статических assets и backups;
+- data lake и архивов;
+- больших immutable objects;
+- обмена файлами между асинхронными этапами.
+
+S3 обеспечивает strong read-after-write consistency для object operations и
+list. Cross-Region Replication работает асинхронно и решает другую задачу:
+копирование данных между регионами для compliance или disaster recovery.
+
+Минимальный upload через AWS SDK for Go v2:
+
+```go
+func putObject(
+    ctx context.Context,
+    client *s3.Client,
+    bucket string,
+    key string,
+    body io.Reader,
+) error {
+    _, err := client.PutObject(ctx, &s3.PutObjectInput{
+        Bucket: aws.String(bucket),
+        Key:    aws.String(key),
+        Body:   body,
+    })
+    if err != nil {
+        return fmt.Errorf("put s3://%s/%s: %w", bucket, key, err)
+    }
+    return nil
+}
 ```
+
+Клиент SDK создают один раз и переиспользуют. Region и credentials приходят из
+конфигурации среды, а не зашиваются в handler.
+
+Для browser upload backend обычно выдаёт presigned URL:
+
+```text
+1. Client → API: запросить upload
+2. API: проверить пользователя и сгенерировать object key
+3. API → Client: presigned PUT/POST с коротким сроком
+4. Client → S3: загрузить bytes напрямую
+5. S3 Event → SQS/Lambda: проверить и обработать object
+```
+
+Presigned PUT ограничивает method, key и срок, но не даёт такого же удобного
+policy-ограничения размера, как presigned POST. После загрузки backend не должен
+доверять только ответу клиента: финальный object проверяет асинхронный worker.
+Полный flow разобран в
+[File Upload Flow](../../05-system-design/external-request-flows/05-file-upload-and-background-processing-flow.md).
+
+Для production явно задают:
+
+- Block Public Access и bucket policy;
+- versioning, если нужна защита от случайного overwrite/delete;
+- lifecycle rules для перехода в холодные storage classes и удаления;
+- encryption и KMS key policy, если нужен customer-managed key;
+- multipart upload cleanup для незавершённых загрузок;
+- access logs или CloudTrail data events для нужного уровня аудита;
+- replication и restore procedure по требованиям RPO/RTO.
+
+Storage class выбирают по частоте доступа и допустимому времени retrieval. Более
+дешёвый GB может иметь minimum storage duration, retrieval fee и более дорогие
+requests.
+
+### EBS и EFS
+
+Elastic Block Store (EBS) предоставляет block volume для EC2. Обычно volume
+привязан к одной Availability Zone и используется как диск VM или database node.
+Удаление EC2 не всегда удаляет связанный volume: поведение задаёт
+`DeleteOnTermination`.
+
+Elastic File System (EFS) предоставляет managed NFS file system, которую могут
+монтировать несколько clients. EFS нужен для общего POSIX-like доступа, но не
+заменяет object storage: модель производительности и стоимость операций другие.
+
+| Требование | Сервис |
+| --- | --- |
+| Object по key, огромный scale | S3 |
+| Block device для одной VM | EBS |
+| Общая NFS file system | EFS |
+
+### RDS и Aurora
+
+Amazon Relational Database Service (RDS) управляет PostgreSQL, MySQL, MariaDB,
+Oracle, SQL Server и Db2 в поддерживаемых вариантах. AWS обслуживает instance,
+backups и часть failover, но schema, indexes, query plans и connection pools
+остаются ответственностью команды.
+
+Для production решают отдельно:
+
+- нужен ли Multi-AZ deployment;
+- какой RPO/RTO дают backups и point-in-time recovery;
+- как приложение переживает DNS change и reconnect при failover;
+- сколько соединений откроют все replicas приложения;
+- нужны ли read replicas и допустим ли replication lag;
+- где хранится password или используется IAM database authentication;
+- как регулярно проверяется restore.
+
+Multi-AZ DB instance содержит primary и синхронный standby в другой AZ. Standby
+нужен для failover и не является обычной read replica. Для этой модели AWS
+указывает типичное время failover 60–120 секунд, но большая транзакция или recovery
+могут увеличить его.
+
+Read replica принимает чтение и реплицируется асинхронно. Она помогает read
+scaling или disaster recovery, но приложение должно учитывать lag. Текущие
+service quotas и engine-specific ограничения проверяют перед проектированием, а
+не фиксируют в архитектуре числом из статьи.
+
+Aurora — MySQL- и PostgreSQL-compatible managed database с отделённым от compute
+распределённым storage. Aurora рассматривают, когда её availability, replica
+model, fast failover или serverless capacity соответствуют требованиям. Для
+обычного небольшого CRUD backend RDS PostgreSQL остаётся нормальной отправной
+точкой; Aurora не исправляет плохие запросы и неограниченный pool.
+
+### DynamoDB
+
+DynamoDB — managed key-value/document database. Она хорошо работает, когда
+access patterns известны заранее и запрос начинается с partition key.
+
+Сильные стороны:
+
+- автоматическое распределение данных и высокий throughput;
+- on-demand и provisioned capacity modes;
+- conditional writes и транзакционные операции;
+- Time to Live для автоматического удаления устаревших items;
+- DynamoDB Streams для change events;
+- Global Tables для multi-region replication.
+
+Модель проектируют от запросов, а не от нормализованных entities. Partition key
+должен распределять нагрузку; один горячий ключ ограничивает параллелизм даже при
+большой общей capacity. Secondary indexes ускоряют дополнительные access
+patterns, но добавляют storage и write cost.
+
+DynamoDB не выбирают как drop-in замену PostgreSQL, если нужны ad-hoc queries,
+joins и гибкие multi-row transactions. Наличие transaction API не превращает
+key-value модель в реляционную.
+
+### ElastiCache
+
+ElastiCache предоставляет managed Valkey, Redis OSS и Memcached в поддерживаемых
+вариантах. Типичные задачи — cache, sessions, rate limiting и временное быстрое
+состояние.
+
+Cache должен иметь определённое поведение при miss, eviction, failover и полной
+недоступности. Если потеря значения нарушает бизнес-инвариант, это уже не только
+cache и нужен durable source of truth.
+
+### Как выбрать хранилище
+
+| Access pattern | Кандидат |
+| --- | --- |
+| `PUT/GET` большого object по key | S3 |
+| Block storage для EC2 | EBS |
+| Общая POSIX-like file system | EFS |
+| Реляционные транзакции и joins | RDS PostgreSQL/MySQL |
+| Отдельные требования Aurora к HA/scale | Aurora |
+| Key-value/document по известным ключам | DynamoDB |
+| Cache и временное состояние | ElastiCache |
+
+Формат данных не определяет выбор. JSON можно хранить и в PostgreSQL, и в S3, и
+в DynamoDB; важны операции, транзакционные границы, latency, рост и restore path.
+
+---
+
+## Асинхронная работа и интеграции
+
+### SQS
+
+Amazon Simple Queue Service (SQS) хранит сообщения, пока consumer не обработает
+и не удалит их.
+
+**Standard queue** даёт at-least-once delivery, best-effort ordering и очень
+высокую пропускную способность. Consumer обязан переживать дубликаты.
+
+**FIFO queue** сохраняет порядок внутри `MessageGroupId` и дедуплицирует отправку
+по `MessageDeduplicationId` в пределах deduplication interval. AWS называет это
+exactly-once processing, но это не гарантирует exactly-once бизнес-эффект во
+внешней базе или API. Если worker записал данные и умер до `DeleteMessage`, то же
+сообщение станет видимым снова. Handler всё равно делают идемпотентным.
+
+Пропускная способность FIFO зависит от режима, региона, batching и распределения
+по message groups. Фиксировать старое число `3000 messages/sec` как общий предел
+нельзя. Один message group обрабатывается последовательно; параллелизм получают
+несколькими независимыми groups.
+
+Безопасный consumer flow:
+
+```text
+ReceiveMessage with long polling
+        │
+        ▼
+validate payload and idempotency key
+        │
+        ▼
+perform business transaction
+        │
+        ├── error → do not delete; message becomes visible again
+        │
+        └── success → DeleteMessage
+```
+
+Упрощённый Go-код показывает только lifecycle одного сообщения:
+
+```go
+func handleMessage(
+    ctx context.Context,
+    client *sqs.Client,
+    queueURL string,
+    message types.Message,
+) error {
+    if message.Body == nil || message.ReceiptHandle == nil {
+        return errors.New("SQS message has no body or receipt handle")
+    }
+
+    if err := processIdempotently(ctx, *message.Body); err != nil {
+        return fmt.Errorf("process SQS message: %w", err)
+    }
+
+    _, err := client.DeleteMessage(ctx, &sqs.DeleteMessageInput{
+        QueueUrl:      aws.String(queueURL),
+        ReceiptHandle: message.ReceiptHandle,
+    })
+    if err != nil {
+        return fmt.Errorf("delete processed SQS message: %w", err)
+    }
+    return nil
+}
+```
+
+Visibility timeout должен покрывать нормальное время обработки с запасом. Для
+долгой операции worker продлевает его через `ChangeMessageVisibility`. После
+настроенного числа неуспешных попыток message отправляют в dead-letter queue
+(DLQ), а backlog и age of oldest message включают в alerts.
+
+### SNS
+
+Simple Notification Service (SNS) публикует одно сообщение нескольким
+subscribers. Для надёжного fan-out backend-системы часто подписывают отдельную SQS
+queue каждого consumer:
+
+```text
+orders-api → SNS topic: order-created
+                 ├── SQS billing → billing-worker
+                 ├── SQS email   → email-worker
+                 └── SQS audit   → audit-writer
+```
+
+Медленный email-worker не блокирует billing-worker, потому что у них разные
+queues, retries и DLQ. Прямая HTTP subscription возможна, но тогда доступность и
+повторы внешнего endpoint надо проектировать отдельно.
+
+### EventBridge
+
+Amazon EventBridge маршрутизирует события по rules. Он полезен для интеграции AWS
+services, SaaS sources и domain events, когда consumers выбираются по полям event,
+а не только по имени topic.
+
+SNS проще для прямого fan-out. EventBridge удобнее, когда нужны event bus,
+content-based routing, archive/replay или несколько независимых правил. Ни один
+из сервисов не заменяет durable task queue автоматически: если consumer должен
+контролировать скорость и backlog, target часто остаётся SQS.
+
+### Step Functions
+
+Step Functions хранит состояние workflow и координирует шаги Lambda, ECS tasks и
+AWS API calls. Сервис подходит для процесса, где нужны retries отдельных шагов,
+ожидание, timeout, compensation и видимый execution state.
+
+Короткую атомарную операцию яснее оставить в коде. Оркестратор окупается, когда
+шаги имеют разные времена жизни и failure policy.
+
+### SQS, SNS, EventBridge или Kafka
+
+| Требование | Выбор |
+| --- | --- |
+| Task queue для workers | SQS |
+| Fan-out одного сообщения | SNS + SQS |
+| Маршрутизация событий по полям | EventBridge |
+| Replayable ordered event log | Kafka/MSK или Kinesis по задаче |
+| Долгий workflow с состоянием | Step Functions |
+
+SQS хранит задачу до удаления, но не является долговременным event log для
+произвольного replay. Если новый consumer должен перечитать историю за месяц,
+сначала рассматривают streaming log или отдельное durable archive.
+
+---
+
+## Сеть и внешний трафик
+
+### VPC, subnets и routes
+
+Virtual Private Cloud (VPC) — региональная виртуальная сеть. Subnet принадлежит
+одной Availability Zone. Route table определяет следующий hop для destination,
+а internet gateway подключает VPC к интернету.
+
+Типовая схема:
+
+```text
 Internet
-   ↓
-[Internet Gateway]
-   ↓
-[Public subnet]
    │
-   ├── ALB (load balancer)
-   │     ↓
-   └── NAT Gateway
-         ↓
-[Private subnet]
+   ▼
+Internet Gateway
    │
-   ├── EC2 instances / ECS tasks   ← приложения
-   ├── RDS instances                ← БД
-   └── ElastiCache                  ← Redis
+   ▼
+Public subnets across AZs
+   ├── Application Load Balancer
+   └── NAT Gateway per AZ when required
+              │
+              ▼
+Private subnets across AZs
+   ├── ECS tasks / EC2 / EKS nodes
+   └── RDS / ElastiCache in isolated data subnets
 ```
 
-**Идея:**
-- Frontend (ALB) — публичный
-- Backend сервисы — приватные, доступны только через ALB
-- БД — приватные, доступны только из backend
+Public subnet определяется route к internet gateway, а не названием. Ресурсу для
+прямого интернет-доступа дополнительно нужен public IPv4/IPv6 и разрешающие
+security rules.
 
-### VPC peering / Transit Gateway
+NAT Gateway даёт исходящий IPv4-доступ private resources и не принимает
+произвольные входящие соединения. Он оплачивается за время и обработанные bytes.
+Для устойчивости обычно размещают NAT Gateway в каждой используемой AZ и ведут
+traffic local-AZ route, иначе отказ одной зоны или cross-AZ transfer становится
+частью рабочего пути.
 
-Несколько VPC можно соединять:
-- **VPC Peering** — point-to-point между двумя VPC
-- **Transit Gateway** — hub-and-spoke, многие VPC через один gateway
+### Security Groups и NACL
 
-Используется для:
-- Connect разных environments (prod, staging)
-- Connect dev VPC с corporate network
-- Multi-account architectures
+| Свойство | Security Group | Network ACL |
+| --- | --- | --- |
+| Применяется к | network interface/resource | subnet |
+| Состояние соединения | stateful | stateless |
+| Правила | allow | allow и deny |
+| Роль | основная граница workload | дополнительная граница subnet |
 
-### VPC Endpoints
+Security Group разрешает входящий или исходящий поток. Ответный трафик
+разрешённого соединения учитывается автоматически. В правилах можно ссылаться на
+другую security group: например, database принимает TCP 5432 только от group
+приложения, а не от всего subnet CIDR.
 
-Доступ к AWS сервисам (S3, DynamoDB) **без выхода в интернет**:
+Network ACL проверяет каждый direction отдельно. Из-за stateless-модели ошибка в
+ephemeral ports легко ломает ответы. Для большинства приложений основную модель
+строят на security groups, а NACL добавляют при явной subnet-level потребности.
 
-- **Gateway Endpoint** — для S3 и DynamoDB, бесплатно
-- **Interface Endpoint** — для остальных сервисов, ~$7/мес за каждый
+### VPC Endpoints и private access
 
-Преимущества: безопасность (трафик не идёт через интернет), меньше costs (не платим за NAT Gateway трафик к AWS).
+VPC endpoint позволяет обратиться к поддерживаемому AWS service без маршрута
+через public internet и NAT Gateway.
+
+- **Gateway endpoint** используется для S3 и DynamoDB и добавляется в route
+  tables.
+- **Interface endpoint** создаёт private network interfaces через AWS PrivateLink
+  и оплачивается за время endpoint в каждой AZ и обработанные данные.
+
+Endpoint не является автоматически бесплатным способом доступа. Для S3 и
+DynamoDB gateway endpoint часто уменьшает NAT cost. Для interface endpoint надо
+сравнить hourly/data processing charge, количество AZ и объём traffic.
+
+### ALB и NLB
+
+Application Load Balancer (ALB) работает на L7 и понимает HTTP(S): host/path
+routing, redirects, TLS termination, health checks и интеграцию с WAF.
+
+Network Load Balancer (NLB) работает на L4 и пересылает TCP/UDP/TLS traffic с
+низкой latency и высокой пропускной способностью. Он нужен для не-HTTP протоколов,
+source IP preservation и сценариев со static IP per AZ.
+
+NLB может передавать WebSocket как TCP traffic, но не понимает WebSocket routing
+на уровне приложения. Для обычного HTTP API выбирают ALB.
+
+### Route 53, CloudFront, WAF и Shield
+
+Route 53 предоставляет authoritative DNS, health checks и routing policies:
+weighted, latency-based, geolocation и failover.
+
+CloudFront — content delivery network. Он кеширует static и cacheable HTTP
+content ближе к пользователю. Эффект зависит от cache hit ratio: динамический
+персонализированный API с `Cache-Control: no-store` не становится дешевле только
+из-за CloudFront.
+
+AWS Shield Standard предоставляет базовую DDoS-защиту поддерживаемых AWS
+resources. AWS WAF фильтрует HTTP requests по rules. CloudFront сам по себе не
+является WAF: эти роли надо различать.
+
+Certificate Manager (ACM) выпускает и обновляет TLS certificates для
+поддерживаемых endpoints. Certificate для CloudFront запрашивают в `us-east-1`,
+даже если origin расположен в другом регионе.
 
 ---
 
-## Security Groups vs NACL
+## IAM, аутентификация и секреты
 
-Два слоя сетевого firewall в VPC. Часто путают.
+### IAM identities и policies
 
-### Security Group (SG)
+IAM отвечает на вопрос: какой principal может выполнить какое API action над
+каким resource и при каких conditions.
 
-- Действует на **уровне instance** (точнее, ENI — Elastic Network Interface)
-- **Stateful** — если разрешил входящий запрос, ответ автоматически разрешён
-- Только **allow** rules (deny by default)
-- Применяется к instance, не к подсети
+Основные сущности:
 
-Пример:
-```yaml
-WebServerSG:
-  Ingress:
-    - Port: 443
-      Source: 0.0.0.0/0       # HTTPS из любого места
-    - Port: 22
-      Source: 10.0.0.0/16     # SSH только из VPC
-  Egress:
-    - Allow all                # стандартно
-```
+- **IAM role** — identity без постоянного пароля/access key, которую можно
+  временно assume;
+- **IAM policy** — JSON-документ с `Effect`, `Action`, `Resource` и `Condition`;
+- **resource-based policy** — policy на S3 bucket, SQS queue, KMS key и других
+  поддерживаемых resources;
+- **permission boundary** — максимальная граница прав IAM principal;
+- **SCP** — внешняя граница разрешённых действий account в Organization.
 
-### NACL (Network ACL)
+Явный `Deny` имеет приоритет над `Allow`. Разрешение должно пройти все применимые
+границы: organization policy, identity/resource policy, permission boundary и
+session policy.
 
-- Действует на **уровне subnet**
-- **Stateless** — нужно явно разрешать обратный трафик
-- **Allow и deny** rules
-- Numbered rules (evaluated in order)
-
-Используются реже, обычно когда нужно блокировать конкретные IP на уровне всей subnet. Большинство случаев — Security Groups достаточно.
-
-### Best practices
-
-- SG для каждого "tier" (web, app, db) с явными правилами
-- **Reference SG** в правилах (вместо CIDR): "разрешить вход с web-sg" — лучше чем "разрешить с 10.0.1.0/24"
-- Default deny, explicit allow
-- Не открывать порты в `0.0.0.0/0` без необходимости (особенно SSH 22, RDP 3389)
-
----
-
-## IAM — управление доступом
-
-**IAM (Identity and Access Management)** — кто что может делать в твоём AWS аккаунте.
-
-### Базовые сущности
-
-**Users** — люди или приложения с long-term credentials (access key + secret).
-
-**Groups** — наборы users. Удобно для управления permission.
-
-**Roles** — assumed identity. Не имеет long-term credentials. Можно "приняться":
-- EC2 instance role — EC2 запускается с ролью, получает temporary credentials автоматически
-- Lambda role
-- Cross-account role — пользователь из другого аккаунта может assume
-
-**Policies** — JSON документы, описывающие разрешения.
-
-### Пример policy
+Пример runtime-policy для чтения одного prefix S3:
 
 ```json
 {
@@ -239,708 +760,497 @@ WebServerSG:
     {
       "Effect": "Allow",
       "Action": [
-        "s3:GetObject",
-        "s3:PutObject"
+        "s3:GetObject"
       ],
-      "Resource": "arn:aws:s3:::my-bucket/*"
-    },
-    {
-      "Effect": "Deny",
-      "Action": "s3:DeleteObject",
-      "Resource": "*"
+      "Resource": "arn:aws:s3:::orders-prod/invoices/*"
     }
   ]
 }
 ```
 
-**Структура statement:**
-- **Effect**: Allow или Deny
-- **Action**: какие API calls (можно wildcards: `s3:*`)
-- **Resource**: на какие ресурсы (ARN)
-- **Condition** (optional): когда применяется
+`s3:ListBucket` использует ARN bucket без `/*` и при необходимости ограничивается
+condition по prefix. Один wildcard `s3:*` на `*` скрывает модель доступа и
+увеличивает blast radius.
 
-### Best practices
+### Identity для workload
 
-**1. Никогда не используй root account для daily work.**
-Root — для billing settings и emergency. Создай IAM user с MFA для всего остального.
+Приложение получает отдельную role:
 
-**2. Принцип least privilege.**
-Не давай `AdministratorAccess` всем. Давай минимум что нужно для роли.
+- EC2 — instance profile;
+- ECS — task role, отличная от task execution role;
+- Lambda — execution role;
+- EKS — Pod Identity или IRSA;
+- внешний CI/CD — OIDC federation и `AssumeRoleWithWebIdentity`.
 
-**3. Используй IAM roles вместо access keys.**
-- EC2 → IAM Role (не embed credentials в код)
-- Lambda → execution role
-- Cross-account → assume role
-- Federation для users (SSO с Okta, Google Workspace)
+Task execution role нужна ECS agent для pull image и отправки logs. Task role
+получает само приложение для S3, SQS или DynamoDB. Объединение этих ролей обычно
+даёт runtime лишние infrastructure permissions.
 
-**4. Rotate access keys регулярно.**
+### AWS SDK for Go v2
 
-**5. MFA для всех users.** Особенно для тех с привилегированными правами.
-
-**6. IAM Access Analyzer** — находит publicly accessible ресурсы и unused permissions.
-
-### Permission boundaries
-
-Ограничение **maximum** permissions, который можно назначить. Полезно для:
-- Devops self-service: разработчики могут создавать roles, но не выйти за boundary
-- Multi-team environments
-
-### Аналитика и audit
-
-- **CloudTrail** — log всех API calls (кто что делал когда)
-- **Access Analyzer** — кто имеет доступ куда
-- **IAM Credential Report** — статус всех access keys и MFA
-
----
-
-## S3 — объектное хранилище
-
-**S3 (Simple Storage Service)** — массовое объектное хранилище. Файлы (объекты) в bucket'ах. Один из старейших и надёжнейших AWS сервисов.
-
-### Базовая модель
-
-- **Bucket** — контейнер для объектов. Имя глобально уникально по всему AWS.
-- **Object** — файл + metadata. Идентифицируется ключом (фактически путём).
-- **Region** — bucket принадлежит региону.
-
-```
-s3://my-bucket/users/alice/avatar.jpg
-        ↑           ↑
-      bucket    object key
-```
-
-### Storage classes
-
-| Class | Цена storage | Цена retrieval | Use case |
-|---|---|---|---|
-| **Standard** | $0.023/GB | бесплатно | Active data |
-| **Intelligent-Tiering** | автомат. | бесплатно | Unknown access pattern |
-| **Standard-IA** (Infrequent Access) | $0.0125/GB | $0.01/GB | Backups |
-| **One Zone-IA** | $0.01/GB | $0.01/GB | Re-creatable data |
-| **Glacier Instant Retrieval** | $0.004/GB | $0.03/GB | Archives, occasional access |
-| **Glacier Flexible** | $0.0036/GB | минуты-часы | Archives |
-| **Glacier Deep Archive** | $0.00099/GB | 12+ часов | Long-term archive |
-
-Lifecycle rules: автоматически переносить старые данные в более дешёвый класс.
-
-### Использование
+`config.LoadDefaultConfig` использует credential provider chain. Локально это
+может быть профиль IAM Identity Center в shared config. В AWS runtime SDK получает
+временные credentials из роли среды. Один и тот же код работает без встроенных
+access keys:
 
 ```go
-// AWS SDK v2 в Go
-import "github.com/aws/aws-sdk-go-v2/service/s3"
-
-client := s3.NewFromConfig(cfg)
-
-// Upload
-_, err := client.PutObject(ctx, &s3.PutObjectInput{
-    Bucket: aws.String("my-bucket"),
-    Key:    aws.String("users/alice/avatar.jpg"),
-    Body:   bytes.NewReader(imageData),
-    ContentType: aws.String("image/jpeg"),
-})
-
-// Download
-resp, err := client.GetObject(ctx, &s3.GetObjectInput{
-    Bucket: aws.String("my-bucket"),
-    Key:    aws.String("users/alice/avatar.jpg"),
-})
-defer resp.Body.Close()
-data, _ := io.ReadAll(resp.Body)
-```
-
-### Presigned URLs
-
-Дают временный доступ к private object без AWS credentials у клиента — и на скачивание, и на загрузку. Главный смысл для upload: байты файла **не идут через backend**, клиент кладёт их прямо в S3.
-
-**Download (presigned GET):**
-
-```go
-presignClient := s3.NewPresignClient(client)
-presigned, err := presignClient.PresignGetObject(ctx, &s3.GetObjectInput{
-    Bucket: aws.String("my-bucket"),
-    Key:    aws.String("private/file.pdf"),
-}, s3.WithPresignExpires(15*time.Minute))
-
-// presigned.URL — можно отдать пользователю, файл доступен 15 минут
-```
-
-**Upload напрямую, без proxy через сервер (presigned PUT):**
-
-```go
-presigned, err := presignClient.PresignPutObject(ctx, &s3.PutObjectInput{
-    Bucket:      aws.String("my-bucket"),
-    Key:         aws.String("uploads/alice/uuid.jpg"), // ключ генерит backend, не клиент
-    ContentType: aws.String("image/jpeg"),
-}, s3.WithPresignExpires(15*time.Minute))
-
-// presigned.URL отдаём клиенту → он сам делает PUT в S3
-```
-
-**Как работает подпись.** Presigned URL — это обычный URL объекта плюс query-параметры, в которых зашита **HMAC-SHA256 подпись** запроса твоим secret access key (схема SigV4, `AWS4-HMAC-SHA256`). При загрузке S3 пересчитывает подпись своим экземпляром секрета и сверяет. Сам secret клиенту не передаётся — только производная подпись, жёстко привязанная к bucket + key + method + сроку (`X-Amz-Expires`). Поэтому ссылку нельзя переиспользовать для другого файла или после истечения.
-
-**Поток для upload:** backend (1) проверяет права и генерит уникальный key, (2) выдаёт presigned PUT, (3) клиент грузит напрямую в S3; (4) о завершении backend узнаёт из **S3 Event Notification** (`s3:ObjectCreated:*` → SQS/SNS/Lambda), а не от клиента; (5) async-воркер валидирует/обрабатывает. Размер у presigned **PUT** не ограничить — если нужен лимит, берут **presigned POST** с policy `["content-length-range", 0, 10485760]`, и S3 сам отклонит превышение. Flow целиком: [File Upload Flow](../../05-system-design/external-request-flows/05-file-upload-and-background-processing-flow.md).
-
-### Подпись в других облаках (GCS, Azure)
-
-Идея — временный подписанный доступ + прямая загрузка клиент↔хранилище мимо backend — одинакова везде. Отличается **криптопримитив подписи**:
-
-| Облако | Чем подписывается | Алгоритм |
-|---|---|---|
-| **AWS S3** | секретный ключ (shared secret) | HMAC-SHA256, `AWS4-HMAC-SHA256` (SigV4) |
-| **GCP GCS** | приватный RSA-ключ сервис-аккаунта (асимметрично) | RSA-SHA256, `GOOG4-RSA-SHA256` (V4) |
-| **Azure Blob** | account key или user-delegation key | SAS-токен (HMAC) |
-
-Практическая разница с AWS:
-- **GCS** по умолчанию подписывает **приватным ключом сервис-аккаунта**, а не общим секретом. Плюс: можно подписывать через IAM API `signBlob`, **не держа приватный ключ в сервисе** (ключ не покидает Google). В Go — `bucket.SignedURL(obj, &storage.SignedURLOptions{Method, Expires, Scheme: storage.SigningSchemeV4, GoogleAccessID, PrivateKey|SignBytes})`. Для S3-совместимости GCS также умеет **HMAC-ключи** (`GOOG4-HMAC-SHA256`) — тогда механика как у AWS.
-- **Azure** использует **SAS** (Shared Access Signature) — токен с правами и сроком, подписанный account key либо user-delegation key (через Entra ID).
-- **Resumable/большие файлы:** S3 — multipart upload; GCS — resumable session URI (POST инициирует, возвращает session URI); цель та же.
-
-Итог: SDK и код разные, но архитектурный паттерн переносится один-в-один — выдать подписанную ссылку, клиент грузит напрямую, дальше async-обработка.
-
-### Особенности
-
-- **Strong consistency** (с 2020) — после write следующий read увидит новые данные
-- **Eventual consistency** — версионирование, кросс-регион репликация
-- **Versioning** — хранить все версии объектов
-- **Encryption at rest** — SSE-S3 (managed by AWS), SSE-KMS (own keys), SSE-C (customer keys)
-- **Encryption in transit** — HTTPS обязательно
-- **Multi-part upload** — файлы > 100 MB лучше разбивать на parts (parallel + retry)
-- **Pre-signed POST** — для browser uploads (без proxy)
-
-### Private vs Public
-
-**Public access blocking** — по умолчанию все bucket'ы приватные. Это **хорошо**. Большинство утечек "AWS S3 bucket exposed" — из-за случайно открытого доступа.
-
-Перед открытием bucket'а — спроси себя: реально ли нужен public access? Часто лучше использовать **CloudFront перед S3** с access control.
-
----
-
-## RDS — managed реляционные БД
-
-**RDS (Relational Database Service)** — managed Postgres, MySQL, MariaDB, Oracle, SQL Server.
-
-AWS управляет:
-- Установка и обновление engine
-- Backups (automatic snapshots)
-- Patching
-- Replication (read replicas, multi-AZ)
-- Monitoring
-
-Ты управляешь:
-- Schema и queries
-- Размер instance
-- Storage type и size
-
-### Multi-AZ
-
-Standard production setup: primary + standby в другой AZ, синхронная репликация. При failover (через ~60-120 секунд) standby становится primary.
-
-**Цена:** примерно × 2 от single-AZ.
-
-### Read replicas
-
-Async replicas (до 5) для read scaling. Можно cross-region для disaster recovery или low-latency reads ближе к пользователям.
-
-### Aurora
-
-Postgres/MySQL-совместимая БД, переписанная AWS:
-- Storage отдельно от compute (replicated 6x across 3 AZ)
-- Быстрее failover (~30 сек)
-- Up to 15 read replicas
-- Continuous backup без impact на performance
-- Aurora Serverless — auto-scaling
-
-Дороже обычной RDS, но для критичных production — обычно выбор по умолчанию.
-
-### Когда использовать RDS
-
-- Когда нужна PostgreSQL/MySQL без оверхеда self-hosted
-- Production-grade backups и failover из коробки
-- Не нужны кастомные extensions, недоступные в RDS
-
-**Когда self-hosted:**
-- Need superuser access
-- Specific extensions недоступные в RDS
-- Cost optimization (RDS дороже EC2 + manual)
-
----
-
-## DynamoDB — managed NoSQL
-
-**DynamoDB** — managed key-value / document БД. Сильно отличается от RDS.
-
-### Особенности
-
-- **Fully managed** — нет instance size, AWS сам масштабирует
-- **Single-digit ms latency** даже на больших данных
-- **Schemaless** — гибкая структура items
-- **Provisioned vs On-demand** capacity
-- **Global tables** — multi-region replication
-
-### Когда использовать
-
-- High-throughput key-value access (миллионы requests/sec)
-- Unpredictable load (serverless с on-demand)
-- Strict latency requirements
-- Hot keys / specific access patterns
-
-### Когда НЕ использовать
-
-- Complex queries с JOIN, ad-hoc analytics — DynamoDB этого не умеет
-- Сильно реляционные данные
-- Когда нужны транзакции на много items (есть, но дорогие и ограниченные)
-
-DynamoDB требует переосмысления модели данных — это не "drop-in" replace для Postgres.
-
----
-
-## SQS — очереди сообщений
-
-**SQS (Simple Queue Service)** — managed queue для async обработки.
-
-### Типы очередей
-
-**Standard queue:**
-- At-least-once delivery
-- Дубликаты возможны
-- Best-effort ordering
-- Unlimited throughput
-- Cheap
-
-**FIFO queue:**
-- Exactly-once delivery
-- Strict ordering
-- 3000 messages/sec (с batching)
-- Дороже Standard
-
-### Использование
-
-```go
-// AWS SDK v2
-client := sqs.NewFromConfig(cfg)
-
-// Send
-_, _ = client.SendMessage(ctx, &sqs.SendMessageInput{
-    QueueUrl:    aws.String(queueURL),
-    MessageBody: aws.String(`{"user_id": 42, "action": "send_email"}`),
-})
-
-// Receive (long polling — до 20 секунд)
-resp, _ := client.ReceiveMessage(ctx, &sqs.ReceiveMessageInput{
-    QueueUrl:            aws.String(queueURL),
-    MaxNumberOfMessages: 10,
-    WaitTimeSeconds:     20,  // long poll
-    VisibilityTimeout:   30,  // секунд "невидимости" после receive
-})
-
-for _, msg := range resp.Messages {
-    // Обработать сообщение
-    processMessage(*msg.Body)
-
-    // Delete после успешной обработки (иначе вернётся в очередь)
-    client.DeleteMessage(ctx, &sqs.DeleteMessageInput{
-        QueueUrl:      aws.String(queueURL),
-        ReceiptHandle: msg.ReceiptHandle,
-    })
-}
-```
-
-### Visibility timeout
-
-Когда worker получает message, оно становится "невидимым" для других worker'ов на N секунд. Если worker не успел обработать и удалить — message вернётся в очередь.
-
-**Если processing медленный — выставь больший timeout** или периодически вызывай `ChangeMessageVisibility` для extension.
-
-### Dead Letter Queues (DLQ)
-
-Если message обрабатывался N раз и всё ещё fails — отправляется в DLQ. Не теряем плохие messages, можем разбираться вручную.
-
-### SQS vs Kafka vs RabbitMQ
-
-| | SQS | Kafka | RabbitMQ |
-|---|---|---|---|
-| Управление | Managed | Self-host или MSK | Self-host или managed |
-| Throughput | Очень высокий | Очень высокий | Средний |
-| Order guarantees | FIFO опция | По partition | Через exchange settings |
-| Retention | до 14 дней | Конфигурируется (дни-навсегда) | Пока не consumed |
-| Replay | Нет | Да | Нет |
-| Use case | Task queue | Event streaming, audit | Complex routing |
-
-SQS — простой "send messages, work через workers". Не Kafka.
-
----
-
-## SNS — pub/sub и notifications
-
-**SNS (Simple Notification Service)** — pub/sub. Publisher отправляет в topic, subscriber'ы получают.
-
-Subscribers могут быть:
-- SQS queue (fan-out pattern)
-- Lambda function
-- HTTP endpoint
-- Email / SMS
-- Mobile push
-
-### Fan-out pattern
-
-```
-Publisher: SendMessage to SNS topic "order-created"
-                ↓
-   ┌────────────┼────────────┐
-   ↓            ↓            ↓
-SQS: email    SQS: stats   Lambda: notify
-worker        worker        admins
-```
-
-Один event → много consumers, каждый со своей очередью и speed.
-
----
-
-## Lambda — serverless
-
-**AWS Lambda** — run code без management сервера. Платишь за выполнение (invocations + compute time).
-
-### Особенности
-
-- **No servers to manage** — AWS поднимает контейнеры по требованию
-- **Auto-scaling** — от 0 до тысяч параллельных executions
-- **Pay per use** — только за реальные выполнения (100ms billing granularity)
-- **Lots of triggers** — HTTP (через API Gateway), S3 events, SQS, DynamoDB streams, CloudWatch schedule, etc.
-
-### Лимиты
-
-- Max execution time: **15 минут**
-- Memory: 128 MB - 10 GB
-- Package size: 50 MB zipped (250 MB с layers), 10 GB через container image
-- Concurrent executions per account: ~1000 (по умолчанию, можно увеличить)
-- **Cold start** — первый запуск после простоя ~100-1000 мс (Go быстрее Python/Java)
-
-### Когда использовать Lambda
-
-- **Event-driven** — обработка S3 uploads, processing queue messages
-- **Sporadic traffic** — мало запросов, нет смысла держать EC2
-- **API for prototypes / low-traffic** — Lambda + API Gateway быстро и дёшево
-- **Cron jobs** — Lambda + EventBridge schedule
-
-### Когда НЕ использовать
-
-- **High-latency-sensitive** — cold starts могут добавить 100-500 мс
-- **Long-running** — 15 минут лимит
-- **WebSockets** — Lambda не для держания соединений (можно через API Gateway WebSocket, но дорого)
-- **High-throughput consistent load** — EC2/ECS дешевле при стабильной нагрузке
-
-Подробнее про serverless — см. (planned) `serverless/01-edge-and-serverless.md`.
-
----
-
-## EKS / ECS — оркестрация контейнеров
-
-**ECS (Elastic Container Service)** — AWS-native контейнерный оркестратор.
-
-**EKS (Elastic Kubernetes Service)** — managed Kubernetes.
-
-### ECS
-
-Проще EKS, но AWS-specific. Концепции:
-- **Task** = один или несколько контейнеров, запускаются вместе
-- **Service** = долгоживущий task с auto-scaling
-- **Cluster** = группа compute (EC2 или Fargate)
-
-**Fargate** — serverless compute для контейнеров (нет EC2 instance, AWS сам провижионит).
-
-### EKS
-
-Standard Kubernetes API, плюс AWS integrations:
-- IAM auth (kubectl с AWS credentials)
-- AWS Load Balancer Controller (ALB как Ingress)
-- IRSA (IAM Roles for Service Accounts) — pod-level IAM permissions
-
-Подходит когда:
-- Уже знаком с Kubernetes
-- Нужна portability (можно перенести на GKE/AKS)
-- Используете Helm, operators, complex deployments
-
-### Когда что
-
-- **ECS + Fargate** — простота, AWS-native, не нужен Kubernetes
-- **EKS** — стандартный Kubernetes, переносимость, ecosystem
-- **EC2 raw** — legacy или специальные нужды
-
----
-
-## CloudWatch — мониторинг
-
-**CloudWatch** — AWS observability platform. Включает:
-
-- **Metrics** — числовые метрики (CPU, memory, custom)
-- **Logs** — лог aggregation (CloudWatch Logs)
-- **Alarms** — алерты по threshold'ам
-- **Dashboards** — визуализация
-- **Insights** — query language для логов
-- **X-Ray** — distributed tracing (отдельный сервис, интегрируется)
-
-### Logs
-
-```
-Container stdout → CloudWatch Logs (через log driver)
-EC2 application → CloudWatch Agent → CloudWatch Logs
-Lambda → автоматически → CloudWatch Logs
-```
-
-Стоимость: ~$0.50/GB ingested + $0.03/GB-month storage. Может быть дорого для chatty логирования.
-
-### Metrics
-
-Стандартные метрики автоматом для большинства сервисов (EC2, RDS, ALB).
-
-Custom metrics через API:
-```go
-import "github.com/aws/aws-sdk-go-v2/service/cloudwatch"
-
-cw.PutMetricData(ctx, &cloudwatch.PutMetricDataInput{
-    Namespace: aws.String("MyApp"),
-    MetricData: []types.MetricDatum{
-        {
-            MetricName: aws.String("ProcessedOrders"),
-            Value:      aws.Float64(42),
-            Unit:       types.StandardUnitCount,
-        },
-    },
-})
-```
-
-### Альтернативы
-
-Многие команды используют **Datadog**, **New Relic**, **Grafana + Prometheus** вместо CloudWatch для метрик — больше фич, лучше UX. Логи иногда тоже идут в DataDog или OpenSearch.
-
-CloudWatch — fallback или для базового мониторинга.
-
----
-
-## Route 53 — DNS
-
-**Route 53** — managed DNS сервис AWS.
-
-Ключевые фичи:
-- **Health checks** — мониторит endpoints
-- **Weighted routing** — traffic split (canary deployments)
-- **Latency-based routing** — направить к ближайшему региону
-- **Geolocation routing** — направить по стране пользователя
-- **Failover routing** — primary + secondary с health checks
-
-Стоимость: $0.50/hosted zone/month + $0.40/million queries.
-
----
-
-## CloudFront — CDN
-
-**CloudFront** — CDN от AWS. Кеширует контент в edge locations по всему миру.
-
-### Когда использовать
-
-- **Static assets** — JS, CSS, images, video
-- **API caching** — для read-heavy endpoints с long TTL
-- **Защита от DDoS** — front-line firewall
-- **HTTPS termination** — managed certificates через ACM
-
-### Виды origin
-
-- S3 bucket
-- ALB / EC2
-- Custom origin (любой HTTP server)
-- Lambda@Edge / CloudFront Functions — code at edge
-
-### Подводные камни
-
-- **Cache invalidation** — $0.005 за path (после 1000 free/month). Лучше использовать versioned URLs (`app.v123.js`)
-- **HTTPS только через ACM cert** в us-east-1 (даже если CloudFront global)
-- **Origin Shield** — дополнительный кэш слой для origin protection
-
----
-
-## ELB / ALB / NLB — load balancers
-
-Три типа load balancer'ов в AWS:
-
-| | ALB | NLB | CLB (legacy) |
-|---|---|---|---|
-| Layer | 7 (HTTP) | 4 (TCP/UDP) | 4 и 7 |
-| Path-based routing | Да | Нет | Limited |
-| Host-based routing | Да | Нет | No |
-| WebSocket | Да | Да | Да |
-| Static IP | Нет (DNS only) | Да | Нет |
-| Performance | Высокая | Очень высокая | Низкая |
-| Use case | Web apps, APIs | High-throughput TCP, gaming | Legacy |
-
-**ALB (Application Load Balancer)** — для большинства HTTP-сервисов. Routing по path и host, native SSL termination, integration с Cognito/WAF.
-
-**NLB (Network Load Balancer)** — extremely high throughput, low latency. Когда нужен static IP или millions of connections.
-
-**Classic Load Balancer** — устаревший, не использовать в новых проектах.
-
----
-
-## Secrets Manager и Parameter Store
-
-Два способа хранить секреты в AWS:
-
-### Secrets Manager
-
-- Для **секретов** (passwords, API keys, DB credentials)
-- **Automatic rotation** — для RDS, можно custom для остальных
-- **Per-secret cost** — $0.40/month + $0.05 за 10k requests
-- Подходит когда нужна ротация
-
-### SSM Parameter Store
-
-- Для **config + secrets**
-- Standard parameters — **бесплатно** (до 10k)
-- Advanced parameters (>4KB, larger limits) — $0.05/month each
-- No built-in rotation
-- Подходит для config и где не нужна ротация
-
-### Использование в Go
-
-```go
-import "github.com/aws/aws-sdk-go-v2/service/secretsmanager"
-
-sm := secretsmanager.NewFromConfig(cfg)
-resp, _ := sm.GetSecretValue(ctx, &secretsmanager.GetSecretValueInput{
-    SecretId: aws.String("prod/db/password"),
-})
-
-var creds struct {
-    Username string `json:"username"`
-    Password string `json:"password"`
-    Host     string `json:"host"`
-}
-json.Unmarshal([]byte(*resp.SecretString), &creds)
-```
-
-Best practice: **не embed credentials в код или env files**. Используй Secrets Manager или Parameter Store, читай при старте сервиса (или через sidecar).
-
-См. также: [11-security/secrets-management/](../../11-security/secrets-management/).
-
----
-
-## Managed vs self-hosted
-
-Главное решение в AWS — что брать managed, что самим.
-
-### Managed обычно выигрывает
-
-- **Простые сервисы** (S3 vs self-hosted blob store) — managed просто всегда лучше
-- **БД** (RDS Postgres vs EC2 Postgres) — operational overhead enormous, RDS делает 90% сам
-- **Logs aggregation** (CloudWatch Logs vs ELK) — для маленьких/средних команд
-- **Queues** (SQS vs Kafka) — если не нужен replay/streaming
-
-### Self-hosted имеет смысл
-
-- **Когда нужны фичи которых нет в managed** (Postgres extensions, custom Kafka configs)
-- **Когда цена managed превышает cost самостоятельного управления**
-- **Cross-cloud portability** — managed AWS привязывает к AWS
-
-### Trade-off
-
-```
-Managed:
-+ Меньше operational toil
-+ Better reliability out of the box
-+ Less expertise needed
-- Cost premium (~30-100%)
-- Vendor lock-in
-- Limited customization
-
-Self-hosted:
-+ Cheaper at scale
-+ Full control
-+ Portability
-- Need DevOps expertise
-- Operational burden
-- More to break
-```
-
-Правило: **начинай с managed**, переходи на self-hosted если уперся в лимиты или cost.
-
----
-
-## AWS SDK в Go
-
-```go
-import (
-    "github.com/aws/aws-sdk-go-v2/config"
-    "github.com/aws/aws-sdk-go-v2/service/s3"
-)
-
-func main() {
-    cfg, err := config.LoadDefaultConfig(ctx,
-        config.WithRegion("us-east-1"),
+func newS3Client(ctx context.Context, region string) (*s3.Client, error) {
+    cfg, err := config.LoadDefaultConfig(
+        ctx,
+        config.WithRegion(region),
     )
-    if err != nil { ... }
-
-    s3Client := s3.NewFromConfig(cfg)
-    // ...
+    if err != nil {
+        return nil, fmt.Errorf("load AWS config: %w", err)
+    }
+    return s3.NewFromConfig(cfg), nil
 }
 ```
 
-### Credential resolution
+Environment variables с постоянным access key допустимы только как ограниченный
+legacy-вариант. В production предпочтительны temporary credentials роли. SDK
+обновляет их автоматически.
 
-AWS SDK ищет credentials в порядке:
-1. Environment variables (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`)
-2. Shared credentials file (`~/.aws/credentials`)
-3. IAM role (если на EC2/ECS/Lambda)
-4. SSO
+Retries SDK не означают, что любая бизнес-операция безопасна для повторения.
+Повтор `GetObject` обычно безопасен, а повтор внешнего payment request требует
+idempotency key. Timeout и cancellation передают через `context.Context`.
 
-**Best practice:** на EC2/ECS/Lambda — всегда IAM role. Никогда не embed access keys в код.
+### Secrets Manager и Parameter Store
 
-### Retries и timeouts
+Secrets Manager хранит versioned secrets и поддерживает rotation workflows.
+Systems Manager Parameter Store подходит для конфигурации и простых secure
+parameters. Конкретный выбор зависит от rotation, размера, throughput, integration
+и цены.
 
-SDK по умолчанию имеет retries с exponential backoff для idempotent операций. Для production:
+Секрет читают через IAM role приложения. Ошибки чтения и JSON parsing нельзя
+игнорировать:
 
 ```go
-cfg, _ := config.LoadDefaultConfig(ctx,
-    config.WithRegion("us-east-1"),
-    config.WithRetryMaxAttempts(5),
-)
+func loadDatabaseSecret(
+    ctx context.Context,
+    client *secretsmanager.Client,
+    secretID string,
+) (databaseCredentials, error) {
+    output, err := client.GetSecretValue(ctx, &secretsmanager.GetSecretValueInput{
+        SecretId: aws.String(secretID),
+    })
+    if err != nil {
+        return databaseCredentials{}, fmt.Errorf("get database secret: %w", err)
+    }
+    if output.SecretString == nil {
+        return databaseCredentials{}, errors.New("database secret is not a string")
+    }
+
+    var credentials databaseCredentials
+    rawSecret := []byte(*output.SecretString)
+    if err := json.Unmarshal(rawSecret, &credentials); err != nil {
+        return databaseCredentials{}, fmt.Errorf("decode database secret: %w", err)
+    }
+    return credentials, nil
+}
 ```
+
+Читать secret на каждый HTTP request дорого и создаёт новую runtime dependency.
+Обычно используют startup load или client-side cache с контролируемым refresh.
+При rotation приложение должно уметь получить новую версию и переподключиться.
+
+Key Management Service (KMS) управляет cryptographic keys и операциями
+encrypt/decrypt/sign. KMS key не заменяет secret: key остаётся в KMS, а secret —
+значение, которое приложение должно получить.
+
+Подробнее способы доставки разобраны в
+[Secrets delivery options](../../11-security/secrets-management/01-secrets-delivery-options.md).
 
 ---
 
-## Полезные команды AWS CLI
+## Сборка и доставка
 
-```bash
-# Текущая identity
-aws sts get-caller-identity
+### ECR
 
-# Список EC2 instances
-aws ec2 describe-instances --query 'Reservations[].Instances[].[InstanceId,State.Name,Tags[?Key==`Name`]|[0].Value]'
+Elastic Container Registry (ECR) хранит container images. Production deployment
+лучше привязывать к immutable digest, а не к перезаписываемому tag `latest`.
 
-# S3 cp/sync
-aws s3 cp file.txt s3://my-bucket/
-aws s3 sync ./local-dir s3://my-bucket/path/
-
-# CloudWatch logs (tail)
-aws logs tail /aws/lambda/my-function --follow
-
-# RDS snapshot
-aws rds create-db-snapshot --db-instance-identifier mydb --db-snapshot-identifier mydb-snap
-
-# Costs
-aws ce get-cost-and-usage \
-  --time-period Start=2026-01-01,End=2026-01-31 \
-  --granularity MONTHLY \
-  --metrics UnblendedCost
+```text
+git commit
+    │
+    ▼
+CI: tests → build image → vulnerability scan
+    │
+    ▼
+ECR: image@sha256:...
+    │
+    ▼
+ECS/EKS deployment → health checks → gradual rollout
 ```
+
+Lifecycle policy удаляет старые untagged images. Перед удалением проверяют, не
+нужны ли они для rollback и audit.
+
+### CI/CD и IaC
+
+Pipeline обычно выполняет:
+
+1. Tests и static analysis.
+2. Сборку одного immutable artifact.
+3. Публикацию artifact в ECR или S3.
+4. Deployment новой revision/task definition.
+5. Health checks и controlled rollout.
+6. Автоматический rollback или остановку rollout при ошибке.
+
+CI получает AWS credentials через OIDC federation и короткую role session. Access
+key в repository secret создаёт долгоживущий credential, который сложнее
+ограничить и отозвать.
+
+CodeBuild и CodePipeline могут реализовать этот flow внутри AWS, но команда может
+использовать GitHub Actions, GitLab CI или другой CI. Важнее границы прав и
+immutable artifact, а не название orchestration product.
 
 ---
 
-См. также: [02-cloud-cost-and-architecture.md](./02-cloud-cost-and-architecture.md) — про стоимость AWS, выбор instance types, оптимизация.
+## Наблюдаемость и аудит
 
-## Полезные ссылки
+### CloudWatch
 
-- [AWS Documentation](https://docs.aws.amazon.com/)
-- [AWS Well-Architected Framework](https://aws.amazon.com/architecture/well-architected/) — best practices
-- [AWS Service Quotas](https://docs.aws.amazon.com/general/latest/gr/aws_service_limits.html) — лимиты по умолчанию
-- [is.gd/AWS](https://github.com/donnemartin/awesome-aws) — большой список AWS resources
-- [AWS Builders' Library](https://aws.amazon.com/builders-library/) — Amazon engineering articles
-- [Last Week in AWS](https://www.lastweekinaws.com/) — Corey Quinn, news & snark
+CloudWatch объединяет несколько ролей:
+
+| Сигнал | Инструмент | Практическое использование |
+| --- | --- | --- |
+| Metrics | CloudWatch Metrics | request rate, errors, latency, saturation |
+| Logs | CloudWatch Logs | structured application и platform logs |
+| Alarms | CloudWatch Alarms | уведомление или ограниченное automated action |
+| Dashboards | CloudWatch Dashboards | обзор service health и SLO signals |
+| Traces | X-Ray / OpenTelemetry integration | путь запроса между сервисами |
+
+EC2 автоматически публикует host-visible metrics вроде CPU, network и disk
+operations. Memory и filesystem usage находятся внутри гостевой ОС, поэтому для
+них нужен CloudWatch Agent или другой collector.
+
+ECS с `awslogs` driver и Lambda отправляют `stdout/stderr` в CloudWatch Logs. Для
+поиска приложение пишет structured JSON с постоянными полями `service`,
+`environment`, `request_id`, `trace_id`, `operation` и `error`.
+
+Retention задают явно. `Never expire` на verbose logs превращает временную
+диагностику в постоянный storage cost.
+
+### CloudTrail и Config
+
+CloudTrail записывает account activity и API events. Management events и data
+events имеют разный объём и стоимость; data events для S3 object access или
+Lambda invocation включают осознанно.
+
+AWS Config отслеживает конфигурацию поддерживаемых ресурсов и её изменения. Это
+помогает проверять правила вроде «S3 bucket не public» или «security group не
+открывает SSH в интернет», но не заменяет runtime metrics и application logs.
+
+### Минимальный набор сигналов
+
+До production нужны:
+
+- request rate, error rate и latency API;
+- CPU/memory и saturation compute;
+- число healthy targets и deployment failures;
+- database connections, latency, storage и replica lag;
+- SQS backlog, age of oldest message и DLQ depth;
+- Lambda errors, throttles, duration и concurrency;
+- log ingestion volume и retention;
+- alarms с владельцем и понятным runbook.
+
+Лог `error` без metric и alarm не создаёт наблюдаемость: никто не обязан читать
+все logs вручную.
+
+---
+
+## Три типовые архитектуры
+
+### Небольшой container API
+
+```text
+Client
+  │ HTTPS
+  ▼
+Route 53 → Application Load Balancer
+                         │
+                         ▼
+              ECS service on Fargate
+                  ├── RDS PostgreSQL
+                  ├── S3
+                  └── SQS worker queue
+
+Runtime identity: ECS task role
+Secrets: Secrets Manager
+Signals: CloudWatch Metrics, Logs and Alarms
+```
+
+Это хороший старт для небольшой команды с контейнеризированным Go-сервисом. Нет
+Kubernetes cluster и EC2 fleet, но команда всё ещё проектирует database HA,
+connection pool, idempotency, autoscaling bounds и alerts.
+
+### Serverless event-driven backend
+
+```text
+Client → API Gateway → Lambda → DynamoDB
+                           │
+                           ├── S3
+                           └── SQS → Lambda worker
+
+Events: EventBridge
+Secrets: Secrets Manager
+Signals: CloudWatch + X-Ray/OpenTelemetry
+```
+
+Модель подходит для нерегулярной нагрузки и коротких handlers. Ограничения
+concurrency защищают downstream: если Lambda масштабируется быстрее database или
+partner API, очередь и reserved concurrency должны сгладить поток.
+
+### Kubernetes platform
+
+```text
+Route 53 → CloudFront + WAF → ALB
+                               │
+                               ▼
+                              EKS
+                       ├── stateless APIs
+                       ├── SQS consumers
+                       └── internal services
+                               │
+                 ┌─────────────┼─────────────┐
+                 ▼             ▼             ▼
+              Aurora      ElastiCache       S3
+```
+
+EKS не требует переносить database, queue и object storage внутрь cluster.
+Managed dependencies обычно уменьшают operational burden. Stateful component в
+Kubernetes выбирают, когда контроль или portability действительно важнее
+managed-варианта.
+
+---
+
+## Стоимость и границы ответственности
+
+В AWS нет единой модели оплаты. EC2 и RDS держат выделенную capacity, Lambda и
+Fargate считают runtime resources, S3 учитывает storage, requests и transfer, а
+NAT Gateway — время и обработанные bytes.
+
+Перед выбором сервиса считают:
+
+1. Steady-state capacity.
+2. Peak capacity.
+3. Failure capacity после потери AZ или node pool.
+4. Объём хранения и срок retention.
+5. Network flow между AZ, регионами и интернетом.
+6. Число requests, messages, log bytes и custom metrics.
+7. Стоимость эксплуатации командой.
+
+Managed-сервис может быть дороже по строке счёта и дешевле по total cost of
+ownership. Self-hosted PostgreSQL на EC2 экономит часть service premium, но
+добавляет patching, backups, failover, monitoring и круглосуточную ответственность.
+
+Конкретные цены зависят от региона и меняются. Практический расчёт, Savings Plans,
+Spot, network cost и защитные меры разобраны в
+[Cloud cost и архитектурные решения](./02-cloud-cost-and-architecture.md).
+
+---
+
+## Типичные ошибки
+
+### Один account и одна role для всего
+
+Общая граница ускоряет первый запуск, но увеличивает blast radius. Ошибка
+non-production pipeline получает путь к production, а расходы и quotas разных
+систем смешиваются. Accounts и runtime roles разделяют по ответственности.
+
+### Постоянные access keys
+
+Access key в `.env`, CI secret или container image может жить месяцами после
+утечки. Люди используют federation, workloads — IAM roles, внешний CI — OIDC.
+
+### Public subnet как замена нормальному egress design
+
+Перенос workload в public subnet ради экономии NAT не делает его безопасным и не
+убирает стоимость public IPv4. Сначала определяют, какой outbound traffic нужен,
+используют endpoints для AWS services и сравнивают NAT, proxy и IPv6 paths.
+
+### Одна VM вместо отказоустойчивого service
+
+Snapshot не превращает одну EC2 instance в high availability. Нужны как минимум
+health checks, replace mechanism, несколько AZ и проверенный deployment/restore
+flow.
+
+### RDS Multi-AZ как read scaling
+
+Standby классической Multi-AZ DB instance не обслуживает обычные reads. Read
+scaling дают read replicas или подходящая cluster architecture, но они добавляют
+replication lag и routing decisions.
+
+### DynamoDB без access patterns
+
+Таблицу нельзя проектировать как набор нормализованных entities, а затем ожидать
+произвольные queries. Сначала записывают access patterns, partition key и
+transaction boundaries.
+
+### SQS consumer без идемпотентности
+
+At-least-once delivery допускает повтор. Бизнес-эффект защищают idempotency key,
+conditional write, inbox/outbox или уникальный constraint, а message удаляют
+только после успешного эффекта.
+
+### Secrets Manager на каждом request
+
+Каждый HTTP request получает дополнительную latency, цену и dependency на control
+service. Secret кешируют с продуманным refresh и поведением при rotation.
+
+### CloudFront перед любым API
+
+CDN экономит origin traffic только при достаточном cache hit ratio. Для
+персонализированного ответа без cache он добавляет ещё один слой и отдельные
+requests.
+
+### Logs без retention
+
+Verbose payloads, headers и debug messages одновременно создают cost, риск утечки
+данных и сложность поиска. Структуру, sampling, redaction и retention проектируют
+до incident.
+
+---
+
+## Практический чек-лист
+
+### До создания ресурсов
+
+- [ ] Production и non-production разделены осознанной account boundary.
+- [ ] Люди входят через IAM Identity Center или federation с MFA.
+- [ ] Root user защищён MFA и не имеет access keys.
+- [ ] Выбран основной region с учётом users, data, compliance и cost.
+- [ ] CloudTrail, Budgets и Cost Anomaly Detection включены до traffic.
+- [ ] Tags и владельцы расходов определены заранее.
+
+### Для приложения
+
+- [ ] Выбран минимально сложный compute runtime.
+- [ ] Runtime role отделена от deployment/execution role.
+- [ ] AWS SDK использует default credential chain без встроенных keys.
+- [ ] Secrets хранятся вне image и repository.
+- [ ] Autoscaling имеет допустимые minimum/maximum bounds.
+- [ ] Локальный диск disposable runtime не хранит критичное состояние.
+
+### Для данных и messaging
+
+- [ ] Storage выбран по access pattern и transaction boundary.
+- [ ] Backups, retention, RPO/RTO и restore procedure проверены.
+- [ ] Connection pool умножен на максимальное число replicas приложения.
+- [ ] Queue consumers идемпотентны.
+- [ ] Visibility timeout, retry и DLQ согласованы со временем обработки.
+- [ ] Lifecycle policies очищают старые objects, snapshots и multipart uploads.
+
+### Для production
+
+- [ ] Workload распределён минимум по двум AZ, если это требует SLO.
+- [ ] Security Groups открывают только необходимые flows.
+- [ ] VPC endpoints и NAT paths выбраны по traffic и cost.
+- [ ] Есть dashboards, alarms, structured logs и trace correlation.
+- [ ] Deployment использует immutable artifact и controlled rollout.
+- [ ] Проверены сценарии потери task, node, AZ и доступа к dependency.
+
+---
+
+## Interview-ready answer
+
+**1. Как выбирать между Lambda, ECS, EKS и EC2?**
+
+- Короткие события — Lambda подходит для ограниченного event-driven handler без
+  постоянного fleet.
+- Контейнерный сервис — ECS с Fargate даёт managed container runtime без
+  Kubernetes.
+- Kubernetes platform — EKS нужен при зависимости от Kubernetes API, operators
+  и общей platform model.
+- Полный контроль — EC2 выбирают для ОС, legacy software и специальных host
+  requirements.
+- Цена выбора — чем ниже уровень абстракции, тем больше контроля и
+  эксплуатационной ответственности.
+
+**2. Как приложение безопасно обращается к AWS APIs?**
+
+- Identity — workload получает отдельную IAM role.
+- Credentials — AWS runtime выдаёт краткоживущие credentials, а SDK обновляет их
+  через provider chain.
+- Authorization — policy разрешает только нужные actions над конкретными
+  resources.
+- Люди и CI — сотрудники используют federation, внешний CI использует OIDC, а не
+  постоянные access keys.
+
+**3. Чем SQS отличается от SNS и EventBridge?**
+
+- SQS — durable queue хранит работу для consumer и регулирует backlog.
+- SNS — topic делает прямой fan-out нескольким subscribers.
+- EventBridge — event bus маршрутизирует события по rules и полям payload.
+- Надёжный fan-out — SNS или EventBridge часто доставляет каждую ветку в
+  отдельную SQS queue.
+
+**4. Чем S3, EBS и EFS отличаются друг от друга?**
+
+- S3 — object storage с API по key, высокой durability и практически
+  неограниченным scale.
+- EBS — block volume для EC2 в конкретной AZ.
+- EFS — общая managed NFS file system для нескольких clients.
+- Выбор — определяется API доступа и временем жизни данных, а не только ценой
+  за GB.
+
+**5. Что даёт Multi-AZ в RDS и чем оно отличается от read replica?**
+
+- Multi-AZ — standby или cluster topology повышает availability и обслуживает
+  failover.
+- Read replica — асинхронная копия разгружает чтения и может иметь lag.
+- Приложение — должно переживать reconnect, DNS change и временные errors при
+  failover.
+- Проверка — backups и standby недостаточны без регулярного restore/failover
+  test.
+
+**6. Что важно знать про сеть AWS?**
+
+- Scope — VPC региональна, а subnet принадлежит одной Availability Zone.
+- Security — Security Group stateful и привязана к network interface; NACL
+  stateless и действует на subnet.
+- Ingress — ALB выбирают для HTTP(S), NLB для L4 traffic.
+- Egress — NAT Gateway, endpoints, public IPv4 и cross-AZ paths имеют разные
+  security и cost trade-offs.
+
+**7. Какие AWS cost-ошибки наиболее опасны?**
+
+- Data transfer — internet, cross-AZ, cross-region и NAT processing считаются по
+  разным meters.
+- Idle capacity — EC2, RDS, NAT Gateway, load balancers и volumes стоят денег
+  без traffic.
+- Unbounded scale — Lambda concurrency, autoscaling и log ingestion могут расти
+  быстрее downstream и budget alerts.
+- Commitment — Savings Plans и RI покупают по измеренному baseline, а не по
+  текущему размеру fleet.
+
+---
+
+## Официальная документация
+
+- [AWS global infrastructure](https://aws.amazon.com/about-aws/global-infrastructure/)
+- [AWS Organizations](https://docs.aws.amazon.com/organizations/latest/userguide/orgs_introduction.html)
+- [IAM security best practices](https://docs.aws.amazon.com/IAM/latest/UserGuide/best-practices.html)
+- [AWS SDK for Go v2 configuration](https://docs.aws.amazon.com/sdk-for-go/v2/developer-guide/configure-gosdk.html)
+- [Amazon EC2](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/concepts.html)
+- [Amazon ECS](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/Welcome.html)
+- [AWS Fargate](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/AWS_Fargate.html)
+- [AWS Lambda quotas](https://docs.aws.amazon.com/lambda/latest/dg/gettingstarted-limits.html)
+- [AWS Lambda pricing](https://aws.amazon.com/lambda/pricing/)
+- [Amazon EKS](https://docs.aws.amazon.com/eks/latest/userguide/what-is-eks.html)
+- [EKS Pod Identity and IRSA](https://docs.aws.amazon.com/eks/latest/userguide/service-accounts.html)
+- [Amazon S3 consistency model](https://docs.aws.amazon.com/AmazonS3/latest/userguide/Welcome.html#ConsistencyModel)
+- [Amazon RDS](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Welcome.html)
+- [RDS Multi-AZ failover](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Concepts.MultiAZ.Failover.html)
+- [Amazon DynamoDB](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Introduction.html)
+- [Amazon SQS message quotas](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/quotas-messages.html)
+- [SQS FIFO exactly-once processing](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/FIFO-queues-exactly-once-processing.html)
+- [Amazon SNS](https://docs.aws.amazon.com/sns/latest/dg/welcome.html)
+- [Amazon EventBridge](https://docs.aws.amazon.com/eventbridge/latest/userguide/eb-what-is.html)
+- [AWS Step Functions](https://docs.aws.amazon.com/step-functions/latest/dg/welcome.html)
+- [Amazon VPC](https://docs.aws.amazon.com/vpc/latest/userguide/what-is-amazon-vpc.html)
+- [Elastic Load Balancing](https://docs.aws.amazon.com/elasticloadbalancing/latest/userguide/what-is-load-balancing.html)
+- [Amazon CloudFront](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/Introduction.html)
+- [AWS Secrets Manager](https://docs.aws.amazon.com/secretsmanager/latest/userguide/intro.html)
+- [Amazon CloudWatch](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/WhatIsCloudWatch.html)
+- [AWS CloudTrail](https://docs.aws.amazon.com/awscloudtrail/latest/userguide/cloudtrail-user-guide.html)

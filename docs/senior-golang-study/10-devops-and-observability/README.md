@@ -4,13 +4,14 @@
 
 Базовые заметки:
 - [CI/CD](./ci-cd/README.md)
-- [Cloud (AWS)](./cloud/README.md)
+- [Cloud: AWS и Google Cloud](./cloud/README.md)
 - [Hardware And OS](./hardware-and-os/README.md)
 - [Linux Internals](./linux/README.md)
 - [Logging And Log Shipping](./logging-and-log-shipping/README.md)
 - [Prometheus And Metrics](./prometheus-and-metrics/README.md)
 - [Tracing And OpenTelemetry](./tracing-and-opentelemetry/README.md)
 - [Реагирование на инциденты и расследование](./incident-response-and-investigation/README.md)
+- [Нагрузочные эксперименты в production](../09-testing-and-quality/load-testing/05-production-testing.md) — synthetic и shadow traffic, ограничения нагрузки, остановка и восстановление
 - [Kubernetes](./kubernetes/README.md)
 - [Docker](./docker/README.md)
 - [Docker Compose](./docker-compose/README.md)
@@ -37,7 +38,7 @@
 
 Структура раздела:
 - `hardware-and-os` - CPU, иерархия памяти, виртуальная память, cache coherence/MESI, atomics на уровне CPU, процессы и потоки в OS
-- `cloud` - AWS core services (EC2, S3, RDS, IAM, VPC, ...), cost optimization, архитектурные решения
+- `cloud` - AWS и Google Cloud: выбор compute, storage, databases, messaging, IAM, networking, cost optimization и архитектурные решения
 - `linux` - namespaces и cgroups (основа контейнеров), сигналы, PID 1, zombie/orphan процессы
 - `logging-and-log-shipping` - пайплайны логов, log platforms, Kibana/Elasticsearch и log investigation
 - `prometheus-and-metrics` - как работает flow метрик, типы метрик, PromQL и практический metric design

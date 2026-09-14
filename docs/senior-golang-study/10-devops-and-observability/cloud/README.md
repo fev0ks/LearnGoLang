@@ -1,38 +1,56 @@
-# Cloud (AWS)
+# Cloud: AWS и Google Cloud
 
-Облачная инфраструктура — стандарт для backend в 2026. AWS остаётся доминирующим провайдером, но концепции переносятся на GCP/Azure.
+Раздел объясняет облачную инфраструктуру со стороны backend-разработчика: какой
+сервис решает задачу, как приложение получает доступ и какие operational
+trade-offs возникают. AWS и Google Cloud разобраны отдельно, чтобы похожие роли
+сервисов не скрывали различия в IAM, networking и deployment model.
+
+---
 
 ## Материалы
 
-- [01. AWS: основные сервисы](./01-aws-core-services.md) — EC2, VPC, IAM, S3, RDS, DynamoDB, SQS/SNS, Lambda, EKS/ECS, CloudWatch, Route 53, CloudFront, ELB/ALB/NLB, Secrets Manager. Managed vs self-hosted, AWS SDK в Go
-- [02. Cloud cost и архитектурные решения](./02-cloud-cost-and-architecture.md) — pricing models, EC2 types, RI/Savings Plans, Spot, storage cost, network cost (NAT GW, egress), скрытые расходы, монитоинг, архитектурные решения для экономии, истории горьких уроков, чек-лист
+- [01. AWS: практический обзор](./01-aws-core-services.md) —
+  выбор compute, storage и messaging, IAM, VPC, Go, delivery и observability
+- [02. Стоимость AWS](./02-cloud-cost-and-architecture.md) — Cost Explorer,
+  CUR 2.0, right-sizing, Savings Plans/RI, Spot, Budgets и проверяемые расчёты
+- [03. Google Cloud: практический обзор](./03-gcp-core-services.md) — Cloud Run,
+  GKE, Compute Engine, data services, Pub/Sub, IAM, сеть и observability
+
+---
 
 ## Что должен знать senior
 
 **Архитектурно:**
-- разница между AZ, region, edge location
-- VPC топология (public/private subnets, NAT, IGW)
-- Security Groups vs NACL
-- IAM (users, roles, policies, least privilege)
-- Managed vs self-hosted trade-offs
+
+- разница между zone, region и edge location;
+- как scope VPC и subnet отличается между AWS и GCP;
+- как выбрать compute по workload, а не по привычному названию продукта;
+- как IAM связывает identity, role и resource;
+- managed vs self-hosted trade-offs.
 
 **Cost-aware:**
-- порядок цен (EC2, RDS, S3, egress)
-- Reserved Instances и Savings Plans
-- Network cost — самое коварное (NAT GW, egress, cross-AZ)
-- Как находить idle resources
-- Когда Spot имеет смысл
 
-**Sin't dunce:**
-- никогда не embed AWS credentials в код (IAM roles!)
-- enable billing alerts заранее
-- tag everything
-- lifecycle policies для storage
+- различать стоимость выделенной capacity и pay-per-use;
+- считать egress, cross-zone и cross-region traffic;
+- находить idle resources и ограничивать autoscaling;
+- понимать, когда commitment и Spot действительно подходят;
+- знать, что budget alert не является жёстким лимитом расходов.
+
+**Практически:**
+
+- не хранить cloud credentials в коде и repository;
+- использовать workload identity: IAM role в AWS, service account и ADC в GCP;
+- включать billing alerts до production traffic;
+- задавать tags/labels и lifecycle policies для storage;
+- проверять backups, restore path, dashboards и alerts до запуска.
+
+---
 
 ## Связанные разделы
 
 - [Terraform](../terraform/) — IaC для AWS/GCP
-- [Kubernetes](../kubernetes/) — на EKS работает тут
-- [CI/CD](../ci-cd/) — deployment на AWS
-- [Secrets management](../../11-security/secrets-management/) — AWS Secrets Manager
-- [Hardware и OS](../hardware-and-os/) — что внутри EC2 instance
+- [Kubernetes](../kubernetes/) — основа EKS и GKE
+- [CI/CD](../ci-cd/) — deployment в AWS и GCP
+- [Secrets management](../../11-security/secrets-management/) — AWS Secrets
+  Manager и Google Secret Manager
+- [Hardware и OS](../hardware-and-os/) — что скрывают VM и container runtimes

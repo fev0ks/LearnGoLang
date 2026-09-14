@@ -1,662 +1,1050 @@
-# Cloud cost и архитектурные решения
-
-Cloud billing — это **сложная инженерная задача**, а не "оплата хостинга". В AWS можно случайно потратить $50,000 за выходные, и таких историй много. С другой стороны — те же workloads могут стоить в 3-10 раз дешевле при правильной архитектуре.
-
-Senior backend должен думать про cost так же как про latency и reliability. Это не "финансовый вопрос", это инженерный trade-off: дёшево / быстро / надёжно — выбирай два.
+# Стоимость AWS: расчёт, контроль и архитектурные решения
 
 ## Содержание
 
-- [Почему cloud cost непредсказуем](#почему-cloud-cost-непредсказуем)
-- [Основные категории расходов](#основные-категории-расходов)
-- [Pricing models — основы экономики AWS](#pricing-models-основы-экономики-aws)
-- [Выбор типа EC2 instance](#выбор-типа-ec2-instance)
+- [Ментальная модель счёта](#ментальная-модель-счёта)
+- [С чего начинать анализ](#с-чего-начинать-анализ)
+- [Как привязать расход к владельцу](#как-привязать-расход-к-владельцу)
+- [Основные модели оплаты](#основные-модели-оплаты)
+- [Стоимость вычислений](#стоимость-вычислений)
 - [Reserved Instances и Savings Plans](#reserved-instances-и-savings-plans)
-- [Spot instances](#spot-instances)
-- [Storage cost](#storage-cost)
-- [Network cost — самое коварное](#network-cost-самое-коварное)
-- [Скрытые расходы](#скрытые-расходы)
-- [Cost monitoring и alerts](#cost-monitoring-и-alerts)
-- [Архитектурные решения для экономии](#архитектурные-решения-для-экономии)
-- [Известные истории горьких уроков](#известные-истории-горьких-уроков)
-- [Cost optimization чек-лист](#cost-optimization-чек-лист)
+- [Spot Instances](#spot-instances)
+- [Стоимость хранилищ и логов](#стоимость-хранилищ-и-логов)
+- [Стоимость сети](#стоимость-сети)
+- [Budgets, поиск аномалий и защитные ограничения](#budgets-поиск-аномалий-и-защитные-ограничения)
+- [Три проверяемых расчёта](#три-проверяемых-расчёта)
+- [Порядок оптимизации](#порядок-оптимизации)
+- [Типичные ошибки](#типичные-ошибки)
+- [Практический чек-лист](#практический-чек-лист)
+- [Interview-ready answer](#interview-ready-answer)
+- [Официальная документация](#официальная-документация)
+
+Cloud cost — инженерное свойство системы. Архитектура определяет не только CPU и
+память, но и количество копий данных, межзональный traffic, число requests,
+retention logs и скорость автоматического масштабирования.
+
+Эта статья не является прайс-листом. Цены AWS зависят от региона и меняются.
+Числа ниже используются только в явно обозначенных примерах с датой и
+допущениями; для production-решения их пересчитывают через актуальную pricing page
+и AWS Pricing Calculator.
 
 ---
 
-## Почему cloud cost непредсказуем
+## Ментальная модель счёта
 
-В отличие от dedicated servers ($X/месяц за машину), cloud billing — это **сумма множества метрик**:
-- Compute hours × instance type
-- GB-month storage × class
-- GB data transfer × direction × destination
-- Requests per service × tier
-- Spot/On-demand/Reserved mix
-- Various add-ons (NAT Gateway hours, EBS IOPS, CloudWatch Logs ingestion, ...)
+Счёт складывается из нескольких независимых meters:
 
-Это даёт **гибкость**, но и **непредсказуемость**. Bill за месяц может вырасти на 200% без изменений в коде — если поменялся паттерн использования.
-
-### Классический story: "S3 bucket нечаянно стал public download endpoint"
-
-Команда забыла настроить authentication → бот нашёл публичный bucket с гигабайтами файлов → начал скачивать → AWS считает egress на $0.09/GB → за выходные счёт $20,000.
-
-Это **не баг AWS**, это **разработчик не понял экономику**.
-
----
-
-## Основные категории расходов
-
-Типичная разбивка AWS bill для backend сервиса:
-
-| Категория | % bill |
-|---|---|
-| EC2 / ECS / EKS compute | 30-50% |
-| Data transfer (egress) | 10-30% |
-| RDS / DynamoDB | 10-25% |
-| S3 storage и requests | 5-15% |
-| CloudWatch (logs + metrics) | 5-15% |
-| Load balancers, NAT GW | 5-10% |
-| Прочее (Lambda, SQS, etc.) | 5% |
-
-Cost optimization начинается с **знать где деньги уходят**. AWS Cost Explorer / Cost Categories — must-have для начала.
-
----
-
-## Pricing models — основы экономики AWS
-
-### Pay-per-use
-
-Большинство сервисов:
-- Compute — за секунду или минуту работы
-- Storage — за GB-month
-- Network — за GB transferred
-- Requests — за миллион (S3, DynamoDB)
-
-**Implication:** ресурс стоит когда работает. Остановил EC2 → не платишь за compute (но платишь за EBS volume).
-
-### Commitment-based discounts
-
-- **Reserved Instances** — обязательство на 1-3 года, скидка 30-72%
-- **Savings Plans** — обязательство $X/час, скидка 30-66%
-- **DynamoDB Reserved Capacity** — для steady-state DynamoDB
-
-Для **predictable baseline** load — commitments экономят значительно.
-
-### Free tier
-
-- 12 месяцев бесплатно: 750 hours/month t2.micro, 5 GB S3, и т.д.
-- Always free: 1M Lambda invocations/month, 25 GB DynamoDB
-- Хорошо для dev/staging маленьких проектов
-
----
-
-## Выбор типа EC2 instance
-
-Маленькая разница в выборе → значительная разница в счёте. Ключевые соображения:
-
-### Generation matters
-
-Новые поколения **дешевле и быстрее**:
-- m5 → m6i → m7i (Intel)
-- m6g → m7g (Graviton, ARM)
-
-Например, `m6i.xlarge` примерно на **15-20% дешевле** при **20-30% лучшей производительности** чем `m5.xlarge`. Просто меняй generation в Terraform/CloudFormation.
-
-### Graviton (ARM) instances
-
-AWS Graviton — собственные ARM-процессоры:
-- ~20% дешевле эквивалентных x86
-- ~40% лучше price/performance для многих workloads
-- Go компилирует на ARM без проблем
-
-**Подход:** для новых сервисов — начинай с Graviton. Тестируй performance. Большинство Go-сервисов работают отлично.
-
-**Подводные камни:**
-- Native C libraries должны быть скомпилированы для ARM (CGO)
-- Некоторые Docker images не имеют ARM tags
-- Тестирование на dev (Intel) и prod (ARM) — следи за регрессиями
-
-### Right-sizing
-
-Главное правило: **не overprovisioning'уй**.
-
-Типичные паттерны overprovisioning:
-- Запустили на m5.4xlarge "чтобы быстро", забыли уменьшить → платишь $400+/мес за неиспользуемое
-- CPU 5-10% utilization average — instance в 5 раз больше чем нужно
-- Memory под 30% — взяли r-type (memory optimized) вместо m-type
-
-**Используй CloudWatch metrics:**
-```
-CPU average < 30% → instance слишком большой
-Memory average < 40% → меньше memory или другой тип
-Network low → не network-intensive workload
+```text
+monthly cost
+    = allocated capacity
+    + consumed requests and runtime
+    + stored data over time
+    + transferred and processed bytes
+    + managed-service control resources
+    + support and marketplace charges
 ```
 
-AWS Compute Optimizer — automatic recommendations.
+Один пользовательский request может затронуть сразу несколько строк:
 
-### Burstable (t-family)
+```text
+Client
+  │ internet data transfer out
+  ▼
+CloudFront / ALB
+  │ request + processed bytes
+  ▼
+ECS task
+  ├── compute capacity
+  ├── CloudWatch log ingestion
+  ├── cross-AZ request to RDS
+  └── NAT Gateway call to external API
+```
 
-`t3`, `t4g` — burstable: получают CPU credits в простое, тратят при нагрузке.
+Поэтому фраза «сервис почти не использует CPU» ничего не говорит о полном счёте.
+Расход может находиться в egress, NAT processing, logs, storage или неиспользуемой
+database capacity.
 
-**Плюсы:** дёшево при низкой/spiky нагрузке.
-**Минусы:** если credits кончились → throttling, performance падает в разы.
+### Средняя нагрузка, пик и failure capacity
 
-**Когда использовать:** dev/staging, low-traffic services. Production-grade web servers — обычно `m`-family.
+Для разных решений нужны разные числа:
 
-`t3.unlimited` mode — не throttling, но платишь extra если кредитов мало. Хорошо для безопасного "burstable production".
+- **Средняя нагрузка** определяет накопление данных и базовый объём потребления.
+- **Пиковая нагрузка** определяет autoscaling, quotas и максимальную capacity.
+- **Failure capacity** показывает, выдержит ли система пик после потери AZ, node
+  group или dependency.
 
-### Spot capacity
+Если сервис обычно использует 40 instances, на пике 80, а после потери одной из
+трёх AZ оставшиеся зоны должны принять traffic, commitment на 80 instances не
+следует автоматически из peak. Сначала определяют длительность пика, минимальный
+устойчивый baseline и допустимый риск недоиспользовать обязательство.
 
-Самая большая экономия — Spot (см. ниже).
+### Цена ресурса и цена сервиса
+
+Цена одной EC2 instance — только часть total cost of ownership (TCO). В
+self-hosted database входят инженеры on-call, upgrades, backups и failover tests.
+Добавляется и стоимость ошибки. Managed RDS может быть дороже за час и дешевле
+для команды целиком.
+
+Обратное тоже возможно: managed abstraction не гарантирует экономию. Fargate или
+Lambda удобны для variable load, но постоянно загруженный workload иногда дешевле
+на правильно подобранной EC2 capacity. Это проверяется измерением, а не названием
+сервиса.
+
+---
+
+## С чего начинать анализ
+
+Оптимизация начинается не с замены instance family, а с локализации расхода.
+
+### Шаг 1. Выбрать корректный cost view
+
+Сначала фиксируют:
+
+- период анализа;
+- payer account или linked accounts;
+- amortized или unblended cost;
+- включение credits, refunds, taxes и support;
+- granularity: месяц, день или час;
+- scope: вся организация, environment, service или feature.
+
+Для Reserved Instances и Savings Plans обычный unblended view может скрывать
+экономический смысл upfront payment. Для сравнения workloads чаще нужен
+amortized cost, который распределяет обязательство по сроку.
+
+### Шаг 2. Разложить расход по измерениям
+
+В AWS Cost Explorer последовательно смотрят:
+
+1. Service.
+2. Linked account.
+3. Region.
+4. Usage type и operation.
+5. Cost allocation tag или Cost Category.
+
+Рост `EC2-Other` может оказаться EBS или data transfer, а не compute instances.
+Рост `DataTransfer-Regional-Bytes` указывает на другой flow, чем internet egress.
+Название service без usage type часто недостаточно.
+
+### Шаг 3. Сравнить cost с usage
+
+Счёт объясняют рабочей метрикой:
+
+- EC2 cost — instance-hours, vCPU-hours и utilization;
+- RDS cost — instance-hours, storage, I/O и backup storage;
+- S3 cost — GB-month, request count, retrieval и transfer;
+- NAT Gateway cost — gateway-hours и processed GB;
+- CloudWatch cost — ingested/stored/query-scanned bytes и custom metrics;
+- Lambda cost — invocations, GB-seconds и provisioned concurrency.
+
+Если стоимость выросла на 50%, а business traffic — на 5%, нужна причина:
+изменился request size, cache hit ratio, retention, replica count или путь данных.
+
+### Шаг 4. Найти дату изменения
+
+Дневная granularity связывает cost spike с deployment, migration, load test или
+настройкой retention. Для аномалии полезна последовательность:
+
+```text
+first expensive day
+    → usage type
+    → resource/account/tag
+    → deployment or configuration change
+    → owner and rollback/mitigation
+```
+
+Без даты легко оптимизировать давно существующий дешёвый ресурс вместо нового
+дорогого flow.
+
+---
+
+## Как привязать расход к владельцу
+
+### Accounts, tags и Cost Categories
+
+Надёжная attribution строится слоями:
+
+- account разделяет environment или крупную business boundary;
+- tag связывает ресурс с `service`, `team`, `environment` и `cost_center`;
+- Cost Category объединяет accounts, tags и charge types в финансовую модель.
+
+Рекомендуемый минимальный набор tags:
+
+```yaml
+Environment: production
+Service: orders-api
+Team: commerce
+CostCenter: cc-142
+ManagedBy: terraform
+```
+
+User-defined cost allocation tag нужно отдельно активировать в Billing. До
+активации tag на ресурсе не появляется в cost reports, а прошлые расходы не
+переразмечаются автоматически.
+
+Не все AWS resources поддерживают одинаковое tagging behavior. Политика
+`Deny ec2:RunInstances` без корректного учёта resource types и create-time tags
+может сломать запуск связанных volumes и network interfaces. Enforcement
+тестируют на реальных API calls и дополняют Tag Policies, IaC checks и inventory.
+
+### CUR 2.0 и Data Exports
+
+Cost Explorer удобен для интерактивного анализа. Для детальных запросов,
+внутреннего dashboard и регулярного allocation используют AWS Data Exports с Cost
+and Usage Report 2.0 (CUR 2.0).
+
+Типичный flow:
+
+```text
+AWS billing data
+      │
+      ▼
+Data Exports / CUR 2.0 → S3 → Athena/BI → team and service reports
+```
+
+CUR содержит line items, pricing dimensions, reservations, Savings Plans и tags.
+Это позволяет отвечать на вопросы, которых нет в готовом Cost Explorer view:
+например, стоимость одного tenant или доля cross-AZ transfer конкретного сервиса.
+
+### Unit economics
+
+Абсолютный AWS bill растёт вместе с бизнесом. Для оценки эффективности полезнее
+стоимость единицы:
+
+```text
+cost per order = monthly amortized service cost / completed orders
+```
+
+Если сервис стоит `$30,000/month` и обрабатывает `6,000,000` заказов:
+
+```text
+$30,000 / 6,000,000 = $0.005 per order
+```
+
+После роста до `$36,000/month` при `9,000,000` заказов:
+
+```text
+$36,000 / 9,000,000 = $0.004 per order
+```
+
+Счёт вырос на 20%, но стоимость заказа снизилась на 20%. Без unit economics это
+можно ошибочно принять за регрессию.
+
+---
+
+## Основные модели оплаты
+
+### Выделенная capacity
+
+EC2, RDS, ElastiCache, NAT Gateway и load balancers имеют оплачиваемую capacity
+или control resource, даже когда пользовательских requests нет. Остановка EC2
+прекращает compute charge, но EBS volumes и public IPv4 могут продолжать
+оплачиваться.
+
+Для выделенной capacity основные рычаги:
+
+- right-sizing;
+- расписание выключения non-production;
+- autoscaling;
+- современная instance family и подходящая architecture;
+- commitments для измеренного baseline;
+- удаление idle resources.
+
+### Pay per request или runtime
+
+Lambda, S3, SQS, DynamoDB on-demand и другие services считают requests, runtime,
+bytes или их комбинацию. У них меньше idle cost, но быстрый autoscaling способен
+быстро увеличить счёт и перегрузить downstream.
+
+Serverless cost оценивают по полной формуле:
+
+```text
+requests × price per request
++ runtime × allocated memory/CPU
++ data transfer
++ logs and traces
++ downstream operations
+```
+
+### Storage over time
+
+`GB-month` — не разовая цена за загрузку. Если средний объём месяца равен 10 TB,
+платёж зависит от времени, которое эти bytes хранятся в выбранном class. Lifecycle
+и retention поэтому являются частью data model.
+
+### Free Tier и credits
+
+Модель AWS Free Tier изменилась для новых клиентов 15 июля 2025 года. Для новых
+accounts действует credit-based free plan сроком до шести месяцев с суммой
+кредитов до `$200`; для более старых accounts применяются legacy-условия. Всегда
+проверяют дату создания account и страницу Billing, а не переносят в расчёт старое
+правило про `t2.micro` на 12 месяцев.
+
+Free Tier не является production cost model. После окончания credits архитектура
+и traffic остаются, поэтому steady-state стоимость считают заранее.
+
+---
+
+## Стоимость вычислений
+
+### Right-sizing без средних процентов
+
+Правило `average CPU < 30% → уменьшить instance` опасно. Среднее скрывает короткие
+пики, а CPU не показывает память, network, disk I/O и latency.
+
+Перед уменьшением capacity проверяют:
+
+- p95/p99 CPU и memory utilization;
+- application latency и queueing;
+- GC pauses и memory headroom;
+- network packets/bytes и connection count;
+- EBS throughput, IOPS и queue depth;
+- пиковые и сезонные периоды;
+- запас после потери AZ или instance;
+- скорость scale-out и warm-up.
+
+AWS Compute Optimizer использует lookback period, percentiles и настраиваемый
+headroom. Рекомендация остаётся гипотезой: её проверяют canary deployment или load
+test с production-like traffic.
+
+### Семейство, поколение и architecture
+
+Новое поколение instance часто улучшает price/performance, но универсального
+процента нет. Результат зависит от CPU model, memory bandwidth, EBS/network limits,
+compiler и access pattern.
+
+Graviton может быть выгоден для Go-сервиса, потому что Go поддерживает `linux/arm64`.
+Проверяют:
+
+- наличие multi-architecture container images;
+- CGO и native dependencies;
+- профили CPU и latency на ARM;
+- производительность encryption/compression;
+- стоимость и доступность capacity в выбранном регионе.
+
+Правильный вывод звучит не «ARM всегда дешевле», а «на benchmark этого workload
+тип `c7g` даёт нужный SLO при меньшей amortized cost».
+
+### Burstable instances
+
+Семейства `t` используют CPU credits. Они подходят для нагрузки с низким baseline
+и короткими bursts. В unlimited mode перерасход credits может оплачиваться
+отдельно; в standard mode исчерпание credits ограничивает CPU.
+
+Production web service может работать на `t` family, если credit balance и
+unlimited charges наблюдаются, а профиль нагрузки действительно bursty. Правило
+«production всегда на `m`» так же неточно, как правило «всё запускать на `t`».
+
+### Autoscaling и downstream
+
+Autoscaling снижает idle capacity, но не знает business constraints сам по себе.
+Если Lambda или ECS быстро добавляет workers, RDS connection limit и partner API
+могут исчерпаться раньше CPU.
+
+Maximum capacity задают из downstream budget:
+
+```text
+max application replicas
+    ≤ floor(database connection budget / pool size per replica)
+```
+
+Если database допускает 600 application connections, а pool одной replica имеет
+20 connections:
+
+```text
+floor(600 / 20) = 30 replicas
+```
+
+Часть connection budget оставляют для migrations, admin access и failure mode,
+поэтому фактический maximum будет меньше 30.
 
 ---
 
 ## Reserved Instances и Savings Plans
 
-Для baseline нагрузки — обязательно использовать commitments.
+Commitment покупают после измерения baseline. Скидка не компенсирует
+неиспользуемое обязательство.
 
-### Reserved Instances (RI)
+### Различия моделей
 
-- Обязательство на конкретный instance type в конкретном регионе
-- Сроки: 1 или 3 года
-- Payment: All upfront / Partial / No upfront
-- Скидка: 30-72% от On-Demand
+| Модель | Что фиксируется | Гибкость | Capacity reservation |
+| --- | --- | --- | --- |
+| Compute Savings Plans | `$ / hour` | EC2, Fargate, Lambda | нет |
+| EC2 Instance Savings Plans | family и region | size, OS, tenancy | нет |
+| Regional RI | matching usage | AZ и часть size flexibility | нет |
+| Zonal Reserved Instance | matching usage в одной AZ | меньше | да |
 
-**Convertible RI:** можешь менять instance type в рамках того же семейства. Гибче, но меньше скидка.
+Standard RI нельзя обменять на другой offering. Convertible RI можно обменять на
+другой Convertible RI с изменёнными атрибутами, включая instance family, type,
+platform, scope или tenancy, если выполняются правила обмена. Упрощение «только
+другой size в том же family» для Convertible RI неверно.
 
-**Минусы:**
-- Привязка к instance type — если архитектура меняется, RI "пропадают"
-- Менее гибко чем Savings Plans
+### Coverage и utilization
 
-### Savings Plans (новее, гибче)
+Две метрики отвечают на разные вопросы:
 
-- Обязательство на $X/час compute
-- Применяется автоматически к разным instance types
-- 1 или 3 года
-- Скидка похожая на RI
+- **Coverage** — какая доля подходящего On-Demand usage покрыта commitment.
+- **Utilization** — какая доля купленного commitment реально использована.
 
-**Compute Savings Plans** — применяются ко всему compute (EC2, Fargate, Lambda). Самые гибкие.
+Высокая coverage при низкой utilization означает, что обязательство слишком
+велико или workload изменился. Высокая utilization при низкой coverage означает,
+что существующий commitment используется, но baseline может позволять осторожно
+добавить покрытие.
 
-**EC2 Instance Savings Plans** — привязаны к семейству instances, но дешевле.
+### Как принимать решение
 
-**Strategy:**
-- 70-80% baseline → Savings Plans (3 года, all upfront — максимум discount)
-- 20-30% variable → On-Demand
-- Batch/fault-tolerant → Spot
+Безопасная последовательность:
 
-### Стоит ли коммитить
+1. Собрать несколько недель или месяцев репрезентативного usage.
+2. Отделить стабильный baseline от peak и временных workloads.
+3. Учесть запланированные migrations, Graviton, Fargate/Lambda и закрытие систем.
+4. Посмотреть рекомендации Cost Explorer и пересчитать сценарии вручную.
+5. Покрыть только ту часть baseline, потерю которой команда готова оплачивать весь
+   срок.
+6. Регулярно проверять coverage и utilization после покупки.
 
-**Правило:** если уверен что будешь использовать ресурс минимум 6 месяцев из 12 → RI окупится.
+Стратегия `80% на три года all upfront` не является универсальной. Молодой
+продукт, миграция между architectures или быстро меняющийся traffic оправдывают
+меньшее покрытие и короткий срок, даже если номинальная скидка ниже.
 
-**Калькулятор break-even:**
+### Break-even
+
+Пусть reservation за весь срок стоит `R`, а On-Demand rate — `D` за час. Минимум
+использованных часов для окупаемости:
+
+```text
+break-even hours = R / D
 ```
-On-Demand $0.10/hour × 24 × 365 = $876/year
-3-year RI $0.05/hour × ... = $438/year
-Break-even: ~6 месяцев constant use
+
+Если условная годовая reservation стоит `$500`, а On-Demand rate равен
+`$0.10/hour`:
+
+```text
+$500 / $0.10 = 5,000 hours
+5,000 / 8,760 ≈ 57% of the year
 ```
+
+Это иллюстрация формулы, а не AWS quote. Реальный расчёт учитывает upfront,
+recurring fee, normalization, eligible usage и альтернативную стоимость денег.
 
 ---
 
-## Spot instances
+## Spot Instances
 
-**Spot** — "лишние" мощности AWS, скидка **до 90%**. Но AWS может забрать в любой момент (с предупреждением 2 минуты).
+Spot использует свободную EC2 capacity со скидкой, но AWS может прервать instance.
+Когда доступно предупреждение об interruption, оно приходит примерно за две
+минуты. Rebalance Recommendation может прийти раньше, но не гарантируется перед
+каждым interruption.
 
-### Когда подходит
+Spot подходит для:
 
-- **Stateless workers** — обработка очередей, batch jobs, transcoding
-- **CI/CD runners** — fail OK, retry
-- **Big data jobs** — Spark, Hadoop, могут recover
-- **Dev/Staging environments**
-- **Auto-scaling spike capacity** — на пик подключаем Spot
+- stateless queue consumers;
+- CI runners;
+- batch processing и transcoding;
+- fault-tolerant distributed jobs;
+- дополнительной capacity Auto Scaling Group или EKS node group.
 
-### Когда НЕ подходит
+Spot не подходит как единственная capacity для singleton stateful service,
+database primary или job, который не умеет checkpoint/retry и обязан закончиться
+к жёсткому deadline.
 
-- Production database (нельзя терять)
-- Stateful single-instance сервисы
-- Strict deadline jobs
+### Устойчивая схема
 
-### Spot Fleet и mixed instance types
-
-Чтобы снизить риск capacity unavailable:
-- Запрос **multiple instance types** одновременно
-- AWS выбирает доступные с лучшей ценой
-- Spot Fleet с маркет-based pricing
-
-```yaml
-# EKS / ECS — mixed Spot + On-Demand
-node_groups:
-  - capacity_type: SPOT
-    instance_types: [m5.large, m5a.large, m6i.large]  # diversity!
-    desired_size: 5
-  - capacity_type: ON_DEMAND
-    instance_types: [m5.large]
-    desired_size: 2  # baseline
+```text
+Auto Scaling Group / EKS node group
+├── On-Demand base capacity
+└── Spot capacity
+    ├── multiple instance families
+    ├── multiple sizes
+    ├── multiple Availability Zones
+    └── capacity-optimized allocation
 ```
-
-5 Spot + 2 On-Demand: если Spot забрали — деградация, но не полное падение.
-
-### Spot interruption handling
-
-EC2 шлёт **interruption warning** за 2 минуты:
-- Через instance metadata: `http://169.254.169.254/latest/meta-data/spot/instance-action`
-- Через EventBridge event
 
 Приложение должно:
-1. Получить warning
-2. Завершить текущие задачи или сохранить state
-3. Drain соединения
-4. Graceful shutdown
 
-В Go:
-```go
-// Poll metadata endpoint
-go func() {
-    for {
-        resp, err := http.Get("http://169.254.169.254/latest/meta-data/spot/instance-action")
-        if err == nil && resp.StatusCode == 200 {
-            // Spot interruption coming
-            initiateGracefulShutdown()
-            return
-        }
-        time.Sleep(5 * time.Second)
-    }
-}()
-```
+1. Перестать принимать новую работу.
+2. Завершить, вернуть в очередь или checkpoint текущую работу.
+3. Удалиться из load balancer targets.
+4. Завершиться до принудительного interruption.
+
+Вместо самодельного бесконечного polling через IMDSv1 используют поддерживаемый
+IMDSv2 client, EventBridge events, lifecycle hooks и готовые controllers вроде
+AWS Node Termination Handler для EKS. Поведение проверяют через AWS Fault
+Injection Service, а не только читают в конфигурации.
+
+Spot price не является главным сигналом доступности. Diversification и allocation
+strategy уменьшают вероятность массового interruption лучше, чем поиск одного
+самого дешёвого instance type.
 
 ---
 
-## Storage cost
-
-Storage обычно дешевле compute, но может неожиданно вырасти.
+## Стоимость хранилищ и логов
 
 ### S3
 
-- **Standard** — $0.023/GB-month
-- **Standard-IA** — $0.0125/GB (но retrieval $0.01/GB)
-- **Glacier** — $0.004/GB (но retrieval часы)
+S3 считает несколько независимых составляющих:
 
-**Lifecycle rules** — автоматический перенос:
+- объём и время хранения;
+- PUT/GET/LIST и другие requests;
+- retrieval из холодных classes;
+- minimum storage duration для отдельных classes;
+- data transfer;
+- replication и дополнительные features.
 
-```yaml
-rules:
-  - id: archive-old
-    filter: { prefix: "logs/" }
-    transitions:
-      - days: 30
-        storage_class: STANDARD_IA
-      - days: 90
-        storage_class: GLACIER
-      - days: 365
-        storage_class: DEEP_ARCHIVE
-    expiration:
-      days: 2555  # 7 лет
+Lifecycle rule переводит objects между classes или удаляет их по возрасту. Rule
+должно следовать access pattern: автоматический перевод через 30 дней в класс с
+retrieval fee может увеличить счёт, если objects читаются каждую неделю.
+
+Multipart upload разбивает один большой object на parts для parallel upload и
+retry. Он не объединяет множество маленьких `PUT` и не является способом снизить
+число requests. Незавершённые multipart uploads продолжают хранить parts, поэтому
+для них задают lifecycle cleanup.
+
+### EBS gp3
+
+В gp3 baseline 3,000 IOPS и 125 MiB/s включён в storage price. Дополнительно
+оплачиваются provisioned IOPS и throughput выше baseline. Формула для volume:
+
+```text
+gp3 cost
+    = provisioned GiB
+    + max(0, IOPS - 3,000)
+    + max(0, throughput MiB/s - 125)
 ```
 
-**Главная экономия:** не держи всё в Standard. Большинство данных через месяц не нужны "горячими".
+Коэффициенты зависят от региона. Перенос gp2 → gp3 часто полезен, но после него
+проверяют, что provisioned performance соответствует реальному workload.
 
-### S3 request cost
+Остановленная EC2 instance продолжает хранить и оплачивать EBS volumes. Unattached
+volume также оплачивается до удаления.
 
-- PUT/POST — $0.005/1000
-- GET — $0.0004/1000
+### EBS snapshots
 
-Кажется мало, но при high traffic — заметная статья. **Reduce requests:**
-- Batch operations
-- Multipart upload вместо many small PUTs
-- CloudFront cache перед S3 (CloudFront reads дешевле + кэшируется)
+Snapshots инкрементальны на уровне изменённых blocks. Число snapshots не равно
+сумме полных размеров volumes: `100 snapshots × 1 TiB` не означает автоматически
+100 TiB billable storage. Стоимость зависит от уникальных сохранённых blocks,
+изменений данных и retention.
 
-### EBS
-
-- **gp3** — $0.08/GB-month + $0.005/provisioned IOPS-month
-- **io2** — $0.125/GB + $0.065/provisioned IOPS — для high-IOPS БД
-
-**Подводный камень:** EBS volumes **сохраняются после terminate EC2** (если не было `DeleteOnTermination=true`). "Orphaned" EBS — обычная находка cost-аудита.
-
-```bash
-# Find unattached EBS volumes
-aws ec2 describe-volumes --filters Name=status,Values=available
-```
-
-### EBS Snapshots
-
-Incremental, но накапливаются. Если делать snapshot каждую ночь полгода — это много петабайт-часов.
-
-**Lifecycle policies для snapshots** — обязательно. Например: keep 7 daily, 4 weekly, 12 monthly.
-
----
-
-## Network cost — самое коварное
-
-Сетевые расходы — самая частая причина "billing surprise". Главные категории:
-
-### Egress (out of AWS)
-
-- **AWS → Internet** — **$0.09/GB** (после 1 GB free/month, дешевле в больших объёмах)
-- **AWS → AWS другой регион** — $0.02/GB
-- **AWS → CloudFront → Internet** — $0.085/GB (немного дешевле)
-
-**Сколько это?** 1 TB egress = $90. 1 PB = $90,000.
-
-### Внутри региона
-
-- **Same AZ** — **бесплатно** (между EC2)
-- **Cross-AZ within region** — $0.01/GB (each direction!)
-- **VPC Peering same region** — $0.01/GB
-
-**Подводный камень:** RDS multi-AZ — replication между AZs **не идёт** в AWS counted egress (managed service). Но EC2 в AZ-a → RDS в AZ-b — это cross-AZ, считается.
-
-### NAT Gateway
-
-- **$0.045/hour** ~$33/month
-- **$0.045/GB** data processed (!)
-
-Если приложение в private subnet делает много исходящих запросов (S3 API, DynamoDB, downloads) — каждый GB через NAT = $0.045.
-
-**Экономия:**
-- **VPC Endpoints** для S3, DynamoDB — бесплатно для S3/DynamoDB, не через NAT
-- Architecture review: что **реально** должно быть в private subnet?
-
-### Cross-region traffic
-
-- **Egress to another AWS region** — $0.02/GB
-- **Inter-region replication** (S3, DynamoDB) — $0.02/GB
-
-Decision making: replicate ли в другой регион → платишь cross-region.
-
-### CloudFront
-
-- **From CloudFront to Internet** — $0.085/GB (cheaper than direct EC2/S3 egress)
-- **Origin fetch** — обычно бесплатно or low
-
-**Reduce origin fetches через хороший cache hit rate.**
-
-### Реальный пример
-
-Backend-сервис на AWS:
-- 10M HTTP requests/day, average 100 KB response
-- = 1 TB/day egress = $90/day = $2700/month
-- На 1 PB/month = $90,000/month
-
-**Это не CPU, не RAM. Это просто отдача ответов клиентам.**
-
-Mitigations:
-- **Сжатие** (gzip/brotli) — 70-90% reduction
-- **CloudFront** перед API — дешевле + кэш
-- **GraphQL** — клиент запрашивает только нужное
-- **Pagination** — не отдавать всё сразу
-- **Image optimization** — WebP, resize on demand
-
----
-
-## Скрытые расходы
-
-Категории cost которые часто пропускают.
+Lifecycle policy полезна, но перед удалением проверяют требования восстановления.
+AWS управляет зависимостями инкрементальной цепочки: удаление промежуточного
+snapshot не должно трактоваться как удаление всех данных следующих snapshots.
 
 ### CloudWatch Logs
 
-- **Ingestion**: $0.50/GB
-- **Storage**: $0.03/GB-month
-- Очень chatty приложения легко генерят 100+ GB/day = $1500+/month только на логи
+Logs могут тарифицироваться за ingestion, storage, query scanning, delivery и
+дополнительные features. Основные controls:
 
-**Mitigations:**
-- Log level filtering (не log DEBUG в prod)
-- Sampling для high-volume logs (логировать 1 из 100)
-- Short retention (7 дней вместо forever)
-- Ship to cheaper store (S3) для long-term
+- structured logging вместо дублирования полного payload;
+- level filtering и sampling;
+- redaction secrets и personal data;
+- retention вместо `Never expire`;
+- metric из события вместо постоянного поиска по всем bytes;
+- export в подходящее долгосрочное хранилище при необходимости.
 
-### CloudWatch Metrics
-
-- **Custom metrics**: $0.30/metric/month (10 free)
-- High cardinality (метрики per-user-per-endpoint) → может быть тысячи custom metrics → expensive
-
-Better: aggregated metrics, dimensions instead of separate metrics.
-
-### Idle resources
-
-- Unused EBS volumes (после terminate без DeleteOnTermination)
-- Forgotten EIPs (Elastic IPs) — $0.005/hour за **unattached** EIPs
-- Old AMIs and snapshots
-- Idle ELBs/ALBs ($16-20/month each)
-- Dev environments running 24/7
-
-**AWS Trusted Advisor / Cost Explorer** — находит idle ресурсы.
-
-### Data transfer to/from S3 in same region
-
-Same-region S3 traffic — **бесплатно** (between AWS services). Но из VPC через NAT Gateway → платный $0.045/GB.
-
-**Use VPC Endpoints для S3** — бесплатно, обходит NAT.
-
-### Forgotten test/load environments
-
-- Запустили load test → забыли остановить cluster
-- $thousands за день
-
-**Tagging convention** + automatic cleanup для untagged resources.
+High-cardinality поля полезны в logs, но создание отдельной custom metric для
+каждого user или URL может породить большое число time series и cost.
 
 ---
 
-## Cost monitoring и alerts
+## Стоимость сети
 
-### AWS Cost Explorer
+Сетевой расчёт начинают с направления каждого data flow:
 
-Веб-интерфейс для analyzing costs:
-- Trends за периоды
-- Breakdown по сервису / тегам / regions
-- Forecasting
-
-### Budgets
-
-```bash
-# Создать budget с alert
-aws budgets create-budget --account-id 123456789012 --budget '{
-  "BudgetName": "Monthly EC2",
-  "BudgetLimit": {"Amount": "1000", "Unit": "USD"},
-  "TimeUnit": "MONTHLY",
-  "BudgetType": "COST",
-  "CostFilters": {"Service": ["Amazon Elastic Compute Cloud - Compute"]}
-}'
+```text
+source → destination → path → GB/month → charge on each hop
 ```
 
-Alerts: при достижении 50%, 80%, 100% от budget — email/SNS.
+Нельзя взять одну цену `$ per GB` и применить ко всей архитектуре. Internet
+egress, cross-AZ, cross-region, NAT processing, Transit Gateway и CloudFront имеют
+разные meters.
+
+### Internet data transfer
+
+На 2 сентября 2026 года AWS указывает 100 GB бесплатного data transfer out в
+интернет в месяц, агрегированного по поддерживаемым сервисам и регионам, кроме
+China и GovCloud. После этого действуют региональные и объёмные tiers.
+
+Линейная оценка `1 PB × $0.09/GB = $90,000` полезна только как верхнеуровневая
+арифметика с допущением flat rate. Реальный 1 PB попадает в несколько pricing
+tiers и должен считаться по каждому диапазону.
+
+Сжатие, pagination и image resizing уменьшают bytes независимо от cloud provider.
+GraphQL не является автоматической экономией: плохо спроектированный query может
+передать больше данных и создать больше backend work.
+
+### Cross-AZ и cross-region
+
+Трафик между Availability Zones одного региона часто оплачивается по обе стороны
+или по service-specific rules. Расположение ECS task в AZ-a и RDS writer в AZ-b
+может создать постоянный cross-AZ path.
+
+Оптимизация не означает поместить всё в одну AZ. Multi-AZ availability имеет
+ценность. Задача — увидеть traffic, локализовать chatty paths и принять осознанный
+trade-off между cost и failure tolerance.
+
+Cross-region replication добавляет transfer cost и хранение второй копии. Его
+выбирают из RPO/RTO и data residency, а не потому, что «multi-region надёжнее» без
+сценария переключения.
+
+### NAT Gateway
+
+NAT Gateway оплачивается за gateway-hours и processed bytes. Дополнительно может
+возникнуть обычный internet или cross-AZ data transfer.
+
+Способы уменьшить лишний NAT flow:
+
+- gateway endpoints для S3 и DynamoDB;
+- interface endpoints для подходящих services после отдельного расчёта;
+- local-AZ NAT routing;
+- IPv6 egress-only path для поддерживаемых destinations;
+- private connectivity к partner или shared services;
+- удаление ненужных внешних downloads из request path.
+
+Keep-alive уменьшает connection setup, но NAT Gateway считает обработанные bytes.
+Один egress proxy с keep-alive сам по себе не уменьшает byte-based processing
+charge.
+
+Перенос приложения в public subnet ради NAT cost — не универсальное решение. Он
+меняет security model и добавляет public IPv4 charge.
+
+### Public IPv4
+
+С 1 февраля 2024 года AWS оплачивает все public IPv4 addresses, включая in-use и
+idle Elastic IP. Поэтому проверяют не только unattached EIP, но и public addresses
+EC2, managed services и другие выделенные IPv4.
+
+IPv6 может уменьшить зависимость от public IPv4 и NAT44, но требует поддержки
+clients, dependencies, security rules и observability. Это архитектурная миграция,
+а не переключение одного billing flag.
+
+### VPC Endpoints
+
+Gateway endpoints для S3 и DynamoDB не имеют hourly/data processing charge. Они
+часто убирают большой NAT path к этим services.
+
+Interface endpoints создаются по AZ и оплачиваются за endpoint-hours и processed
+data. Если endpoint используется редко, его fixed cost может быть выше NAT share.
+Если через него проходят большие volumes или требуется private connectivity,
+результат может быть обратным.
+
+### CloudFront
+
+CloudFront экономит origin traffic только для cacheable content с достаточным hit
+ratio. Полная модель:
+
+```text
+CloudFront cost
+    = viewer requests
+    + viewer data transfer
+    + origin requests on cache miss
+    + origin data transfer under service-specific rules
+    + optional invalidation/functions/security features
+```
+
+Если cache hit ratio равен 90%, origin получает примерно 10% cacheable requests.
+Если response персонализирован и hit ratio близок к нулю, CloudFront добавляет
+слой и не даёт ожидаемой экономии compute.
+
+---
+
+## Budgets, поиск аномалий и защитные ограничения
+
+### AWS Budgets
+
+Budget сравнивает actual или forecasted cost с threshold и отправляет
+notification. Billing data обновляется с задержкой; AWS указывает обновление до
+трёх раз в сутки с типичным интервалом 8–12 часов. За это время расход может
+продолжить расти.
+
+Budget не является универсальным жёстким лимитом. Budget Actions могут применить
+IAM/SCP policy или остановить отдельные EC2/RDS resources, но такое действие надо
+проектировать по workload: автоматическая остановка production database способна
+создать более дорогой incident.
+
+Команда настраивает как минимум:
+
+- actual thresholds, например 50%, 80% и 100%;
+- forecasted threshold;
+- email/SNS destination с реальным владельцем;
+- отдельные budgets для account, service или tag;
+- runbook: кто проверяет usage type и что имеет право остановить.
+
+CLI-команда `create-budget` создаёт alert только при передаче
+`--notifications-with-subscribers`. Один `--budget` без subscribers создаёт бюджет
+без email/SNS notification.
+
+```bash
+aws budgets create-budget \
+  --account-id 123456789012 \
+  --budget file://budget.json \
+  --notifications-with-subscribers file://notifications.json
+```
+
+Файл `notifications.json` содержит threshold и получателя:
+
+```json
+[
+  {
+    "Notification": {
+      "NotificationType": "ACTUAL",
+      "ComparisonOperator": "GREATER_THAN",
+      "Threshold": 80,
+      "ThresholdType": "PERCENTAGE"
+    },
+    "Subscribers": [
+      {
+        "SubscriptionType": "EMAIL",
+        "Address": "cloud-cost-owner@example.com"
+      }
+    ]
+  }
+]
+```
+
+Адрес в примере — placeholder. Для production используют рабочий group address
+или SNS topic и подтверждают subscription.
 
 ### Cost Anomaly Detection
 
-ML-based anomaly detection. Шлёт alert если cost вырос аномально.
+Cost Anomaly Detection ищет расход, отклоняющийся от исторического pattern. Он
+дополняет fixed budget:
 
-**Обязательно включить** — поможет catch'ить incidents типа "S3 bucket стал публичным" быстрее.
+- budget отвечает «вышли ли мы за запланированный уровень»;
+- anomaly detection отвечает «появилось ли необычное изменение».
 
-### Tagging
+Новый сервис может быть аномалией при маленьком общем bill, а постепенный рост
+может превысить budget без резкого anomaly score. Нужны оба сигнала.
 
-Тегируй **всё**:
+### Guardrails
 
-```yaml
-tags:
-  Environment: production
-  Service: payment-api
-  Team: payments
-  Owner: alice@example.com
-  CostCenter: 12345
+Защита от runaway cost строится из нескольких ограничений:
+
+- service quotas и quota alarms;
+- maximum capacity в Auto Scaling, ECS и Lambda concurrency;
+- rate limits и authentication на public endpoints;
+- S3 Block Public Access;
+- IAM/SCP restrictions на дорогие regions и resource types, если это допустимо;
+- log retention и sampling;
+- lifecycle для snapshots, images и objects;
+- automatic cleanup временных environments;
+- owner и TTL tags для экспериментальных ресурсов.
+
+Guardrail не должен ломать recovery. Например, слишком низкая EC2 quota может
+помешать scale-out после потери AZ.
+
+---
+
+## Три проверяемых расчёта
+
+Все цены в этом разделе — допущения примера, а не обещание текущего тарифа.
+
+### NAT Gateway для 10 TB в месяц
+
+Допустим:
+
+- два NAT Gateways для двух AZ;
+- 730 часов в месяце;
+- `$0.045/hour` за gateway;
+- `$0.045/GB` processed data;
+- 10 TB считаем как 10,000 GB;
+- cross-AZ и internet transfer пока не включаем.
+
+Hourly component:
+
+```text
+2 × 730 × $0.045 = $65.70/month
 ```
 
-Это даёт breakdown в Cost Explorer "сколько стоит payment-api в production".
+Data processing:
 
-**Enforce через IAM:** запретить создавать ресурсы без тегов:
-
-```json
-{
-  "Effect": "Deny",
-  "Action": "ec2:RunInstances",
-  "Resource": "*",
-  "Condition": {
-    "StringNotEqualsIfExists": {
-      "aws:RequestTag/Environment": ["production", "staging", "dev"]
-    }
-  }
-}
+```text
+10,000 GB × $0.045 = $450/month
 ```
 
----
+Итого по двум meters:
 
-## Архитектурные решения для экономии
+```text
+$65.70 + $450 = $515.70/month
+```
 
-### 1. CloudFront перед всем
+Если все 10 TB идут в S3 через NAT, gateway endpoint может убрать `$450` NAT
+processing. Hourly component останется, если NAT нужен для другого egress.
 
-CloudFront — самая универсальная экономия:
-- Cache reduces origin load → меньше EC2
-- CloudFront egress дешевле direct
-- Защита от DDoS
-- Free SSL через ACM
+### 50 забытых EC2 instances на 90 дней
 
-Использовать перед S3, ALB, even Lambda.
+Допустим, условный On-Demand rate одной instance равен `$0.768/hour`:
 
-### 2. Auto-scaling
+```text
+$0.768 × 50 × 24 × 90 = $82,944
+```
 
-Pay for what you use:
-- Scale-out утром, scale-in ночью
-- Scale-out per traffic pattern
-- Stateless services scale easily
+Утверждение «примерно `$120,000`» нельзя вывести из этих данных без дополнительных
+расходов или другого региона. EBS, load balancers, control plane, support и data
+transfer надо перечислить отдельно, а не прятать в итог.
 
-**Подводные камни:**
-- Cold-start delay на scale-out
-- Auto-scaling tuning сложен
-- Слишком aggressive scaling = thrashing
+### 5 TB logs в день
 
-### 3. Architecture: managed services vs DIY
+Допустим:
 
-Managed RDS vs self-hosted Postgres on EC2:
-- RDS dearer per-instance
-- Но: no DBA hire, automated backups, multi-AZ
-- В большинстве случаев managed cheaper TCO
+- 5 TB/day считаем как 5,000 GB/day;
+- ingestion стоит условные `$0.50/GB`;
+- месяц содержит 30 дней;
+- tiers, storage и query cost не учитываем.
 
-### 4. Outbound traffic patterns
+```text
+5,000 GB/day × $0.50/GB = $2,500/day
+$2,500/day × 30 days = $75,000/month
+```
 
-- Webhooks → outbound через NAT GW = $0.045/GB
-- В public subnet вместо private — нет NAT cost
-- Or: dedicated egress proxy с keep-alive
-
-### 5. Caching layers
-
-Cache → less DB / external API calls → less cost.
-
-- Redis для DB cache
-- CloudFront для HTTP cache
-- In-memory cache в приложении
-
-### 6. Right-sized regions
-
-- Some regions cheaper than others
-- us-east-1 (cheapest)
-- Asian regions ~20% more expensive
-- EU GDPR может требовать EU regions
-
-Но: cross-region latency, compliance, customer proximity.
-
-### 7. Serverless для variable load
-
-Если traffic spiky (например, 100 req/sec normally, 10000 на пиках):
-- EC2 Auto Scaling — paying for headroom
-- Lambda — pay per invocation, no idle cost
-
-Trade-off: lambda cold start, 15-min limit, vendor lock-in.
-
-### 8. Multi-cloud arbitrage
-
-Use services from cheapest provider:
-- AWS S3 + GCP BigQuery
-- Cloudflare workers (cheaper edge compute)
-- DigitalOcean droplets для baseline EC2
-
-Но: complexity, integration overhead, multiple bills.
+Арифметика воспроизводима, но результат меняется с регионом, pricing tier и
+реальным количеством bytes. Поэтому число подписывают допущениями, а не называют
+«известной историей» без источника.
 
 ---
 
-## Известные истории горьких уроков
+## Порядок оптимизации
 
-### Story 1: $50k за выходные
+### 1. Остановить аномальный рост
 
-Startup deployed new feature, forgot rate-limiting. Bot detected open endpoint, fired millions of requests including S3 downloads. Egress charges $50k in 48 hours. AWS refunded after long appeal, but stressful weekend.
+Сначала ограничивают public abuse, runaway autoscaling, debug logging или
+ошибочный data loop. Покупка Savings Plan во время incident закрепляет расход, но
+не устраняет причину.
 
-**Lesson:** **always have billing alerts**, even at lower thresholds.
+### 2. Удалить idle и забытое
 
-### Story 2: NAT Gateway $30k/month
+Проверяют:
 
-Microservices архитектура, 50 services all in private subnets, делающие много API calls к AWS (CloudWatch, S3, DynamoDB, Secrets Manager) через NAT Gateway. $0.045/GB × terabytes = $30k/month just for NAT.
+- stopped/unused EC2 и старые Auto Scaling Groups;
+- unattached EBS volumes;
+- старые snapshots и AMIs;
+- idle load balancers, NAT Gateways и interface endpoints;
+- public IPv4;
+- non-production environments, работающие круглосуточно;
+- старые RDS instances и replicas;
+- ECR images и незавершённые S3 multipart uploads.
 
-**Lesson:** **VPC endpoints**. After adding endpoints for S3, DynamoDB, KMS, Secrets Manager — bill dropped to $3k/month.
+Удаление material resource требует owner confirmation и проверки restore/rollback.
 
-### Story 3: Forgotten test cluster
+### 3. Исправить retention и data flow
 
-Engineer launched EKS cluster for load testing, scaled to 50 nodes m5.4xlarge. Forgot to delete. Discovered 3 months later. ~$120k.
+Lifecycle, log retention, cache hit ratio, cross-AZ traffic и NAT paths часто дают
+экономию без изменения business capacity.
 
-**Lesson:** automatic cleanup для untagged resources, mandatory tagging, regular cost review meetings.
+### 4. Выполнить right-sizing
 
-### Story 4: Database backups exposion
+Изменение instance проверяют по percentiles, SLO и failure capacity. Сначала
+canary или часть fleet, затем весь service.
 
-DB snapshots set on hourly schedule, retention "indefinite". Over 2 years — 17000 snapshots, $50k/month just for snapshot storage.
+### 5. Улучшить architecture
 
-**Lesson:** **lifecycle policies for everything**.
+К этому уровню относятся:
 
-### Story 5: CloudWatch Logs из debug logging
+- queue для сглаживания peak;
+- cache для дорогого повторного чтения;
+- подходящий storage class;
+- Graviton после benchmark;
+- serverless для редкой нагрузки или allocated capacity для постоянной;
+- VPC endpoints для измеренного NAT flow;
+- CloudFront для cacheable content.
 
-Engineer added `log.Println` для каждого incoming request с full headers and body. Service handles 10000 req/sec. Logs grew to 5 TB/day = $2500/day = $75k/month.
+Архитектурная миграция имеет engineering cost. Экономия `$500/month` не всегда
+окупает квартал разработки и новый operational risk.
 
-**Lesson:** **log sampling** for high-volume, level filtering, log rotation/expiry.
+### 6. Купить commitments
 
----
-
-## Cost optimization чек-лист
-
-### Quick wins (часто экономят 20-50%)
-
-- [ ] Enable Cost Anomaly Detection
-- [ ] Set up Budget alerts (50%, 80%, 100% of expected)
-- [ ] Tag everything (environment, service, team)
-- [ ] Stop/terminate dev/staging on nights and weekends
-- [ ] Right-size obviously oversized instances (CPU < 30%)
-- [ ] Move to Graviton (ARM) where possible
-- [ ] Enable S3 lifecycle policies for old data
-- [ ] Set up CloudWatch Logs retention (не "Never expire")
-- [ ] Delete unused EBS volumes and EIPs
-
-### Architectural (для значительной экономии)
-
-- [ ] Reserved Instances or Savings Plans для baseline
-- [ ] CloudFront в front of EC2/S3
-- [ ] VPC Endpoints для S3, DynamoDB
-- [ ] Auto-scaling для variable load
-- [ ] Spot instances для batch / stateless workers
-- [ ] Compression (gzip/brotli) для HTTP responses
-- [ ] Pagination и filtering в API (не отдавать tons of data)
-- [ ] Caching layer (Redis or local in-memory)
-- [ ] Log sampling для high-volume services
-
-### Process (long-term hygiene)
-
-- [ ] Monthly cost review meetings
-- [ ] Cost attribution to teams (via tags)
-- [ ] FinOps practice — coordinate finance & engineering
-- [ ] Trusted Advisor recommendations regularly review
-- [ ] AWS Compute Optimizer для right-sizing
-- [ ] Mandatory tagging policy enforced through IAM
-
-### Disaster prevention
-
-- [ ] Billing alerts at multiple thresholds
-- [ ] Cost Anomaly Detection enabled
-- [ ] Rate limiting on public endpoints
-- [ ] S3 bucket policies (no accidental public buckets)
-- [ ] Egress monitoring и alerting
-- [ ] Disaster recovery plan для overcharge scenarios
+Reserved Instances и Savings Plans идут после удаления waste и выбора целевой
+architecture. Иначе команда покупает обязательство на resource, который собирается
+заменить.
 
 ---
 
-## Полезные ссылки
+## Типичные ошибки
+
+### Точные цены без региона и даты
+
+Строка `S3 = $0.023/GB-month` выглядит как контракт, хотя class, region, объём и
+дата не указаны. В учебном материале сохраняют формулу и дают ссылку на pricing;
+если число нужно для примера, рядом фиксируют допущения.
+
+### Проценты «типичного AWS bill» как факт
+
+У API, video platform, data warehouse и SaaS control plane разные cost profiles.
+Универсальная таблица `compute 40%, network 20%` создаёт ложную точность. Сначала
+смотрят фактический Cost Explorer/CUR конкретной системы.
+
+### Commitments до right-sizing
+
+Высокая скидка на завышенную instance всё равно оставляет waste. Сначала выбирают
+целевой размер и architecture, затем покрывают устойчивый baseline.
+
+### Average CPU как единственный сигнал
+
+Низкий average может сочетаться с ежедневным latency spike. Нужны percentiles,
+memory, I/O, SLO и запас на отказ.
+
+### CloudFront перед всем
+
+CloudFront помогает cacheable traffic и edge delivery. Dynamic private API с
+нулевым hit ratio получает дополнительный слой без ожидаемой экономии.
+
+### Public subnet вместо NAT
+
+Это меняет attack surface и добавляет public IPv4. Сетевой путь выбирают по
+security и traffic, а не только по одной строке NAT Gateway.
+
+### Multi-cloud arbitrage по цене одного сервиса
+
+Связка `AWS S3 + BigQuery` может добавить internet egress, две IAM models,
+cross-cloud incident response и data consistency problems. Multi-cloud выбирают
+по business requirement и полной стоимости пути данных.
+
+### Budget как hard cap
+
+Billing data приходит с задержкой, а alert не останавливает все ресурсы. Нужны
+autoscaling bounds, quotas, IAM и runbook.
+
+### Snapshot count как полный объём
+
+EBS snapshots инкрементальны. Стоимость нельзя получить умножением числа snapshots
+на полный размер volume; нужны changed blocks и retention.
+
+### NAT proxy как экономия bytes
+
+Keep-alive уменьшает connection overhead, но NAT Gateway тарифицирует обработанные
+bytes. Proxy полезен для policy, observability или connection management, но не
+доказывает снижение NAT data processing.
+
+---
+
+## Практический чек-лист
+
+### Видимость расходов
+
+- [ ] Cost Explorer настроен на корректный amortized/unblended view.
+- [ ] Production и non-production разделены accounts или явными boundaries.
+- [ ] Cost allocation tags активированы в Billing.
+- [ ] CUR 2.0/Data Export доступен для детального анализа.
+- [ ] Есть unit metric: cost per request, order, tenant или processed GB.
+
+### Compute
+
+- [ ] Idle EC2, RDS, ElastiCache и load balancers найдены.
+- [ ] Right-sizing учитывает p95/p99, memory, I/O и failure capacity.
+- [ ] Graviton или новое поколение проверено benchmark, а не только прайсом.
+- [ ] Autoscaling maximum согласован с database и partner limits.
+- [ ] Non-production имеет расписание или TTL cleanup.
+
+### Commitments и Spot
+
+- [ ] Savings Plans/RI покупаются только на измеренный baseline.
+- [ ] Coverage и utilization проверяются регулярно.
+- [ ] Planned migrations учтены до срока commitment.
+- [ ] Spot распределён по families, sizes и AZ.
+- [ ] Interruption flow протестирован, а On-Demand base соответствует SLO.
+
+### Storage и network
+
+- [ ] S3 lifecycle соответствует реальной частоте чтения.
+- [ ] EBS gp3 baseline и extra IOPS/throughput рассчитаны отдельно.
+- [ ] Snapshot retention основан на RPO/RTO и changed blocks.
+- [ ] Internet, cross-AZ, cross-region и NAT traffic измерены отдельно.
+- [ ] VPC endpoints сравнены с NAT по hourly и data processing cost.
+- [ ] Public IPv4 inventory включает in-use и idle addresses.
+- [ ] CloudFront используется там, где измерен cache hit ratio.
+
+### Защита
+
+- [ ] Budgets имеют actual и forecasted notifications с владельцем.
+- [ ] Cost Anomaly Detection включён для основных scopes.
+- [ ] Autoscaling и Lambda concurrency имеют безопасные bounds.
+- [ ] Public endpoints защищены authentication и rate limiting.
+- [ ] Logs имеют level, sampling, redaction и retention.
+- [ ] Для cost incident существует runbook и право на mitigation.
+
+---
+
+## Interview-ready answer
+
+**1. Из чего складывается AWS bill?**
+
+- Capacity — EC2, RDS, caches, load balancers и NAT оплачиваются во времени.
+- Consumption — Lambda, requests, I/O и messages зависят от использования.
+- Data — storage, retrieval, replication и retention оплачиваются отдельно.
+- Network — internet, cross-AZ, cross-region и managed transit имеют разные meters.
+- Operations — logs, metrics, backups и managed features тоже входят в
+  архитектурную стоимость.
+
+**2. Как правильно выполнять right-sizing?**
+
+- Метрики — используют p95/p99 CPU и памяти, I/O, network и application
+  latency.
+- Период — захватывают пики, сезонность и failure mode, а не один спокойный день.
+- Headroom — оставляют запас на рост и потерю части capacity.
+- Проверка — рекомендацию подтверждают canary или load test перед массовым
+  уменьшением.
+
+**3. Чем Savings Plans отличаются от Reserved Instances?**
+
+- Savings Plans — фиксируют почасовое commitment и дают разную гибкость по
+  compute usage.
+- Regional RI — применяет discount к matching EC2 usage и может давать AZ/size
+  flexibility.
+- Zonal RI — дополнительно резервирует capacity в конкретной AZ.
+- Решение — принимают по baseline, сроку, planned migrations, coverage и utilization.
+
+**4. Когда использовать Spot?**
+
+- Подходящая работа — stateless, retryable и checkpointable workload.
+- Устойчивость — несколько instance types и AZ уменьшают зависимость от одного
+  capacity pool.
+- Base capacity — критичная часть остаётся на On-Demand или другой
+  гарантированной модели.
+- Interruption — draining/checkpoint flow тестируется заранее.
+
+**5. Почему NAT Gateway часто создаёт неожиданный счёт?**
+
+- Два meters — оплачиваются gateway-hours и processed bytes.
+- Дополнительный путь — отдельно могут добавиться cross-AZ и internet transfer.
+- AWS services — traffic к S3/DynamoDB через NAT можно часто вывести в gateway endpoints.
+- Ограничение — keep-alive не отменяет byte-based processing charge.
+
+**6. Является ли AWS Budget жёстким лимитом?**
+
+- Нет — Budget сравнивает billing data с threshold и отправляет notification с
+  задержкой обновления данных.
+- Actions — отдельные budget actions могут ограничить часть ресурсов, но требуют
+  безопасного design.
+- Guardrails — реальную защиту дополняют quotas, autoscaling bounds, IAM, rate
+  limits и incident runbook.
+
+**7. В каком порядке оптимизировать AWS cost?**
+
+- Сначала incident — останавливают аномальный рост и public abuse.
+- Затем waste — удаляют idle resources и исправляют retention/data paths.
+- Потом efficiency — выполняют right-sizing и benchmark architecture.
+- В конце commitment — покупают Savings Plans/RI на уже очищенный устойчивый baseline.
+
+---
+
+## Официальная документация
 
 - [AWS Pricing Calculator](https://calculator.aws/)
-- [AWS Cost Explorer](https://aws.amazon.com/aws-cost-management/aws-cost-explorer/) — analytics
-- [Last Week in AWS](https://www.lastweekinaws.com/) — Corey Quinn, cost optimization expert
-- [Cloudonaut Pricing Articles](https://cloudonaut.io/aws-pricing/)
-- [FinOps Foundation](https://www.finops.org/) — community и frameworks
-- [Vantage](https://www.vantage.sh/) — cost management tool с good UI
-
----
-
-См. также: [01-aws-core-services.md](./01-aws-core-services.md) — общий обзор AWS сервисов.
+- [AWS Free Tier FAQ](https://aws.amazon.com/free/free-tier-faqs/)
+- [AWS Cost Explorer](https://docs.aws.amazon.com/cost-management/latest/userguide/ce-what-is.html)
+- [AWS Data Exports and CUR 2.0](https://docs.aws.amazon.com/cur/latest/userguide/what-is-data-exports.html)
+- [Cost allocation tags](https://docs.aws.amazon.com/awsaccountbilling/latest/aboutv2/cost-alloc-tags.html)
+- [AWS Budgets](https://docs.aws.amazon.com/cost-management/latest/userguide/budgets-managing-costs.html)
+- [AWS Budgets best practices](https://docs.aws.amazon.com/cost-management/latest/userguide/budgets-best-practices.html)
+- [AWS Cost Anomaly Detection](https://docs.aws.amazon.com/cost-management/latest/userguide/manage-ad.html)
+- [AWS Compute Optimizer](https://docs.aws.amazon.com/compute-optimizer/latest/ug/what-is-compute-optimizer.html)
+- [Compute Optimizer rightsizing preferences](https://docs.aws.amazon.com/compute-optimizer/latest/ug/rightsizing-preferences.html)
+- [Savings Plans](https://docs.aws.amazon.com/savingsplans/latest/userguide/what-is-savings-plans.html)
+- [Reserved Instance types](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/reserved-instances-types.html)
+- [Reserved Instance discount application](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/apply_ri.html)
+- [EC2 Spot best practices](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/spot-best-practices.html)
+- [EC2 On-Demand and data transfer pricing](https://aws.amazon.com/ec2/pricing/on-demand/)
+- [Amazon VPC pricing](https://aws.amazon.com/vpc/pricing/)
+- [Amazon EBS gp3](https://docs.aws.amazon.com/ebs/latest/userguide/general-purpose.html)
+- [Amazon EBS pricing](https://aws.amazon.com/ebs/pricing/)
+- [Amazon S3 pricing](https://aws.amazon.com/s3/pricing/)
+- [Amazon CloudWatch pricing](https://aws.amazon.com/cloudwatch/pricing/)
+- [Cost Optimization Pillar](https://docs.aws.amazon.com/wellarchitected/latest/cost-optimization-pillar/welcome.html)
