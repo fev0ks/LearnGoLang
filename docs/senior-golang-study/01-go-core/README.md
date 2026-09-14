@@ -66,6 +66,7 @@
 - [05. Execution Tracer](./profiling/05-execution-tracer.md)
 - [06. Benchmarks](./profiling/06-benchmarks.md)
 - [07. Case Studies](./profiling/07-case-studies.md)
+- [08. Практическая оптимизация Go-кода](./profiling/performance-optimization/) — от профиля и benchmark до buffers, pools, layout, `unsafe` и выбора serialization format
 
 ## Вопросы senior-уровня
 

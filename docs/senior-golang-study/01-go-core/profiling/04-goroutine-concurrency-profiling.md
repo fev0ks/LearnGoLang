@@ -338,14 +338,16 @@ cat /proc/$(pgrep myapp)/status | grep Threads
 
 ### Шаг 1: Мониторинг роста
 
-```go
-// Экспортировать в Prometheus
-func metricsHandler(w http.ResponseWriter, r *http.Request) {
-    fmt.Fprintf(w, "go_goroutines %d\n", runtime.NumGoroutine())
-}
+Стандартный Go collector из `prometheus/client_golang` уже экспортирует gauge:
+
+```promql
+go_goroutines
 ```
 
-Если горутин постоянно больше чем (workers + connections + небольшой baseline) → утечка.
+Если после спада нагрузки число goroutines не возвращается к baseline, это
+сигнал проверить утечку. Абсолютный порог зависит от числа workers, соединений и
+модели конкурентности. Подключение collector и связь с RPS, heap и RSS разобраны
+в [метриках Go runtime и процесса](../../10-devops-and-observability/prometheus-and-metrics/practical-metric-patterns/06-go-runtime-and-process-metrics.md).
 
 ### Шаг 2: Сравнить дампы
 

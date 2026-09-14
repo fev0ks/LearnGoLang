@@ -11,6 +11,7 @@
 - [05. Execution Tracer](./05-execution-tracer.md) — runtime/trace vs pprof, go tool trace, GC паузы, STW, scheduling gaps, user annotations
 - [06. Benchmarks](./06-benchmarks.md) — testing.B, dead code elimination, -benchmem, b.RunParallel, benchstat, PGO
 - [07. Case Studies](./07-case-studies.md) — 5 сценариев: CPU/regexp, memory leak, goroutine leak, lock contention, GC pressure
+- [08. Практическая оптимизация Go-кода](./performance-optimization/) — compiler diagnostics, buffers и pools, concurrent map, layout, `unsafe`, zero-copy и сериализация
 
 ## Порядок чтения
 
@@ -20,6 +21,7 @@
 4. `05` — для понимания latency spikes и GC
 5. `06` — если пишешь оптимизации и нужно их измерять
 6. `07` — закрепление через реальные сценарии, хорошо перед интервью
+7. `08` — playbook по выбору и проверке низкоуровневых оптимизаций
 
 ## Вопросы senior-уровня
 
@@ -32,6 +34,9 @@
 - Как сравнить производительность до и после оптимизации надёжно?
 - Что такое dead code elimination в бенчмарках и как от неё защититься?
 - Как sync.Pool снижает GC pressure?
+- Когда caller-provided buffer лучше `sync.Pool`?
+- Почему ускорение микробенчмарка может не изменить p99 сервиса?
+- Когда `unsafe` zero-copy оправдан, а когда обычная копия безопаснее и дешевле?
 - Что показывает пустой P в execution tracer?
 
 ## Инструменты
