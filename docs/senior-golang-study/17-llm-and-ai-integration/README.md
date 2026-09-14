@@ -27,12 +27,15 @@
 
 ```text
 17-llm-and-ai-integration/
+├── learning-repositories-overview.md  обзор внешних учебных репозиториев
 ├── learning-path/     пошаговый практический маршрут по AI-агентам
 ├── api-integration/   как устроен вызов модели
 ├── agents/            вызов инструментов и агентный цикл
 ├── quality/           измерение качества
 └── rag/               поиск по своим данным и генерация ответа
 ```
+
+**[Обзор учебных репозиториев](./learning-repositories-overview.md)** — сравнение курсов, реализаций LLM с нуля, cookbook и каталогов агентов с рекомендациями по порядку изучения
 
 **[learning-path/](./learning-path/README.md)** — поэтапная практика
 
