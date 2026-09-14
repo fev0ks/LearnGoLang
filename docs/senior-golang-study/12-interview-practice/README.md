@@ -4,16 +4,14 @@
 
 ## Структура
 
-- **coding-tasks/** — задачи на код, которые часто просят на собеседовании
+- **[coding-tasks/](./coding-tasks/README.md)** — задачи на код, которые часто просят на собеседовании
   - **concurrency/** — задачи на горутины, каналы, синхронизацию (самая частая категория для Go)
   - **data-structures/** — LRU cache, top-K (heap), bloom filter, trie, sliding window counter
   - **system-primitives/** — connection pool, retry с backoff, circuit breaker, distributed lock, idempotency
   - **code-review/** — задачи формата "найди баги": broken-looking code, найти все проблемы, переписать
   - **streams/** — обработка потоков: deduplication, batching writer, streaming aggregation, backpressure
 
-- **[questions-olezhek28go.md](questions-olezhek28go.md)** — разбор 20 задач с Go-собесов (Олег Козырев): concurrency, runtime, channels, interfaces, http — с ответами и ссылками на теорию
-
-- **[gis_interview_questions.md](gis_interview_questions.md)** — 73 вопроса с краткими ответами: Go core, concurrency, channels, HTTP и PostgreSQL
+- **[question-banks/](./question-banks/README.md)** — подборки вопросов и коротких ответов: общий банк, топ-50, тематические прогоны, скрининг Tech Lead и вопросы кандидата к компании
 
 - _Behavioral_ _(planned)_ — STAR-кейсы, рассказ о себе, leadership примеры
 - _Design drills_ _(planned)_ — system design на 30-45 минут

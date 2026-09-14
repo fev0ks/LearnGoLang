@@ -97,7 +97,7 @@ func main() {
 Через `atomic` максимум считать неудобно (нужен CAS-цикл), поэтому здесь мьютекс уместнее.
 </details>
 
-Глубже: [Memory model и happens-before](../01-go-core/concurrency-and-performance/01-memory-model.md), [Goroutines и channels](../01-go-core/concurrency-and-performance/02-goroutines-and-channels.md), [Sync-примитивы](../01-go-core/concurrency-and-performance/03-sync-primitives.md). Про захват loop variable — раздел «Захват переменной цикла» в [worker-pool](coding-tasks/concurrency/01-worker-pool.md).
+Глубже: [Memory model и happens-before](../../01-go-core/concurrency-and-performance/01-memory-model.md), [Goroutines и channels](../../01-go-core/concurrency-and-performance/02-goroutines-and-channels.md), [Sync-примитивы](../../01-go-core/concurrency-and-performance/03-sync-primitives.md). Про захват loop variable — раздел «Захват переменной цикла» в [worker-pool](../coding-tasks/concurrency/01-worker-pool.md).
 
 ---
 
@@ -114,7 +114,7 @@ func main() {
   - **GC и рантайм** — фоновые worker'ы, sysmon-поток.
   - На уровне ОС видно `N` потоков; сколько из них реально на CPU — решает планировщик ОС, а не GOMAXPROCS.
 
-Глубже: [Scheduler и preemption (G-M-P, syscalls)](../01-go-core/runtime-scheduler/01-scheduler-and-preemption.md), [Syscall handling](../01-go-core/runtime-scheduler/02-syscall.md), [Go 1.25 — cgroup-aware GOMAXPROCS](../15-go-version-differences/go1.25.md).
+Глубже: [Scheduler и preemption (G-M-P, syscalls)](../../01-go-core/runtime-scheduler/01-scheduler-and-preemption.md), [Syscall handling](../../01-go-core/runtime-scheduler/02-syscall.md), [Go 1.25 — cgroup-aware GOMAXPROCS](../../15-go-version-differences/go1.25.md).
 
 ---
 
@@ -174,7 +174,7 @@ func (s *Search) SearchAll(ctx context.Context, query string, servers []string) 
 Если `Search` не принимает `ctx`, отмена «проигравших» невозможна — стоит проговорить это и предложить добавить `ctx` в сигнатуру. С `errgroup` лаконичнее, но «первый успех» там выражается неестественно (errgroup заточен под «первая ошибка»), поэтому ручной сбор через канал здесь чище.
 </details>
 
-Глубже: [Fan-in / fan-out](coding-tasks/concurrency/03-fan-in-fan-out.md), [Context patterns (отмена, propagation)](../01-go-core/concurrency-and-performance/04-context-patterns.md).
+Глубже: [Fan-in / fan-out](../coding-tasks/concurrency/03-fan-in-fan-out.md), [Context patterns (отмена, propagation)](../../01-go-core/concurrency-and-performance/04-context-patterns.md).
 
 ---
 
@@ -200,7 +200,7 @@ func (s *Search) SearchAll(ctx context.Context, query string, servers []string) 
 - `GOMEMLIMIT` (soft limit) заставляет GC работать агрессивнее у границы — способ оттянуть OOM, но не лечит саму утечку.
 - На голом сервере без cgroup нет «мягкого» лимита на процесс — упирается весь хост; в Kubernetes сначала сработал бы cgroup-лимит пода (OOM внутри cgroup).
 
-Глубже: [Virtual memory и paging](../10-devops-and-observability/hardware-and-os/05-virtual-memory-and-paging.md), [Linux virtual memory](../10-devops-and-observability/linux/01-virtual-memory.md), [Garbage collector (GOMEMLIMIT, возврат памяти ОС)](../01-go-core/memory-internals/04-garbage-collector.md), [Memory profiling](../01-go-core/profiling/03-memory-profiling.md), [Symptom-driven troubleshooting](../10-devops-and-observability/incident-response-and-investigation/02-symptom-driven-troubleshooting.md).
+Глубже: [Virtual memory и paging](../../10-devops-and-observability/hardware-and-os/05-virtual-memory-and-paging.md), [Linux virtual memory](../../10-devops-and-observability/linux/01-virtual-memory.md), [Garbage collector (GOMEMLIMIT, возврат памяти ОС)](../../01-go-core/memory-internals/04-garbage-collector.md), [Memory profiling](../../01-go-core/profiling/03-memory-profiling.md), [Symptom-driven troubleshooting](../../10-devops-and-observability/incident-response-and-investigation/02-symptom-driven-troubleshooting.md).
 
 ---
 
@@ -283,7 +283,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 Клиент при `202` опрашивает `GET /orders/{orderID}` или подписывается на вебхук/SSE.
 </details>
 
-Глубже: [Background workers (постановка в очередь, outbox)](../04-architecture-and-patterns/patterns/04-background-workers.md), [Идемпотентность](../05-system-design/reliability-patterns/06-idempotency.md), [Таймауты и deadlines](../05-system-design/reliability-patterns/01-timeouts-and-deadlines.md), [Write-request с очередью и async-обработкой](../05-system-design/external-request-flows/03-write-request-with-queue-and-async-processing.md).
+Глубже: [Background workers (постановка в очередь, outbox)](../../04-architecture-and-patterns/patterns/04-background-workers.md), [Идемпотентность](../../05-system-design/reliability-patterns/06-idempotency.md), [Таймауты и deadlines](../../05-system-design/reliability-patterns/01-timeouts-and-deadlines.md), [Write-request с очередью и async-обработкой](../../05-system-design/external-request-flows/03-write-request-with-queue-and-async-processing.md).
 
 ---
 
@@ -349,7 +349,7 @@ func main() {
 При `cancel()` все стадии выйдут по `ctx.Done()`, каждая закроет свой `out`, цепочка `for range` свернётся сверху вниз — горутины не утекут.
 </details>
 
-Глубже: подробный разбор — [Pipeline (coding-task)](coding-tasks/concurrency/04-pipeline.md), [Context patterns](../01-go-core/concurrency-and-performance/04-context-patterns.md), [Go Concurrency Patterns: Pipelines](https://go.dev/blog/pipelines).
+Глубже: подробный разбор — [Pipeline (coding-task)](../coding-tasks/concurrency/04-pipeline.md), [Context patterns](../../01-go-core/concurrency-and-performance/04-context-patterns.md), [Go Concurrency Patterns: Pipelines](https://go.dev/blog/pipelines).
 
 ---
 
@@ -382,7 +382,7 @@ func main() {
 
 Мораль: готовность case у небуферизованного канала определяется наличием *парной* горутины, у буферизованного — наличием места/данных в буфере.
 
-Глубже: [Goroutines и channels (буферизация, select, deadlock)](../01-go-core/concurrency-and-performance/02-goroutines-and-channels.md).
+Глубже: [Goroutines и channels (буферизация, select, deadlock)](../../01-go-core/concurrency-and-performance/02-goroutines-and-channels.md).
 
 ---
 
@@ -403,7 +403,7 @@ func main() {
 
 Суть: процесс — единица *изоляции и владения ресурсами*; поток — единица *планирования/исполнения*. Потоки одного процесса делят память, поэтому общаются через неё напрямую (и нуждаются в синхронизации).
 
-> **Про строку «Переключение».** Имеется в виду **context switch** — планировщик ОС снимает с ядра одну задачу и ставит другую (само переключение всегда между потоками; «между процессами» = между потоками разных процессов). Сохранение/восстановление регистров есть всегда. Дорогим переключение делает именно смена адресного пространства: загрузка нового корня таблиц страниц (`CR3` на x86), что обычно **инвалидирует TLB** — кэш переводов «виртуальный → физический адрес». После этого первые обращения к памяти промахиваются мимо TLB и идут через page-table walk, плюс остывают L1/L2-кэши. При переключении потоков **одного** процесса адресное пространство то же → `CR3` не меняется → TLB цел, поэтому дешевле. Современные CPU смягчают сброс через **PCID/ASID** (тэгирование записей TLB идентификатором процесса), но затраты не убирают полностью. Переключение **горутин** внутри одного потока ещё дешевле — оно в user-space, ядро и `CR3` не вовлечены (см. [Context switching и scheduling](../10-devops-and-observability/hardware-and-os/07-context-switching-and-scheduling.md)).
+> **Про строку «Переключение».** Имеется в виду **context switch** — планировщик ОС снимает с ядра одну задачу и ставит другую (само переключение всегда между потоками; «между процессами» = между потоками разных процессов). Сохранение/восстановление регистров есть всегда. Дорогим переключение делает именно смена адресного пространства: загрузка нового корня таблиц страниц (`CR3` на x86), что обычно **инвалидирует TLB** — кэш переводов «виртуальный → физический адрес». После этого первые обращения к памяти промахиваются мимо TLB и идут через page-table walk, плюс остывают L1/L2-кэши. При переключении потоков **одного** процесса адресное пространство то же → `CR3` не меняется → TLB цел, поэтому дешевле. Современные CPU смягчают сброс через **PCID/ASID** (тэгирование записей TLB идентификатором процесса), но затраты не убирают полностью. Переключение **горутин** внутри одного потока ещё дешевле — оно в user-space, ядро и `CR3` не вовлечены (см. [Context switching и scheduling](../../10-devops-and-observability/hardware-and-os/07-context-switching-and-scheduling.md)).
 
 **IPC между процессами** (память не общая, нужны явные механизмы):
 
@@ -414,9 +414,9 @@ func main() {
 - **Signals** — примитивное уведомление (`SIGTERM` и т.п.), без полезной нагрузки.
 - **Файлы / memory-mapped files**, **eventfd/pipe** для нотификаций.
 
-Связь с Go: горутина — не поток ОС, а user-level «задача», которую рантайм мультиплексирует на потоки (`M`) — см. [Scheduler](../01-go-core/runtime-scheduler/01-scheduler-and-preemption.md).
+Связь с Go: горутина — не поток ОС, а user-level «задача», которую рантайм мультиплексирует на потоки (`M`) — см. [Scheduler](../../01-go-core/runtime-scheduler/01-scheduler-and-preemption.md).
 
-Глубже: [Процессы и потоки](../10-devops-and-observability/hardware-and-os/06-processes-and-threads.md), [Context switching и scheduling](../10-devops-and-observability/hardware-and-os/07-context-switching-and-scheduling.md), [Сигналы и процессы](../10-devops-and-observability/linux/04-signals-and-processes.md).
+Глубже: [Процессы и потоки](../../10-devops-and-observability/hardware-and-os/06-processes-and-threads.md), [Context switching и scheduling](../../10-devops-and-observability/hardware-and-os/07-context-switching-and-scheduling.md), [Сигналы и процессы](../../10-devops-and-observability/linux/04-signals-and-processes.md).
 
 ---
 
@@ -460,7 +460,7 @@ func work2() {
 Если по логике одна из функций обязана брать `mu2` первым — выделить общий helper, инкапсулирующий *единый* порядок, и звать только его.
 </details>
 
-Глубже: [Sync-примитивы (Mutex, TryLock, deadlock)](../01-go-core/concurrency-and-performance/03-sync-primitives.md).
+Глубже: [Sync-примитивы (Mutex, TryLock, deadlock)](../../01-go-core/concurrency-and-performance/03-sync-primitives.md).
 
 ---
 
@@ -685,7 +685,7 @@ func (c *LFU) Put(key, value any) {
 | Слабое место | «скан» из новых ключей вымывает горячие | застаревание частот, нужен decay/aging |
 | Где уместен | временна́я локальность (recent = вероятно нужно снова) | устойчивая популярность ключей |
 
-Глубже: полный разбор LRU с тестами и thread-safe вариантом — [LRU cache (coding-task)](coding-tasks/data-structures/01-lru-cache.md).
+Глубже: полный разбор LRU с тестами и thread-safe вариантом — [LRU cache (coding-task)](../coding-tasks/data-structures/01-lru-cache.md).
 
 ---
 
@@ -708,7 +708,7 @@ func (c *LFU) Put(key, value any) {
 
 Практический трюк: присваивание каналу `nil` в `select` **отключает** его case (он никогда не сработает) — используют, чтобы исключить уже завершённый источник из `select`.
 
-Глубже: [Goroutines и channels (закрытие, nil-каналы, select)](../01-go-core/concurrency-and-performance/02-goroutines-and-channels.md).
+Глубже: [Goroutines и channels (закрытие, nil-каналы, select)](../../01-go-core/concurrency-and-performance/02-goroutines-and-channels.md).
 
 ---
 
@@ -848,7 +848,7 @@ func (c *ShardedCache) GetOrCreate(key, value string) string {
 - **Готовая альтернатива** — не изобретать: `sync.Map` (read-mostly) или библиотеки вроде `dgraph-io/ristretto`/`puzpuzpuz/xsync`, где шардирование уже внутри.
 </details>
 
-Глубже: [Sync-примитивы (Mutex/RWMutex/singleflight)](../01-go-core/concurrency-and-performance/03-sync-primitives.md), [sync.Map](../01-go-core/map-internals/sync-map/README.md), [Fetcher with cache (code-review)](coding-tasks/code-review/01-fetcher-with-cache.md).
+Глубже: [Sync-примитивы (Mutex/RWMutex/singleflight)](../../01-go-core/concurrency-and-performance/03-sync-primitives.md), [sync.Map](../../01-go-core/map-internals/sync-map/README.md), [Fetcher with cache (code-review)](../coding-tasks/code-review/01-fetcher-with-cache.md).
 
 ---
 
@@ -931,7 +931,7 @@ func (b *Broadcast[T]) Close() {
 Политика «дропать при переполнении» — выбор; альтернативы: блокироваться (нарушает условие), отписывать медленного, расширять буфер. На собесе важно проговорить компромисс.
 </details>
 
-Глубже: [Pub/Sub (coding-task)](coding-tasks/concurrency/05-pubsub.md), [Redis Pub/Sub](../07-message-brokers-and-streaming/05-redis-pubsub.md).
+Глубже: [Pub/Sub (coding-task)](../coding-tasks/concurrency/05-pubsub.md), [Redis Pub/Sub](../../07-message-brokers-and-streaming/05-redis-pubsub.md).
 
 ---
 
@@ -947,7 +947,7 @@ func (b *Broadcast[T]) Close() {
   - **Много ядер и частые `RLock`** — счётчик читателей становится точкой контеншена по кэш-линии (cache-line bouncing между ядрами); иногда обычный `Mutex` или шардирование быстрее.
 - Практика: не угадывать, а мерить (`go test -bench`, `-race`, профиль contention `mutex`/`block`). Часто для коротких секций `Mutex` или `atomic`/шардирование обгоняют `RWMutex`.
 
-Глубже: [Sync-примитивы (Mutex vs RWMutex, бенчмарки, semtable)](../01-go-core/concurrency-and-performance/03-sync-primitives.md).
+Глубже: [Sync-примитивы (Mutex vs RWMutex, бенчмарки, semtable)](../../01-go-core/concurrency-and-performance/03-sync-primitives.md).
 
 ---
 
@@ -993,7 +993,7 @@ func (s *Semaphore) Release() {
 `default` в `Release` превращает «тихий вечный блок» в явную панику — непарный вызов виден сразу.
 </details>
 
-Глубже: [Sync-примитивы](../01-go-core/concurrency-and-performance/03-sync-primitives.md), [Rate limiter (coding-task)](coding-tasks/concurrency/02-rate-limiter.md), `golang.org/x/sync/semaphore` (weighted).
+Глубже: [Sync-примитивы](../../01-go-core/concurrency-and-performance/03-sync-primitives.md), [Rate limiter (coding-task)](../coding-tasks/concurrency/02-rate-limiter.md), `golang.org/x/sync/semaphore` (weighted).
 
 ---
 
@@ -1022,7 +1022,7 @@ func (s *Semaphore) Release() {
 
 Правило: «context передаёт *что про этот запрос*, а не *что умеет сервис*». Зависимости — явными полями/аргументами.
 
-Глубже: [Context patterns (WithValue, антипаттерны, ключи)](../01-go-core/concurrency-and-performance/04-context-patterns.md), [Dependencies и composition (DI в Go)](../04-architecture-and-patterns/patterns/go-code-patterns/01-dependencies-and-composition.md).
+Глубже: [Context patterns (WithValue, антипаттерны, ключи)](../../01-go-core/concurrency-and-performance/04-context-patterns.md), [Dependencies и composition (DI в Go)](../../04-architecture-and-patterns/patterns/go-code-patterns/01-dependencies-and-composition.md).
 
 ---
 
@@ -1138,7 +1138,7 @@ func process(ctx context.Context, jobs []Job) ([]Result, error) {
 Инвариант «**ровно один send на горутину**»: при нормальном завершении send делает `doWork`, а `recover()` возвращает `nil` (второго send нет); при панике основной send не выполняется — отправляет `defer`. В любом случае цикл получает ровно `len(jobs)` значений и не виснет. Буфер `len(jobs)` гарантирует, что и «аварийный» send не заблокируется. Без `recover` паника обрушила бы весь процесс.
 </details>
 
-Глубже: [Worker pool debug (классы goroutine leak)](coding-tasks/concurrency/07-worker-pool-debug.md), [Symptom-driven troubleshooting](../10-devops-and-observability/incident-response-and-investigation/02-symptom-driven-troubleshooting.md), [Goroutine/concurrency profiling](../01-go-core/profiling/04-goroutine-concurrency-profiling.md).
+Глубже: [Worker pool debug (классы goroutine leak)](../coding-tasks/concurrency/07-worker-pool-debug.md), [Symptom-driven troubleshooting](../../10-devops-and-observability/incident-response-and-investigation/02-symptom-driven-troubleshooting.md), [Goroutine/concurrency profiling](../../01-go-core/profiling/04-goroutine-concurrency-profiling.md).
 
 ---
 
@@ -1288,7 +1288,7 @@ func (l *Limiter) Close() { close(l.stop) } // остановить горути
 Поэтому для production обычно берут ленивый пересчёт (как в `golang.org/x/time/rate`), а «канал + тикер» хорош, когда `rps` невелик и важна простота.
 </details>
 
-Глубже: [Rate limiter (coding-task, варианты)](coding-tasks/concurrency/02-rate-limiter.md), [Rate limiting (протоколы)](../08-networking-and-api/protocols/05-integration-patterns/03-rate-limiting.md), [Rate limiting (reliability)](../05-system-design/reliability-patterns/04-rate-limiting.md), [Redis rate limiters](../06-databases/database-systems-catalog/08b-redis-rate-limiters.md).
+Глубже: [Rate limiter (coding-task, варианты)](../coding-tasks/concurrency/02-rate-limiter.md), [Rate limiting (протоколы)](../../08-networking-and-api/protocols/05-integration-patterns/03-rate-limiting.md), [Rate limiting (reliability)](../../05-system-design/reliability-patterns/04-rate-limiting.md), [Redis rate limiters](../../06-databases/database-systems-catalog/08b-redis-rate-limiters.md).
 
 ---
 
@@ -1308,7 +1308,7 @@ func (l *Limiter) Close() { close(l.stop) } // остановить горути
 
 Итог: для I/O чаще достаточно «горутина на задачу + семафор на лимит», а тяжёлый worker pool — когда нужен переиспользуемый долгоживущий конвейер или строгий контроль числа исполнителей.
 
-Глубже: [Worker pool (coding-task)](coding-tasks/concurrency/01-worker-pool.md), [Worker pool debug](coding-tasks/concurrency/07-worker-pool-debug.md), [Background workers](../04-architecture-and-patterns/patterns/04-background-workers.md), [Netpoller](../01-go-core/runtime-scheduler/03-netpoller.md).
+Глубже: [Worker pool (coding-task)](../coding-tasks/concurrency/01-worker-pool.md), [Worker pool debug](../coding-tasks/concurrency/07-worker-pool-debug.md), [Background workers](../../04-architecture-and-patterns/patterns/04-background-workers.md), [Netpoller](../../01-go-core/runtime-scheduler/03-netpoller.md).
 
 ---
 
@@ -1364,14 +1364,14 @@ fmt.Println(err == nil) // false — интерфейс (тип=*MyError, зна
 ```
 </details>
 
-Глубже: [Interfaces, method sets и nil (typed nil, itab)](../01-go-core/03-interfaces-method-sets-and-nil.md).
+Глубже: [Interfaces, method sets и nil (typed nil, itab)](../../01-go-core/03-interfaces-method-sets-and-nil.md).
 
 ---
 
 ## Что есть рядом
 
-- [Interview Practice — обзор](README.md)
-- [Concurrency coding-tasks](coding-tasks/concurrency/README.md) — worker pool, rate limiter, fan-in/out, pipeline, pub/sub, singleflight
-- [Concurrency and Performance (теория)](../01-go-core/concurrency-and-performance/README.md) — memory model, channels, sync, context
-- [Runtime scheduler](../01-go-core/runtime-scheduler/README.md) — G-M-P, syscalls, netpoller, таймеры
-- [System Design Interview Cases](../05-system-design/interview-cases/README.md)
+- [Interview Practice — обзор](../README.md)
+- [Concurrency coding-tasks](../coding-tasks/concurrency/README.md) — worker pool, rate limiter, fan-in/out, pipeline, pub/sub, singleflight
+- [Concurrency and Performance (теория)](../../01-go-core/concurrency-and-performance/README.md) — memory model, channels, sync, context
+- [Runtime scheduler](../../01-go-core/runtime-scheduler/README.md) — G-M-P, syscalls, netpoller, таймеры
+- [System Design Interview Cases](../../05-system-design/interview-cases/README.md)

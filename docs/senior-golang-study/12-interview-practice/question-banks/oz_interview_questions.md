@@ -23,7 +23,7 @@
 - Как связана с физической памятью — ОС отображает виртуальные страницы на физические фреймы той же длины через таблицы страниц.
 - Почему размер именно такой — компромисс: мельче означает раздутые таблицы страниц, крупнее означает потери на внутреннюю фрагментацию.
 - Что работает постранично — подкачка, права доступа, copy-on-write, ленивое выделение памяти.
-- См. [hardware-and-os/05-virtual-memory-and-paging.md](../10-devops-and-observability/hardware-and-os/05-virtual-memory-and-paging.md).
+- См. [hardware-and-os/05-virtual-memory-and-paging.md](../../10-devops-and-observability/hardware-and-os/05-virtual-memory-and-paging.md).
 
 **Если страницы мапятся на физическую память, то каждое обращение — это поиск в «мапе». Как это работает быстро?**
 
@@ -32,7 +32,7 @@
 - Почему быстро — благодаря локальности обращений почти все трансляции это попадание в TLB: единицы тактов, без обхода таблиц.
 - При промахе TLB — запускается аппаратный page-table walk по многоуровневой таблице, результат кладётся в TLB.
 - Почему таблицы многоуровневые — чтобы не хранить запись на каждую страницу адресного пространства.
-- См. [hardware-and-os/02-memory-hierarchy.md](../10-devops-and-observability/hardware-and-os/02-memory-hierarchy.md).
+- См. [hardware-and-os/02-memory-hierarchy.md](../../10-devops-and-observability/hardware-and-os/02-memory-hierarchy.md).
 
 **Что такое hugepages?**
 
@@ -40,7 +40,7 @@
 - Зачем — меньше записей в таблицах и меньше промахов TLB: одна TLB-запись покрывает гораздо больший диапазон, что ускоряет память-ёмкие нагрузки (БД, JVM- и Go-хипы).
 - Виды — явные (hugetlbfs) и Transparent Huge Pages (THP, автоматические).
 - Минусы — внутренняя фрагментация (страница большая, мельче не выделить), а THP может давать латентные всплески на дефрагментации и слиянии.
-- См. [hardware-and-os/05-virtual-memory-and-paging.md](../10-devops-and-observability/hardware-and-os/05-virtual-memory-and-paging.md).
+- См. [hardware-and-os/05-virtual-memory-and-paging.md](../../10-devops-and-observability/hardware-and-os/05-virtual-memory-and-paging.md).
 
 **Зачем нужна виртуальная память?**
 
@@ -49,7 +49,7 @@
 - Память больше, чем есть RAM — за счёт подкачки (swap) и ленивого выделения по page-fault.
 - Упрощение размещения — линкер не думает про физические адреса.
 - Что ещё становится возможным — COW при fork, `mmap`, разделяемые библиотеки.
-- См. [linux/01-virtual-memory.md](../10-devops-and-observability/linux/01-virtual-memory.md).
+- См. [linux/01-virtual-memory.md](../../10-devops-and-observability/linux/01-virtual-memory.md).
 
 ---
 
@@ -62,7 +62,7 @@
 - User space — пользовательские процессы работают в ограниченном режиме (ring 3), без прямого доступа к устройствам, чужой и ядерной памяти.
 - Зачем разделение — стабильность и безопасность: баг или вредонос в приложении не может напрямую испортить ядро, чужие процессы или железо.
 - Как пересекают границу — только через контролируемые точки: сисколлы и прерывания.
-- См. [linux/04-signals-and-processes.md](../10-devops-and-observability/linux/04-signals-and-processes.md).
+- См. [linux/04-signals-and-processes.md](../../10-devops-and-observability/linux/04-signals-and-processes.md).
 
 **Что такое сисколл?**
 
@@ -70,7 +70,7 @@
 - Типовые категории — ввод-вывод (`read`, `write`), работа с памятью (`mmap`), процессы (`fork`, `execve`), сеть (`socket`, `accept`).
 - Чем является по сути — той самой контролируемой границей между user space и kernel space.
 - Что важно помнить про цену — каждый вызов это переключение режима, поэтому частые мелкие сисколлы заметно дороже редких крупных.
-- См. [runtime-scheduler/02-syscall.md](../01-go-core/runtime-scheduler/02-syscall.md).
+- См. [runtime-scheduler/02-syscall.md](../../01-go-core/runtime-scheduler/02-syscall.md).
 
 **Что происходит во время вызова сисколла?**
 
@@ -79,7 +79,7 @@
 - Возврат — инструкцией возврата процесс переключается обратно в user mode.
 - Стоимость — это переключение режима, оно дешевле полного переключения контекста между процессами, но не бесплатно.
 - Практический вывод — отсюда стремление батчить I/O и использовать epoll вместо частых сисколлов.
-- См. [runtime-scheduler/02-syscall.md](../01-go-core/runtime-scheduler/02-syscall.md).
+- См. [runtime-scheduler/02-syscall.md](../../01-go-core/runtime-scheduler/02-syscall.md).
 
 **Что делает сисколл fork?**
 
@@ -87,7 +87,7 @@
 - Возвращает дважды — 0 в дочернем процессе, PID ребёнка в родителе, `-1` при ошибке.
 - Память копируется не сразу — по Copy-on-Write: страницы общие и read-only, физическая копия делается только при первой записи.
 - Типичное продолжение — за `fork` следует `execve`, заменяющий образ новой программой.
-- См. [linux/04-signals-and-processes.md](../10-devops-and-observability/linux/04-signals-and-processes.md).
+- См. [linux/04-signals-and-processes.md](../../10-devops-and-observability/linux/04-signals-and-processes.md).
 
 **Что делает сисколл epoll?**
 
@@ -95,7 +95,7 @@
 - API — `epoll_create` создаёт инстанс, `epoll_ctl` добавляет и удаляет fd, `epoll_wait` блокируется до готовности.
 - Отличие от `select`/`poll` — те работают за O(n), каждый раз перебирая весь набор; epoll возвращает только готовые события, поэтому стоимость не зависит от общего числа наблюдаемых fd.
 - Где применяется — на epoll построен сетевой поллер Go.
-- См. [runtime-scheduler/03-netpoller.md](../01-go-core/runtime-scheduler/03-netpoller.md).
+- См. [runtime-scheduler/03-netpoller.md](../../01-go-core/runtime-scheduler/03-netpoller.md).
 
 **Какие примитивы синхронизации в ОС знаешь?**
 
@@ -108,7 +108,7 @@
   - Барьер — точка, где потоки дожидаются друг друга.
   - Монитор — мьютекс и condition variable, упакованные в одну конструкцию языка.
 - На уровне Linux — futex (fast userspace mutex), на котором и строятся мьютексы и семафоры библиотек: быстрый путь без сисколла, уход в ядро только при реальном конфликте. Плюс сигналы и файловые блокировки (`flock`, `fcntl`).
-- См. [linux/04-signals-and-processes.md](../10-devops-and-observability/linux/04-signals-and-processes.md).
+- См. [linux/04-signals-and-processes.md](../../10-devops-and-observability/linux/04-signals-and-processes.md).
 
 **Что такое файловый дескриптор?**
 
@@ -116,7 +116,7 @@
 - Как устроен — индекс в таблице открытых файлов процесса; через него выполняются `read`, `write`, `close`.
 - Почему «всё есть файл» — единый интерфейс позволяет работать с сокетом и файлом одними и теми же вызовами.
 - Лимиты и типичная авария — число дескрипторов ограничено (`ulimit -n`), а утечка (незакрытые тела ответов, соединения) приводит к отказу с «too many open files».
-- См. [linux/02-file-descriptors-and-io.md](../10-devops-and-observability/linux/02-file-descriptors-and-io.md).
+- См. [linux/02-file-descriptors-and-io.md](../../10-devops-and-observability/linux/02-file-descriptors-and-io.md).
 
 **Что такое stdin/stdout/stderr и какие у них дескрипторы?**
 
@@ -127,7 +127,7 @@
 - Их можно перенаправлять — `> file`, `2>&1`, конвейеры через `|`.
 - Зачем stderr отделён от stdout — чтобы диагностика не смешивалась с полезными данными: `prog > data.txt` сохранит результат, а ошибки останутся на экране.
 - Практика для контейнеров — приложение должно писать логи именно в stdout и stderr, а не в файл внутри контейнера: их подхватывает драйвер логирования.
-- См. [linux/02-file-descriptors-and-io.md](../10-devops-and-observability/linux/02-file-descriptors-and-io.md).
+- См. [linux/02-file-descriptors-and-io.md](../../10-devops-and-observability/linux/02-file-descriptors-and-io.md).
 
 ---
 
@@ -139,7 +139,7 @@
 - Системный (kernel) поток — единица планирования внутри процесса.
 - Что делят потоки — адресное пространство и дескрипторы, поэтому создание и переключение между ними дешевле, но нужна синхронизация доступа к общим данным.
 - Кого планирует ОС — именно потоки, а не процессы.
-- См. [hardware-and-os/06-processes-and-threads.md](../10-devops-and-observability/hardware-and-os/06-processes-and-threads.md).
+- См. [hardware-and-os/06-processes-and-threads.md](../../10-devops-and-observability/hardware-and-os/06-processes-and-threads.md).
 
 **Как процессы могут обмениваться информацией (IPC)?**
 
@@ -150,7 +150,7 @@
 - Сигналы — не передача данных, а уведомление о событии.
 - Memory-mapped files (`mmap`) — общий файл, отображённый в адресные пространства нескольких процессов.
 - Как выбирать — по объёму данных и по границе: внутри одной машины выигрывает shared memory, между машинами остаются только сокеты.
-- См. [linux/04-signals-and-processes.md](../10-devops-and-observability/linux/04-signals-and-processes.md).
+- См. [linux/04-signals-and-processes.md](../../10-devops-and-observability/linux/04-signals-and-processes.md).
 
 **Как убить процесс в Linux? Какие флаги у kill?**
 
@@ -165,7 +165,7 @@
   - `-0` — не убивает, только проверяет существование процесса и права на него.
 - По имени — `pkill <name>` или `killall`.
 - Группу процессов — `kill -- -<pgid>`.
-- См. [linux/04-signals-and-processes.md](../10-devops-and-observability/linux/04-signals-and-processes.md).
+- См. [linux/04-signals-and-processes.md](../../10-devops-and-observability/linux/04-signals-and-processes.md).
 
 ---
 
@@ -176,7 +176,7 @@
 - Что это — максимальное число логических процессоров P, то есть сколько горутин с Go-кодом могут исполняться параллельно в один момент; по сути число OS-потоков, одновременно крутящих Go-код.
 - Значение по умолчанию — число ядер (`runtime.NumCPU`); с Go 1.25 в контейнерах учитываются CPU-квоты cgroups.
 - Зачем крутить — регулирует степень параллелизма; иногда понижают, чтобы оставить ядра другим процессам.
-- См. [runtime-scheduler/01-scheduler-and-preemption.md](../01-go-core/runtime-scheduler/01-scheduler-and-preemption.md).
+- См. [runtime-scheduler/01-scheduler-and-preemption.md](../../01-go-core/runtime-scheduler/01-scheduler-and-preemption.md).
 
 **Может ли приложение с GOMAXPROCS=4 потреблять больше 4 ядер CPU?**
 
@@ -187,7 +187,7 @@
   - Фоновые потоки рантайма — GC и sysmon.
   - cgo-вызовы и обработчики сигналов.
 - Итог — суммарное потребление CPU процессом может превышать 4 ядра.
-- См. [runtime-scheduler/02-syscall.md](../01-go-core/runtime-scheduler/02-syscall.md).
+- См. [runtime-scheduler/02-syscall.md](../../01-go-core/runtime-scheduler/02-syscall.md).
 
 **Входит ли системная горутина sysmon в лимит GOMAXPROCS?**
 
@@ -195,7 +195,7 @@
 - Что делает sysmon — служебный мониторинг рантайма: следит за преемпцией долгих горутин и сетевым поллером, форсирует GC, возвращает память ОС.
 - Почему не входит — работает на собственном OS-потоке (M) без привязки к P, поэтому не занимает слот из GOMAXPROCS.
 - Что вообще считает GOMAXPROCS — только P, исполняющие пользовательский Go-код; sysmon, GC-воркеры и потоки, застрявшие в сисколлах, идут «сверх» лимита.
-- См. [runtime-scheduler/01-scheduler-and-preemption.md](../01-go-core/runtime-scheduler/01-scheduler-and-preemption.md).
+- См. [runtime-scheduler/01-scheduler-and-preemption.md](../../01-go-core/runtime-scheduler/01-scheduler-and-preemption.md).
 
 **В `top` процесс показывает 146% CPU. Возможно ли больше 100% и как это понимать?**
 
@@ -206,7 +206,7 @@
 - Потолок — `число_ядер × 100%`: на 8-ядерной машине до 800%.
 - Для Go это норма — рантайм раскладывает горутины на несколько ядер.
 - Посмотреть по потокам — `top -H` или `htop`.
-- См. [linux/06-linux-commands.md](../10-devops-and-observability/linux/06-linux-commands.md).
+- См. [linux/06-linux-commands.md](../../10-devops-and-observability/linux/06-linux-commands.md).
 
 ---
 
@@ -218,7 +218,7 @@
 - Как кладут — ключ прогоняется через хэш-функцию, получается число, из него номер бакета; в бакет кладётся пара ключ-значение.
 - Сложность — доступ по ключу амортизированно O(1).
 - В старой Go-map (`hmap`) — массив бакетов `bmap`, где каждый бакет хранит до 8 пар + массив `tophash` (старшие байты хэшей для быстрого сравнения) + указатель на overflow-бакет.
-- См. [map-internals/02-hmap-before-1.24.md](../01-go-core/map-internals/02-hmap-before-1.24.md).
+- См. [map-internals/02-hmap-before-1.24.md](../../01-go-core/map-internals/02-hmap-before-1.24.md).
 
 **Хэш-функция вернула огромное число, а массив фиксированного размера (например, 100 ячеек). Как из большого значения получить индекс?**
 
@@ -251,7 +251,7 @@
 - Условие 1 — средняя загрузка превышает порог (для старой map это load factor ≈ 6.5 элементов на бакет), тогда размер удваивается.
 - Условие 2 — развелось слишком много overflow-бакетов даже без превышения load factor; тогда идёт same-size grow, то есть переупаковка для очистки разреженных бакетов.
 - Как проходит эвакуация — инкрементально: элементы переносятся из старых бакетов в новые порциями при последующих записях и удалениях, а не одним стоп-вызовом.
-- См. [map-internals/02-hmap-before-1.24.md](../01-go-core/map-internals/02-hmap-before-1.24.md).
+- См. [map-internals/02-hmap-before-1.24.md](../../01-go-core/map-internals/02-hmap-before-1.24.md).
 
 **Чему равна временная сложность операций старой map в худшем случае?**
 
@@ -271,7 +271,7 @@
 - Из чего состоит правило — формат сообщений (синтаксис), смысл полей (семантика), порядок и тайминг обмена.
 - Зачем — чтобы две машины «понимали» друг друга, обе должны следовать одному протоколу.
 - Организация по уровням (модели OSI и TCP/IP) — каждый уровень решает свою задачу и опирается на нижележащий: физический → канальный → сетевой (IP) → транспортный (TCP/UDP) → прикладной (HTTP, DNS).
-- См. [linux/03-tcp-sockets.md](../10-devops-and-observability/linux/03-tcp-sockets.md).
+- См. [linux/03-tcp-sockets.md](../../10-devops-and-observability/linux/03-tcp-sockets.md).
 
 **За что отвечает прикладной уровень?**
 
@@ -279,7 +279,7 @@
 - За что отвечает — за формат и семантику прикладных сообщений: что такое «запрос», «ответ», «ресурс».
 - Что делегирует — доставку байтов транспортному уровню (TCP/UDP).
 - Коротко — отвечает за «о чём говорят», а не за «как байты долетели».
-- См. [request-lifecycle/03-tcp-tls-and-http-request.md](../08-networking-and-api/request-lifecycle/03-tcp-tls-and-http-request.md).
+- См. [request-lifecycle/03-tcp-tls-and-http-request.md](../../08-networking-and-api/request-lifecycle/03-tcp-tls-and-http-request.md).
 
 **Что такое HTTP-протокол?**
 
@@ -288,7 +288,7 @@
 - Как состояние всё-таки появляется — его добавляют поверх: cookies, серверные сессии, токены.
 - Представление — текстовое и человекочитаемое в HTTP/1.1, бинарный фрейминг в HTTP/2 и HTTP/3.
 - Транспорт — TCP для версий 1.1 и 2, QUIC поверх UDP для версии 3.
-- См. [02-http/02-server-in-go.md](../08-networking-and-api/protocols/02-http/02-server-in-go.md).
+- См. [02-http/02-server-in-go.md](../../08-networking-and-api/protocols/02-http/02-server-in-go.md).
 
 **HTTP работает поверх какого протокола?**
 
@@ -296,14 +296,14 @@
 - HTTPS — тот же HTTP поверх TCP, но через промежуточный слой TLS.
 - HTTP/3 — исключение: работает поверх QUIC, а тот построен на UDP.
 - Почему это не шаг назад — надёжность, порядок и мультиплексирование реализованы в самом QUIC, в пространстве пользователя; заодно так уходит head-of-line blocking на уровне TCP.
-- См. [request-lifecycle/03-tcp-tls-and-http-request.md](../08-networking-and-api/request-lifecycle/03-tcp-tls-and-http-request.md).
+- См. [request-lifecycle/03-tcp-tls-and-http-request.md](../../08-networking-and-api/request-lifecycle/03-tcp-tls-and-http-request.md).
 
 **В чём разница между HTTP/1.0, HTTP/1.1 и HTTP/2?**
 
 - HTTP/1.0 — по одному запросу на TCP-соединение, соединение закрывается после ответа (keep-alive не по умолчанию) → накладные расходы на каждый запрос.
 - HTTP/1.1 — постоянные соединения (`keep-alive`) по умолчанию, конвейеризация (pipelining), обязательный заголовок `Host` (виртуальный хостинг), chunked-кодирование. Главная боль — head-of-line blocking: ответы по соединению идут строго по очереди.
 - HTTP/2 — бинарный фрейминг вместо текста, мультиплексирование многих запросов-стримов в одном TCP-соединении (нет HoL-блокировки на уровне HTTP), сжатие заголовков HPACK, приоритеты, server push. Остаётся HoL на уровне TCP (его решает уже HTTP/3 поверх QUIC).
-- См. [protocols/00-protocol-comparison.md](../08-networking-and-api/protocols/00-protocol-comparison.md).
+- См. [protocols/00-protocol-comparison.md](../../08-networking-and-api/protocols/00-protocol-comparison.md).
 
 **Из каких частей состоит HTTP-запрос?**
 
@@ -312,7 +312,7 @@
 - Пустая строка — обязательный разделитель между заголовками и телом.
 - Тело — опционально, обычно у `POST` и `PUT`.
 - Как сервер понимает, где заканчивается тело — по `Content-Length` либо по `Transfer-Encoding: chunked`; без них тело считается пустым.
-- См. [02-http/02-server-in-go.md](../08-networking-and-api/protocols/02-http/02-server-in-go.md).
+- См. [02-http/02-server-in-go.md](../../08-networking-and-api/protocols/02-http/02-server-in-go.md).
 
 **Чем HTTP-ответ отличается от запроса?**
 
@@ -360,7 +360,7 @@
 - Безопасные (не меняют состояние) — `GET`, `HEAD`, `OPTIONS`.
 - Идемпотентные — `GET`, `PUT`, `DELETE`, `HEAD`, `OPTIONS`.
 - Не идемпотентны — `POST` и обычно `PATCH`.
-- См. [api-design/03-http-methods.md](../08-networking-and-api/api-design/03-http-methods.md).
+- См. [api-design/03-http-methods.md](../../08-networking-and-api/api-design/03-http-methods.md).
 
 **В чём разница между PUT и PATCH?**
 
@@ -375,7 +375,7 @@
 - Зачем `HEAD` — дёшево проверить существование ресурса, его размер (`Content-Length`), дату изменения, кэш-валидаторы (`ETag`) — не скачивая данные.
 - `OPTIONS` — запрос возможностей: какие методы допустимы для ресурса, ответ приходит в заголовке `Allow`.
 - Ключевая роль `OPTIONS` на практике — CORS preflight: браузер заранее спрашивает, можно ли слать кросс-доменный запрос.
-- См. [api-design/03-http-methods.md](../08-networking-and-api/api-design/03-http-methods.md).
+- См. [api-design/03-http-methods.md](../../08-networking-and-api/api-design/03-http-methods.md).
 
 ---
 
@@ -390,7 +390,7 @@
   - Удалённый, но открытый файл: процесс держит fd на удалённый большой файл — место не освобождается, пока он не закроет/перезапустится. Ищут `lsof | grep deleted`, лечат рестартом процесса.
   - Зарезервированные под root блоки (по умолчанию 5% на ext4): обычный пользователь упирается в лимит, хотя root «видит» место. Лечат `tune2fs -m`.
   - Квоты пользователя/группы (`quota`), или заполненный отдельный маунт (`/var`, `/tmp`).
-- См. [linux/06-linux-commands.md](../10-devops-and-observability/linux/06-linux-commands.md) и [linux/02-file-descriptors-and-io.md](../10-devops-and-observability/linux/02-file-descriptors-and-io.md).
+- См. [linux/06-linux-commands.md](../../10-devops-and-observability/linux/06-linux-commands.md) и [linux/02-file-descriptors-and-io.md](../../10-devops-and-observability/linux/02-file-descriptors-and-io.md).
 
 **На голом сервере (не контейнер) сервис течёт по памяти. Что произойдёт, когда память закончится?**
 
@@ -398,7 +398,7 @@
 - Следствие — растёт I/O, начинается thrashing, латентность деградирует.
 - Потом — когда исчерпаны и RAM, и swap, и ядро не может высвободить достаточно памяти, срабатывает OOM Killer.
 - Кого убивает — процесс с наибольшим `oom_score`, как правило самый прожорливый, то есть наш текущий; убивает сигналом `SIGKILL`.
-- См. [linux/01-virtual-memory.md](../10-devops-and-observability/linux/01-virtual-memory.md).
+- См. [linux/01-virtual-memory.md](../../10-devops-and-observability/linux/01-virtual-memory.md).
 
 **На какой тип памяти опирается система, решая запустить OOM Killer?**
 
@@ -406,7 +406,7 @@
 - Что почти не считается — page cache (страницы файлов): его ядро освобождает само, переиспользуя под текущие нужды.
 - Когда запускается OOM — после вытеснения кэша и свопинга свободной физической памяти всё равно не хватает.
 - Как выбирают жертву — по `oom_score`, функции от RSS и `oom_score_adj`.
-- См. [linux/01-virtual-memory.md](../10-devops-and-observability/linux/01-virtual-memory.md).
+- См. [linux/01-virtual-memory.md](../../10-devops-and-observability/linux/01-virtual-memory.md).
 
 ---
 
@@ -426,4 +426,4 @@
 - Контекст и отмена. Если загрузка значения ходит в БД/сеть — пробрасывается ли `context` (таймаут/отмена), а не висит бесконечно под блокировкой.
 - Не держать блокировку на время тяжёлой операции. Под `Lock` нельзя делать сетевой/IO-вызов — это сериализует весь кэш. Загрузку выносят за пределы критической секции.
 - Наблюдаемость и тесты. Метрики hit/miss/evictions, юнит-тесты на конкурентность (`-race`), бенчмарки (`-benchmem`).
-- См. [concurrency-and-performance/03-sync-primitives.md](../01-go-core/concurrency-and-performance/03-sync-primitives.md) и [map-internals/sync-map](../01-go-core/map-internals/sync-map/README.md).
+- См. [concurrency-and-performance/03-sync-primitives.md](../../01-go-core/concurrency-and-performance/03-sync-primitives.md) и [map-internals/sync-map](../../01-go-core/map-internals/sync-map/README.md).

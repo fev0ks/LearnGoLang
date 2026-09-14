@@ -66,7 +66,7 @@
 - Передача в функцию — копирует только дескриптор. Изменение элементов видно вызывающему коду, а изменение самого дескриптора без возврата наружу не передаётся.
 - Риски — конкурентная запись требует синхронизации, а маленький subslice может удерживать в памяти большой backing array.
 
-Подробнее: [Slices](../01-go-core/04-slices.md).
+Подробнее: [Slices](../../01-go-core/04-slices.md).
 
 </details>
 
@@ -301,7 +301,7 @@ var _ Saver = (*PostgresSaver)(nil)
 
 Практичные примеры — `Set[T comparable]`, типизированная очередь, функции `Map`/`Filter`, обобщённый результат `Result[T]`. Не стоит делать дженерик только ради устранения двух похожих строк: сложность API должна окупаться повторным использованием.
 
-Подробнее: [Generics](../01-go-core/06-generics.md).
+Подробнее: [Generics](../../01-go-core/06-generics.md).
 
 </details>
 
@@ -455,7 +455,7 @@ wg.Wait()
 
 Runtime берёт G из локальных и глобальной очередей, использует work stealing между P и вытесняет долго работающие горутины. Заблокированная на канале G паркуется. Сетевой ввод-вывод обслуживается через netpoller, а при блокирующем системном вызове P может перейти к другому M.
 
-Подробнее: [Scheduler and preemption](../01-go-core/runtime-scheduler/01-scheduler-and-preemption.md).
+Подробнее: [Scheduler and preemption](../../01-go-core/runtime-scheduler/01-scheduler-and-preemption.md).
 
 </details>
 
@@ -468,7 +468,7 @@ Runtime берёт G из локальных и глобальной очере�
 
 `GOMAXPROCS` ограничивает число потоков, которые одновременно выполняют пользовательский Go-код. Если значение не задано явно, runtime выбирает default из числа логических CPU, CPU affinity и, на Linux, cgroup CPU quota. Учёт container CPU limit и автоматическое обновление default включены для модулей с версией языка Go 1.25 и новее. Это число P, а не общее число M.
 
-Подробнее: [Go 1.25 — container-aware GOMAXPROCS](../15-go-version-differences/go1.25.md).
+Подробнее: [Go 1.25 — container-aware GOMAXPROCS](../../15-go-version-differences/go1.25.md).
 
 </details>
 
@@ -692,7 +692,7 @@ Case с `nil`-каналом никогда не готов, поэтому пр
 
 Для обычной доменной map чаще лучше `map[K]V` с `Mutex` или `RWMutex`: она типобезопасна и позволяет защищать дополнительные инварианты вместе с содержимым. `sync.Map` не делает потокобезопасным объект, лежащий внутри значения.
 
-Подробнее: [sync.Map](../01-go-core/map-internals/sync-map/README.md).
+Подробнее: [sync.Map](../../01-go-core/map-internals/sync-map/README.md).
 
 </details>
 
@@ -800,7 +800,7 @@ HTTP сам по себе stateless: каждый запрос должен не
 - Семантика — методы, статусы и смысл заголовков не меняются.
 - Ограничение — HTTP/2 убирает блокировку головой очереди на уровне HTTP, но TCP head-of-line blocking при потере пакета остаётся.
 
-Подробнее: [HTTP versions](../08-networking-and-api/protocols/02-http/01-http-versions.md).
+Подробнее: [HTTP versions](../../08-networking-and-api/protocols/02-http/01-http-versions.md).
 
 </details>
 
@@ -830,7 +830,7 @@ HTTP сам по себе stateless: каждый запрос должен не
 
 Одного `Client.Timeout` иногда недостаточно для streaming-ответов, где нужен отдельный контроль времени бездействия между сообщениями.
 
-Подробнее: [HTTP client in Go](../08-networking-and-api/protocols/02-http/03-client-in-go.md).
+Подробнее: [HTTP client in Go](../../08-networking-and-api/protocols/02-http/03-client-in-go.md).
 
 </details>
 
@@ -860,7 +860,7 @@ HTTP сам по себе stateless: каждый запрос должен не
 
 Важно различать горутину и поток ОС: модель «одно соединение — одна горутина» не означает «одно соединение — один поток».
 
-Подробнее: [HTTP server in Go](../08-networking-and-api/protocols/02-http/02-server-in-go.md).
+Подробнее: [HTTP server in Go](../../08-networking-and-api/protocols/02-http/02-server-in-go.md).
 
 </details>
 
@@ -986,7 +986,7 @@ LIMIT 2;
 
 `EXPLAIN ANALYZE` реально выполняет запрос и добавляет фактические строки, время и число циклов. `BUFFERS` показывает обращения к страницам в shared buffers и на диске. Большое расхождение estimated rows и actual rows часто указывает на плохую статистику или корреляцию колонок. Для изменяющих запросов `ANALYZE` действительно меняет данные, поэтому его запускают осознанно, при необходимости внутри транзакции с `ROLLBACK`.
 
-Подробнее: [Query planning](../06-databases/database-systems-catalog/postgresql/03-query-planning.md).
+Подробнее: [Query planning](../../06-databases/database-systems-catalog/postgresql/03-query-planning.md).
 
 </details>
 
@@ -1063,7 +1063,7 @@ LIMIT 2;
 
 Дополнительно индекс бывает составным, частичным, уникальным, функциональным и покрывающим. Это свойства индекса, а не отдельные access methods.
 
-Подробнее: [PostgreSQL indexes](../06-databases/database-systems-catalog/postgresql/02-indexes.md).
+Подробнее: [PostgreSQL indexes](../../06-databases/database-systems-catalog/postgresql/02-indexes.md).
 
 </details>
 
@@ -1147,7 +1147,7 @@ CREATE INDEX idx_orders_customer_created
 
 В PostgreSQL основные уровни — `Read Committed` по умолчанию, `Repeatable Read` и `Serializable`. Чем сильнее изоляция, тем меньше аномалий, но тем выше цена конфликтов и повторов. Транзакции держат короткими: не ждут внутри пользователя или внешний HTTP-сервис, обрабатывают ошибки всех шагов и всегда выполняют rollback при неуспехе.
 
-Подробнее: [Transactions and locking](../06-databases/database-systems-catalog/postgresql/04-transactions-and-locking.md).
+Подробнее: [Transactions and locking](../../06-databases/database-systems-catalog/postgresql/04-transactions-and-locking.md).
 
 </details>
 
@@ -1163,7 +1163,7 @@ CREATE INDEX idx_orders_customer_created
 
 ACID не означает, что любая бизнес-логика автоматически корректна, что транзакции всегда выполняются строго последовательно или что подтверждённые данные уже находятся в географически удалённом бэкапе.
 
-Подробнее: [ACID](../06-databases/database-fundamentals/01-acid.md).
+Подробнее: [ACID](../../06-databases/database-fundamentals/01-acid.md).
 
 </details>
 
@@ -1171,10 +1171,10 @@ ACID не означает, что любая бизнес-логика авто
 
 ## Что читать глубже
 
-- [Primitive types and zero values](../01-go-core/01-primitive-types-and-zero-values.md)
-- [Strings](../01-go-core/07-strings.md)
-- [Interfaces, method sets and nil](../01-go-core/03-interfaces-method-sets-and-nil.md)
-- [Goroutines and channels](../01-go-core/concurrency-and-performance/02-goroutines-and-channels.md)
-- [Synchronization primitives](../01-go-core/concurrency-and-performance/03-sync-primitives.md)
-- [HTTP](../08-networking-and-api/protocols/02-http/README.md)
-- [PostgreSQL](../06-databases/database-systems-catalog/postgresql/README.md)
+- [Primitive types and zero values](../../01-go-core/01-primitive-types-and-zero-values.md)
+- [Strings](../../01-go-core/07-strings.md)
+- [Interfaces, method sets and nil](../../01-go-core/03-interfaces-method-sets-and-nil.md)
+- [Goroutines and channels](../../01-go-core/concurrency-and-performance/02-goroutines-and-channels.md)
+- [Synchronization primitives](../../01-go-core/concurrency-and-performance/03-sync-primitives.md)
+- [HTTP](../../08-networking-and-api/protocols/02-http/README.md)
+- [PostgreSQL](../../06-databases/database-systems-catalog/postgresql/README.md)

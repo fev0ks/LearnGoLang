@@ -21,46 +21,46 @@
 
 **Можно ли передать функцию как параметр в другую функцию?**
 
-- Да. В Go функции — first-class values: их можно передавать аргументом, возвращать, хранить в переменных и полях структур. Тип параметра — сигнатура (`func(int) error`); часто комбинируется с замыканиями. См. [02-value-vs-pointer-semantics.md](../01-go-core/02-value-vs-pointer-semantics.md), раздел про семантику значений.
+- Да. В Go функции — first-class values: их можно передавать аргументом, возвращать, хранить в переменных и полях структур. Тип параметра — сигнатура (`func(int) error`); часто комбинируется с замыканиями. См. [02-value-vs-pointer-semantics.md](../../01-go-core/02-value-vs-pointer-semantics.md), раздел про семантику значений.
 
 **Чем отличается слайс от массива?**
 
-- Массив `[N]T` — фиксированная длина, часть типа, копируется целиком по значению. Слайс — дескриптор из трёх полей (указатель на массив, `len`, `cap`), копируется как заголовок и ссылается на общий backing-массив. См. [04-slices.md](../01-go-core/04-slices.md).
+- Массив `[N]T` — фиксированная длина, часть типа, копируется целиком по значению. Слайс — дескриптор из трёх полей (указатель на массив, `len`, `cap`), копируется как заголовок и ссылается на общий backing-массив. См. [04-slices.md](../../01-go-core/04-slices.md).
 
 **Где выделяется память под новый массив при расширении слайса?**
 
 - Где — при `append` сверх `cap` рантайм аллоцирует новый backing-массив на куче: escape-анализ почти всегда отправляет его туда.
 - Что со старым — он остаётся жить, пока на него есть ссылки.
 - Механика роста `cap` — см. вопрос «Как работает встроенная функция append» ниже в этом разделе.
-- См. [04-slices.md](../01-go-core/04-slices.md) и [memory-internals/02-allocator.md](../01-go-core/memory-internals/02-allocator.md).
+- См. [04-slices.md](../../01-go-core/04-slices.md) и [memory-internals/02-allocator.md](../../01-go-core/memory-internals/02-allocator.md).
 
 **Какая алгоритмическая сложность доступа по ключу для map?**
 
-- Амортизированно O(1): хеш ключа → бакет → сравнение внутри бакета. Худший случай O(n) при массовых коллизиях, но на практике константа: hash seed у каждой map случайный (подобрать коллизии извне сложно), а при превышении load factor таблица растёт и записи перераспределяются. См. [map-internals](../01-go-core/map-internals/README.md).
+- Амортизированно O(1): хеш ключа → бакет → сравнение внутри бакета. Худший случай O(n) при массовых коллизиях, но на практике константа: hash seed у каждой map случайный (подобрать коллизии извне сложно), а при превышении load factor таблица растёт и записи перераспределяются. См. [map-internals](../../01-go-core/map-internals/README.md).
 
 **Есть ли set в Go? Как сделать?**
 
-- Отдельного `set` в языке нет. Делают через `map[T]struct{}`: ключ — сам элемент (обеспечивает уникальность), значение — `struct{}{}` (нулевой размер, память не тратит). `map[T]bool` тоже подходит, но `struct{}` экономнее. См. [map-internals](../01-go-core/map-internals/README.md).
+- Отдельного `set` в языке нет. Делают через `map[T]struct{}`: ключ — сам элемент (обеспечивает уникальность), значение — `struct{}{}` (нулевой размер, память не тратит). `map[T]bool` тоже подходит, но `struct{}` экономнее. См. [map-internals](../../01-go-core/map-internals/README.md).
 
 **Какие бывают виды каналов?**
 
-- По направлению: двунаправленный `chan T`, только-на-приём `<-chan T`, только-на-отправку `chan<- T`. По буферизации: небуферизированный (rendezvous — отправитель ждёт получателя) и буферизированный (`make(chan T, n)` — блокирует при заполнении). См. [concurrency-and-performance/02-goroutines-and-channels.md](../01-go-core/concurrency-and-performance/02-goroutines-and-channels.md).
+- По направлению: двунаправленный `chan T`, только-на-приём `<-chan T`, только-на-отправку `chan<- T`. По буферизации: небуферизированный (rendezvous — отправитель ждёт получателя) и буферизированный (`make(chan T, n)` — блокирует при заполнении). См. [concurrency-and-performance/02-goroutines-and-channels.md](../../01-go-core/concurrency-and-performance/02-goroutines-and-channels.md).
 
 **Зачем нужен context.Context?**
 
-- Сквозная передача сигнала отмены/дедлайна и request-scoped значений по дереву вызовов и горутин. Главное — кооперативная отмена: при `cancel()`/таймауте закрывается `Done()`, и все слушающие операции (запросы в БД, HTTP, ожидание) прекращаются, не утекая в горутины. См. [concurrency-and-performance/04-context-patterns.md](../01-go-core/concurrency-and-performance/04-context-patterns.md).
+- Сквозная передача сигнала отмены/дедлайна и request-scoped значений по дереву вызовов и горутин. Главное — кооперативная отмена: при `cancel()`/таймауте закрывается `Done()`, и все слушающие операции (запросы в БД, HTTP, ожидание) прекращаются, не утекая в горутины. См. [concurrency-and-performance/04-context-patterns.md](../../01-go-core/concurrency-and-performance/04-context-patterns.md).
 
 **Есть ли исключения в Go?**
 
-- Нет классических try/catch. Ошибки — обычные значения (`error`), возвращаются явно и проверяются `if err != nil`. Для нештатных, фатальных ситуаций есть `panic`/`recover`, но это не механизм бизнес-ошибок, а аварийный путь. См. [05-error-handling.md](../01-go-core/05-error-handling.md).
+- Нет классических try/catch. Ошибки — обычные значения (`error`), возвращаются явно и проверяются `if err != nil`. Для нештатных, фатальных ситуаций есть `panic`/`recover`, но это не механизм бизнес-ошибок, а аварийный путь. См. [05-error-handling.md](../../01-go-core/05-error-handling.md).
 
 **Что такое mutex?**
 
-- Примитив взаимного исключения: `sync.Mutex` гарантирует, что критическую секцию в любой момент выполняет одна горутина. `Lock`/`Unlock`; есть `sync.RWMutex` с разделением на множественных читателей и одного писателя. Защищает разделяемое состояние от гонок. См. [concurrency-and-performance/03-sync-primitives.md](../01-go-core/concurrency-and-performance/03-sync-primitives.md).
+- Примитив взаимного исключения: `sync.Mutex` гарантирует, что критическую секцию в любой момент выполняет одна горутина. `Lock`/`Unlock`; есть `sync.RWMutex` с разделением на множественных читателей и одного писателя. Защищает разделяемое состояние от гонок. См. [concurrency-and-performance/03-sync-primitives.md](../../01-go-core/concurrency-and-performance/03-sync-primitives.md).
 
 **Что такое go.mod и go.sum?**
 
-- `go.mod` — манифест модуля: имя модуля (import path), версия Go и список прямых/косвенных зависимостей с их версиями (semver + MVS — minimal version selection). `go.sum` — список криптографических хешей (контрольных сумм) каждой зависимости и её `go.mod` для проверки целостности: при сборке Go сверяет загруженный код с хешем и не даёт незаметно подменить версию. Оба файла коммитятся. См. [service-topologies/03-go-project-layout.md](../04-architecture-and-patterns/service-topologies/03-go-project-layout.md).
+- `go.mod` — манифест модуля: имя модуля (import path), версия Go и список прямых/косвенных зависимостей с их версиями (semver + MVS — minimal version selection). `go.sum` — список криптографических хешей (контрольных сумм) каждой зависимости и её `go.mod` для проверки целостности: при сборке Go сверяет загруженный код с хешем и не даёт незаметно подменить версию. Оба файла коммитятся. См. [service-topologies/03-go-project-layout.md](../../04-architecture-and-patterns/service-topologies/03-go-project-layout.md).
 
 **Чем make отличается от new?**
 
@@ -73,19 +73,19 @@
 - Если места нет — рантайм аллоцирует новый массив большего размера, копирует старые элементы и возвращает новый заголовок.
 - Рост `cap` — примерно ×2 на малых слайсах и плавнее (≈×1.25) на больших.
 - Следствия — результат `append` всегда нужно присваивать обратно (`s = append(s, …)`), а при общем backing-массиве возможны неожиданные перезаписи.
-- См. [04-slices.md](../01-go-core/04-slices.md).
+- См. [04-slices.md](../../01-go-core/04-slices.md).
 
 **Как работают новые map? Чем отличаются от старой реализации?**
 
-- С Go 1.24 встроенный `map` перешёл на Swiss Tables: вместо старой схемы «бакет на 8 пар + цепочка overflow-бакетов» используется открытая адресация группами по 8 слотов с control-байтами (по байту метаданных на слот), что даёт SIMD-сканирование группы, меньше промахов кэша и быстрее lookup/insert при высокой заполненности. Семантика (случайный порядок итерации, запрет конкурентной записи) не изменилась. См. [map-internals/01-swiss-tables-since-1.24.md](../01-go-core/map-internals/01-swiss-tables-since-1.24.md).
+- С Go 1.24 встроенный `map` перешёл на Swiss Tables: вместо старой схемы «бакет на 8 пар + цепочка overflow-бакетов» используется открытая адресация группами по 8 слотов с control-байтами (по байту метаданных на слот), что даёт SIMD-сканирование группы, меньше промахов кэша и быстрее lookup/insert при высокой заполненности. Семантика (случайный порядок итерации, запрет конкурентной записи) не изменилась. См. [map-internals/01-swiss-tables-since-1.24.md](../../01-go-core/map-internals/01-swiss-tables-since-1.24.md).
 
 **Что произойдёт при чтении из закрытого канала? А при записи?**
 
-- Чтение из закрытого канала не блокируется: сначала отдаются оставшиеся в буфере значения, потом — нулевое значение типа; идиома `v, ok := <-ch` даёт `ok == false`, когда канал закрыт и пуст. Запись в закрытый канал и повторный `close` вызывают панику. Поэтому закрывает канал всегда отправитель и только один раз. См. [concurrency-and-performance/02-goroutines-and-channels.md](../01-go-core/concurrency-and-performance/02-goroutines-and-channels.md).
+- Чтение из закрытого канала не блокируется: сначала отдаются оставшиеся в буфере значения, потом — нулевое значение типа; идиома `v, ok := <-ch` даёт `ok == false`, когда канал закрыт и пуст. Запись в закрытый канал и повторный `close` вызывают панику. Поэтому закрывает канал всегда отправитель и только один раз. См. [concurrency-and-performance/02-goroutines-and-channels.md](../../01-go-core/concurrency-and-performance/02-goroutines-and-channels.md).
 
 **Чем `interface{}` отличается от `any`?**
 
-- Ничем — `any` это псевдоним (`type any = interface{}`), введённый в Go 1.18 для читаемости. Оба означают «любой тип» (пустой интерфейс без методов). `any` — рекомендуемая запись в новом коде. См. [03-interfaces-method-sets-and-nil.md](../01-go-core/03-interfaces-method-sets-and-nil.md).
+- Ничем — `any` это псевдоним (`type any = interface{}`), введённый в Go 1.18 для читаемости. Оба означают «любой тип» (пустой интерфейс без методов). `any` — рекомендуемая запись в новом коде. См. [03-interfaces-method-sets-and-nil.md](../../01-go-core/03-interfaces-method-sets-and-nil.md).
 
 **Как реализовать конкурентный доступ к общей переменной без гонок?**
 
@@ -95,7 +95,7 @@
 - `sync.Once` — когда надо инициализировать ровно один раз.
 - Проверка корректности — race-детектор (`go test -race`).
 - Главное правило — к одной переменной нельзя одновременно писать и читать без синхронизации.
-- См. [concurrency-and-performance/03-sync-primitives.md](../01-go-core/concurrency-and-performance/03-sync-primitives.md) и [concurrency-and-performance/01-memory-model.md](../01-go-core/concurrency-and-performance/01-memory-model.md).
+- См. [concurrency-and-performance/03-sync-primitives.md](../../01-go-core/concurrency-and-performance/03-sync-primitives.md) и [concurrency-and-performance/01-memory-model.md](../../01-go-core/concurrency-and-performance/01-memory-model.md).
 
 **Какие методы у context.Context?**
 
@@ -105,7 +105,7 @@
   - `Deadline() (time.Time, bool)` — есть ли дедлайн и какой.
   - `Value(key any) any` — request-scoped значение.
 - Как создают — `context.Background()`/`TODO()` и обёртки `WithCancel`/`WithTimeout`/`WithDeadline`/`WithValue`.
-- См. [concurrency-and-performance/04-context-patterns.md](../01-go-core/concurrency-and-performance/04-context-patterns.md).
+- См. [concurrency-and-performance/04-context-patterns.md](../../01-go-core/concurrency-and-performance/04-context-patterns.md).
 
 **В чём разница sync.Mutex и sync.RWMutex? Когда предпочесть RWMutex?**
 
@@ -114,7 +114,7 @@
 - Когда RWMutex выгоден — при сильном перекосе в сторону чтения и нетривиальной критической секции.
 - Когда он хуже — при частой записи или очень коротких секциях медленнее обычного `Mutex` из-за большего оверхеда: прежде всего contention на счётчике читателей между ядрами.
 - Starvation писателя не грозит — `RWMutex` в Go writer-preferring: пока писатель ждёт `Lock`, новые `RLock` блокируются.
-- См. [concurrency-and-performance/03-sync-primitives.md](../01-go-core/concurrency-and-performance/03-sync-primitives.md).
+- См. [concurrency-and-performance/03-sync-primitives.md](../../01-go-core/concurrency-and-performance/03-sync-primitives.md).
 
 **Как работает сборщик мусора в Go? Какие фазы и как влияют на производительность?**
 
@@ -123,18 +123,18 @@
 - Влияние на производительность — паузы STW обычно суб-миллисекундные; реальная цена — расход CPU на маркировку и барьеры.
 - Ручки настройки — `GOGC` (целевой рост кучи) и `GOMEMLIMIT` (мягкий лимит памяти).
 - Главный рычаг ускорения — снижать аллокации: меньше мусора → реже и дешевле GC.
-- См. [memory-internals/04-garbage-collector.md](../01-go-core/memory-internals/04-garbage-collector.md).
+- См. [memory-internals/04-garbage-collector.md](../../01-go-core/memory-internals/04-garbage-collector.md).
 
 **Как происходит захват внешних переменных в замыканиях?**
 
 - Захват по ссылке — замыкание держит указатель на ту же переменную (а не копию значения), поэтому видит её изменения и может менять.
 - Escape на кучу — если переменная переживает кадр стека (замыкание возвращают или запускают в горутине), escape-анализ переносит её на кучу.
 - Классическая ловушка — захват переменной цикла: до Go 1.22 все замыкания делили одну переменную `i`; с 1.22 (loopvar) переменная цикла своя на каждой итерации.
-- См. [02-value-vs-pointer-semantics.md](../01-go-core/02-value-vs-pointer-semantics.md) и [memory-internals/03-escape-analysis.md](../01-go-core/memory-internals/03-escape-analysis.md).
+- См. [02-value-vs-pointer-semantics.md](../../01-go-core/02-value-vs-pointer-semantics.md) и [memory-internals/03-escape-analysis.md](../../01-go-core/memory-internals/03-escape-analysis.md).
 
 **Какой размер у структуры `Foo{ a int32, b bool }` в байтах?**
 
-- 8 байт. `int32` — 4 байта, `bool` — 1 байт, итого «полезных» 5. Но выравнивание структуры равно максимальному выравниванию поля (здесь 4 байта у `int32`), поэтому размер округляется вверх до кратного 4 → после `b` добавляется 3 байта padding. Перестановка полей тут не помогает; проверить можно `unsafe.Sizeof(Foo{})`. См. [memory-internals/01-stack-and-heap.md](../01-go-core/memory-internals/01-stack-and-heap.md).
+- 8 байт. `int32` — 4 байта, `bool` — 1 байт, итого «полезных» 5. Но выравнивание структуры равно максимальному выравниванию поля (здесь 4 байта у `int32`), поэтому размер округляется вверх до кратного 4 → после `b` добавляется 3 байта padding. Перестановка полей тут не помогает; проверить можно `unsafe.Sizeof(Foo{})`. См. [memory-internals/01-stack-and-heap.md](../../01-go-core/memory-internals/01-stack-and-heap.md).
 
 **Можно ли в Go использовать динамические библиотеки?**
 
@@ -144,7 +144,7 @@
   - Пакет `plugin` (`-buildmode=plugin`) — загрузка `.so` в рантайме с резолвом символов; только Linux/macOS, без Windows, с жёсткими требованиями к совпадению версий и тулчейна.
 - По умолчанию Go статически линкует всё в один бинарь — это и есть его «фишка» (простой деплой).
 - На практике динамику используют редко: cgo тянет зависимость от libc и ломает кросс-компиляцию, а `plugin` хрупкий.
-- См. [08-unsafe-and-low-level.md](../01-go-core/08-unsafe-and-low-level.md).
+- См. [08-unsafe-and-low-level.md](../../01-go-core/08-unsafe-and-low-level.md).
 
 **Какие бывают состояния у горутины?**
 
@@ -157,7 +157,7 @@
 - Реальные статусы рантайма — `_Grunnable`, `_Grunning`, `_Gwaiting`, `_Gsyscall`, `_Gdead` (объект в пуле переиспользования), плюс служебные `_Gcopystack` (рантайм копирует растущий стек) и `_Gpreempted` (остановлена для вытеснения).
 - Где это видно на практике — в дампе горутин (`/debug/pprof/goroutine?debug=2`, паника, `SIGQUIT`) заголовок вида `goroutine 42 [chan receive, 5 minutes]:` показывает состояние, причину ожидания (`chan receive`, `select`, `IO wait`, `semacquire`, `sleep`) и как долго она в нём висит.
 - Зачем это на собесе — утечка горутин выглядит как растущая пачка горутин, застрявших в waiting с одной и той же причиной; по ней и ищут место, где забыли закрыть канал или отменить контекст.
-- См. [runtime-scheduler/01-scheduler-and-preemption.md](../01-go-core/runtime-scheduler/01-scheduler-and-preemption.md) и [runtime-scheduler/02-syscall.md](../01-go-core/runtime-scheduler/02-syscall.md).
+- См. [runtime-scheduler/01-scheduler-and-preemption.md](../../01-go-core/runtime-scheduler/01-scheduler-and-preemption.md) и [runtime-scheduler/02-syscall.md](../../01-go-core/runtime-scheduler/02-syscall.md).
 
 **Что происходит с горутиной при сетевом вызове?**
 
@@ -166,11 +166,11 @@
 - Поток освобождается — OS-поток (M) с процессором (P) берёт другую готовую горутину.
 - Итог — тысячи сетевых горутин обслуживаются немногими потоками без блокировки.
 - Контраст — чтение обычного файла не поллится и блокирует M.
-- См. [runtime-scheduler/03-netpoller.md](../01-go-core/runtime-scheduler/03-netpoller.md).
+- См. [runtime-scheduler/03-netpoller.md](../../01-go-core/runtime-scheduler/03-netpoller.md).
 
 **Что происходит, когда сетевой вызов завершён?**
 
-- Когда сокет становится готов (пришли данные / можно писать), netpoller узнаёт об этом (epoll возвращает событие) и помечает связанную горутину runnable — кладёт обратно в очередь планировщика. Дальше её подхватывает свободный P/M и продолжает с места парковки. Опрос netpoller делает планировщик (в т.ч. фоновый sysmon), поэтому пробуждение не требует выделенного потока на каждый сокет. См. [runtime-scheduler/03-netpoller.md](../01-go-core/runtime-scheduler/03-netpoller.md).
+- Когда сокет становится готов (пришли данные / можно писать), netpoller узнаёт об этом (epoll возвращает событие) и помечает связанную горутину runnable — кладёт обратно в очередь планировщика. Дальше её подхватывает свободный P/M и продолжает с места парковки. Опрос netpoller делает планировщик (в т.ч. фоновый sysmon), поэтому пробуждение не требует выделенного потока на каждый сокет. См. [runtime-scheduler/03-netpoller.md](../../01-go-core/runtime-scheduler/03-netpoller.md).
 
 **Зачем в Go свой планировщик, если уже есть планировщик ОС?**
 
@@ -179,7 +179,7 @@
 - Решение — рантайм мультиплексирует много горутин (G) на немного OS-потоков (M) по модели G-M-P в user space.
 - Цена горутины — стартовый стек ~2 КБ, растёт по надобности; переключение между горутинами не уходит в ядро.
 - Бонус — планировщик «знает» про каналы и сетевой I/O (netpoller) и паркует горутину, не блокируя поток.
-- См. [runtime-scheduler/01-scheduler-and-preemption.md](../01-go-core/runtime-scheduler/01-scheduler-and-preemption.md).
+- См. [runtime-scheduler/01-scheduler-and-preemption.md](../../01-go-core/runtime-scheduler/01-scheduler-and-preemption.md).
 
 **Почему планировщик ОС медленнее, чем планировщик Go?**
 
@@ -188,7 +188,7 @@
 - Плюс архитектура — кооперативные точки переключения и локальные очереди на каждый P (work-stealing) снижают синхронизацию.
 - Итог — смена горутины на порядки дешевле смены потока.
 - Оговорка — это не делает ОС-планировщик «плохим»: он управляет именно потоками, Go просто добавляет лёгкий слой поверх.
-- См. [runtime-scheduler/01-scheduler-and-preemption.md](../01-go-core/runtime-scheduler/01-scheduler-and-preemption.md).
+- См. [runtime-scheduler/01-scheduler-and-preemption.md](../../01-go-core/runtime-scheduler/01-scheduler-and-preemption.md).
 
 ---
 
@@ -202,7 +202,7 @@
 - Колоночные / wide-column (ClickHouse, Cassandra) — аналитика и большой объём записи; «+» сжатие и быстрые агрегации по столбцам, «−» плохи для точечных update и OLTP.
 - Графовые (Neo4j) — связи и обходы; «+» эффективны для графов отношений, «−» нишевые.
 - Поисковые (Elasticsearch) — полнотекст и фасеты; «+» мощный поиск, «−» вторичное хранилище, не source of truth.
-- Выбор — по модели данных, паттерну доступа и требованиям к консистентности/масштабу. См. [database-systems-catalog/01-comparison-table.md](../06-databases/database-systems-catalog/01-comparison-table.md) и [database-fundamentals/02-cap-and-base.md](../06-databases/database-fundamentals/02-cap-and-base.md).
+- Выбор — по модели данных, паттерну доступа и требованиям к консистентности/масштабу. См. [database-systems-catalog/01-comparison-table.md](../../06-databases/database-systems-catalog/01-comparison-table.md) и [database-fundamentals/02-cap-and-base.md](../../06-databases/database-fundamentals/02-cap-and-base.md).
 
 **Зачем нужны индексы? Примеры.**
 
@@ -213,14 +213,14 @@
 - GiST — геоданные, диапазоны, поиск по включению/пересечению.
 - BRIN — компактная сводка по блокам для физически упорядоченных данных (классика — append-only таблица по времени).
 - Плата — замедление записи и место на диске.
-- См. [postgresql/02-indexes.md](../06-databases/database-systems-catalog/postgresql/02-indexes.md) и [postgresql/03-query-planning.md](../06-databases/database-systems-catalog/postgresql/03-query-planning.md).
+- См. [postgresql/02-indexes.md](../../06-databases/database-systems-catalog/postgresql/02-indexes.md) и [postgresql/03-query-planning.md](../../06-databases/database-systems-catalog/postgresql/03-query-planning.md).
 
 **Чем hash-индекс отличается от B-tree-индекса?**
 
 - Hash-индекс хранит хеши значений и поддерживает только поиск по точному равенству (`=`) за O(1); не умеет диапазоны (`<`, `>`, `BETWEEN`), сортировку, `LIKE 'a%'` и сортированный обход.
 - B-tree упорядочен, поэтому покрывает равенство, диапазоны, `ORDER BY`, префиксный поиск — за O(log n), и потому является дефолтным индексом.
 - Вывод — hash выигрывает лишь в узком случае массивных lookup’ов по равенству; на практике B-tree выбирают почти всегда.
-- См. [postgresql/02-indexes.md](../06-databases/database-systems-catalog/postgresql/02-indexes.md).
+- См. [postgresql/02-indexes.md](../../06-databases/database-systems-catalog/postgresql/02-indexes.md).
 
 **Как устроен B-tree-индекс? Чем отличается от бинарного дерева, как идёт поиск, зачем балансировка, сколько детей у узла?**
 
@@ -230,7 +230,7 @@
 - Отличие от бинарного дерева: у бинарного максимум 2 ребёнка и один ключ на узел → дерево высокое; у B-tree — широкий узел и много ключей → меньше уровней и меньше дисковых I/O.
 - Поиск: с корня выбираем интервал между разделителями (бинарный поиск внутри страницы) → спускаемся к нужному ребёнку → так до листа за O(log n) с большим основанием логарифма (мало обращений к диску).
 - Балансировка держит все листья на одной глубине (одинаковая стоимость поиска любого ключа) и узлы заполненными: при переполнении страницы — split (расщепление и подъём ключа вверх), при опустошении — слияние. Поэтому дерево не вырождается в список, как несбалансированное BST.
-- См. [postgresql/02-indexes.md](../06-databases/database-systems-catalog/postgresql/02-indexes.md) и [16-algorithms-and-data-structures/04-trees-and-graphs.md](../16-algorithms-and-data-structures/04-trees-and-graphs.md).
+- См. [postgresql/02-indexes.md](../../06-databases/database-systems-catalog/postgresql/02-indexes.md) и [16-algorithms-and-data-structures/04-trees-and-graphs.md](../../16-algorithms-and-data-structures/04-trees-and-graphs.md).
 
 **За счёт чего B-tree хорошо работает с `>`/`<` и диапазонами?**
 
@@ -238,7 +238,7 @@
 
 **Как устроен hash-индекс?**
 
-- Значение прогоняется через хэш-функцию → номер бакета (через маску/остаток), в бакете лежат записи с этим хэшем и ссылки на строки (TID). Поиск по `=`: вычислить хэш → прыгнуть в бакет → сверить ключи (хэш-коллизии возможны, поэтому сравнение по факту). Порядка нет, поэтому диапазоны и сортировка недоступны. В PostgreSQL hash-индексы стали журналируемыми (crash-safe) с версии 10. См. [postgresql/02-indexes.md](../06-databases/database-systems-catalog/postgresql/02-indexes.md).
+- Значение прогоняется через хэш-функцию → номер бакета (через маску/остаток), в бакете лежат записи с этим хэшем и ссылки на строки (TID). Поиск по `=`: вычислить хэш → прыгнуть в бакет → сверить ключи (хэш-коллизии возможны, поэтому сравнение по факту). Порядка нет, поэтому диапазоны и сортировка недоступны. В PostgreSQL hash-индексы стали журналируемыми (crash-safe) с версии 10. См. [postgresql/02-indexes.md](../../06-databases/database-systems-catalog/postgresql/02-indexes.md).
 
 **Будет ли работать составной индекс по (a, b, c), если искать по b и c?**
 
@@ -246,7 +246,7 @@
 - Почему — составной B-tree упорядочен по левому префиксу: сначала по `a`, внутри равных `a` — по `b`, и т.д. Без условия на ведущий столбец `a` дерево навигировать нельзя.
 - Что сделает планировщик — уйдёт в seq scan; теоретически возможен дорогой full index scan.
 - Как починить — нужен индекс с `b` впереди, например `(b, c)`.
-- См. [postgresql/02-indexes.md](../06-databases/database-systems-catalog/postgresql/02-indexes.md).
+- См. [postgresql/02-indexes.md](../../06-databases/database-systems-catalog/postgresql/02-indexes.md).
 
 **Индекс построили, но запрос всё равно тормозит — что делать?**
 
@@ -259,7 +259,7 @@
   - Условие не ложится на B-tree — `!=`, `LIKE '%x'`; `OR` уходит в seq scan, если индексы есть не на все ветви (иначе планировщик может собрать `BitmapOr`).
   - Маленькая таблица — seq scan просто быстрее.
 - Решения по диагнозу — индекс-выражение, частичный или покрывающий (`INCLUDE`) индекс, переписать условие, обновить статистику, поднять её таргет.
-- См. [postgresql/03-query-planning.md](../06-databases/database-systems-catalog/postgresql/03-query-planning.md).
+- См. [postgresql/03-query-planning.md](../../06-databases/database-systems-catalog/postgresql/03-query-planning.md).
 
 **Почему поиск в B-tree быстрее полного перебора? Чем B-tree лучше AVL?**
 
@@ -268,7 +268,7 @@
 - Почему B-tree лучше для БД — узел совпадает по размеру со страницей диска (обычно 8 КБ), и за одну дисковую I/O-операцию читаются сразу сотни ключей.
 - Узкое место БД — именно random-I/O к диску, а не сравнения в памяти; AVL с одним ключом на узел и большой высотой потребовал бы на порядки больше дисковых обращений.
 - Где что применимо — AVL хорош в RAM (например, in-memory индекс), B-tree — когда данные на диске (индексы БД, файловые системы).
-- См. [postgresql/02-indexes.md](../06-databases/database-systems-catalog/postgresql/02-indexes.md) и [16-algorithms-and-data-structures/04-trees-and-graphs.md](../16-algorithms-and-data-structures/04-trees-and-graphs.md).
+- См. [postgresql/02-indexes.md](../../06-databases/database-systems-catalog/postgresql/02-indexes.md) и [16-algorithms-and-data-structures/04-trees-and-graphs.md](../../16-algorithms-and-data-structures/04-trees-and-graphs.md).
 
 **Что такое ACID?**
 
@@ -281,7 +281,7 @@
 - Частая путаница — C в ACID это не C в CAP: в ACID речь про валидность данных после транзакции, в CAP — про то, увидят ли разные узлы одно и то же актуальное значение.
 - Чего ACID не отменяет — идемпотентности, unique-ограничений, осознанного выбора уровня изоляции и того, что чтение с асинхронной реплики может вернуть устаревшие данные.
 - Разбор буквы C — см. вопрос «Что такое консистентность (C в ACID)» ниже в этом разделе.
-- См. [database-fundamentals/01-acid.md](../06-databases/database-fundamentals/01-acid.md).
+- См. [database-fundamentals/01-acid.md](../../06-databases/database-fundamentals/01-acid.md).
 
 **Зачем нужны транзакции? Какие уровни изоляции?**
 
@@ -293,15 +293,15 @@
   - Serializable — результат эквивалентен последовательному выполнению транзакций.
 - Логика уровней — каждый следующий отсекает больше аномалий: dirty read → non-repeatable read → phantom read → write skew.
 - Цена — строже = меньше параллелизма и больше откатов.
-- См. [postgresql/04-transactions-and-locking.md](../06-databases/database-systems-catalog/postgresql/04-transactions-and-locking.md) и [database-fundamentals/01-acid.md](../06-databases/database-fundamentals/01-acid.md).
+- См. [postgresql/04-transactions-and-locking.md](../../06-databases/database-systems-catalog/postgresql/04-transactions-and-locking.md) и [database-fundamentals/01-acid.md](../../06-databases/database-fundamentals/01-acid.md).
 
 **В чём отличие WHERE и HAVING?**
 
-- `WHERE` фильтрует строки до группировки (`GROUP BY`) и не работает с агрегатами. `HAVING` фильтрует уже сгруппированные результаты и применяется к агрегатам (`HAVING COUNT(*) > 5`). Порядок: WHERE → GROUP BY → HAVING. См. [postgresql/00-sql-basics-and-syntax.md](../06-databases/database-systems-catalog/postgresql/00-sql-basics-and-syntax.md).
+- `WHERE` фильтрует строки до группировки (`GROUP BY`) и не работает с агрегатами. `HAVING` фильтрует уже сгруппированные результаты и применяется к агрегатам (`HAVING COUNT(*) > 5`). Порядок: WHERE → GROUP BY → HAVING. См. [postgresql/00-sql-basics-and-syntax.md](../../06-databases/database-systems-catalog/postgresql/00-sql-basics-and-syntax.md).
 
 **Примеры агрегатных функций. В какой секции их фильтруют?**
 
-- `COUNT`, `SUM`, `AVG`, `MIN`, `MAX`. Они схлопывают группы строк в одно значение; чтобы отфильтровать по результату агрегата, используют секцию `HAVING` (в `WHERE` агрегаты нельзя). См. [postgresql/00-sql-basics-and-syntax.md](../06-databases/database-systems-catalog/postgresql/00-sql-basics-and-syntax.md).
+- `COUNT`, `SUM`, `AVG`, `MIN`, `MAX`. Они схлопывают группы строк в одно значение; чтобы отфильтровать по результату агрегата, используют секцию `HAVING` (в `WHERE` агрегаты нельзя). См. [postgresql/00-sql-basics-and-syntax.md](../../06-databases/database-systems-catalog/postgresql/00-sql-basics-and-syntax.md).
 
 **Что такое триггер? Для чего и какие проблемы?**
 
@@ -309,15 +309,15 @@
 
 **В чём разница OLTP и OLAP?**
 
-- OLTP — много коротких транзакций, запись/чтение по ключу, нормализованная схема, низкая латентность (типовой backend). OLAP — аналитика: тяжёлые агрегации по большим объёмам, колоночное хранение, редкая запись пачками (ClickHouse, хранилища). См. [database-fundamentals/03-oltp-vs-olap.md](../06-databases/database-fundamentals/03-oltp-vs-olap.md).
+- OLTP — много коротких транзакций, запись/чтение по ключу, нормализованная схема, низкая латентность (типовой backend). OLAP — аналитика: тяжёлые агрегации по большим объёмам, колоночное хранение, редкая запись пачками (ClickHouse, хранилища). См. [database-fundamentals/03-oltp-vs-olap.md](../../06-databases/database-fundamentals/03-oltp-vs-olap.md).
 
 **Что такое репликация БД?**
 
-- Копирование данных с primary-узла на реплики. Даёт отказоустойчивость (failover) и масштабирование чтения. Бывает синхронная (надёжнее, медленнее) и асинхронная (быстрее, риск отставания/lag и чтения устаревших данных). См. [postgresql/06-replication.md](../06-databases/database-systems-catalog/postgresql/06-replication.md).
+- Копирование данных с primary-узла на реплики. Даёт отказоустойчивость (failover) и масштабирование чтения. Бывает синхронная (надёжнее, медленнее) и асинхронная (быстрее, риск отставания/lag и чтения устаревших данных). См. [postgresql/06-replication.md](../../06-databases/database-systems-catalog/postgresql/06-replication.md).
 
 **Что такое шардирование БД?**
 
-- Горизонтальное разбиение данных на части (шарды) по ключу (hash/range/directory), каждая на своём узле. Масштабирует запись и объём, которые репликация не решает. Платой идут кросс-шардовые запросы, ребалансировка и распределённые транзакции. См. [postgresql/12-sharding.md](../06-databases/database-systems-catalog/postgresql/12-sharding.md).
+- Горизонтальное разбиение данных на части (шарды) по ключу (hash/range/directory), каждая на своём узле. Масштабирует запись и объём, которые репликация не решает. Платой идут кросс-шардовые запросы, ребалансировка и распределённые транзакции. См. [postgresql/12-sharding.md](../../06-databases/database-systems-catalog/postgresql/12-sharding.md).
 
 **Что такое CAP-теорема?**
 
@@ -329,7 +329,7 @@
 - CP — лучше отказать, чем отдать некорректные данные. Подходит для платежей, остатков товара, уникальных имён, выбора лидера в кластере. Цена — рост латентности и доли ошибок при деградации.
 - AP — лучше ответить, пусть и устаревшим значением. Подходит для лайков, просмотров, ленты, presence, телеметрии. Цена — stale reads и необходимость потом сводить расхождения.
 - Дополнение PACELC — CAP описывает только момент разрыва, но размен есть и в спокойное время: Else, то есть без partition, выбирают между Latency и Consistency, потому что синхронная репликация и кворумное чтение стоят времени на каждом запросе.
-- См. [database-fundamentals/02-cap-and-base.md](../06-databases/database-fundamentals/02-cap-and-base.md).
+- См. [database-fundamentals/02-cap-and-base.md](../../06-databases/database-fundamentals/02-cap-and-base.md).
 
 **Что такое BASE и eventual consistency? Чем отличается от ACID?**
 
@@ -341,34 +341,34 @@
 - Чем отличается от ACID — это не противоположность, а другой стиль проектирования: ACID даёт строгие гарантии в границах одной БД, BASE допускает временную рассинхронизацию ради доступности и масштаба.
 - Где BASE уместен — счётчики просмотров и лайков, лента рекомендаций, presence, поисковый индекс, аналитические read-модели, кэши.
 - Где BASE неуместен — там, где есть инварианты: не списать деньги дважды, не продать больше билетов, чем есть, уникальность username, единственный успешный платёж у заказа.
-- См. [database-fundamentals/02-cap-and-base.md](../06-databases/database-fundamentals/02-cap-and-base.md).
+- См. [database-fundamentals/02-cap-and-base.md](../../06-databases/database-fundamentals/02-cap-and-base.md).
 
 **Что такое Redis? Плюсы и минусы.**
 
 - In-memory key-value хранилище с богатыми структурами (string, hash, list, set, sorted set, stream, bitmap, HLL); работает в одном потоке по командам, поэтому операции атомарны. Применяют как кэш, счётчики, rate-limiter, очереди, лидерборды, distributed lock, pub/sub.
 - Плюсы: суб-миллисекундная латентность, удобные структуры данных, атомарные операции и TTL, простота.
 - Минусы: данные в RAM (дорого и ограничено объёмом), durability компромиссная (RDB-снимки / AOF-лог можно потерять), single-threaded — тяжёлая команда блокирует всех, кластеризация и сильная консистентность нетривиальны.
-- См. [database-systems-catalog/08-redis.md](../06-databases/database-systems-catalog/08-redis.md) и [caching/01-redis-as-cache.md](../06-databases/caching/01-redis-as-cache.md).
+- См. [database-systems-catalog/08-redis.md](../../06-databases/database-systems-catalog/08-redis.md) и [caching/01-redis-as-cache.md](../../06-databases/caching/01-redis-as-cache.md).
 
 **SQL — декларативный или императивный язык?**
 
-- Декларативный: описывается что нужно получить (какой результат), а не как его вычислять пошагово. Способ выполнения (порядок джойнов, индексы, алгоритмы) выбирает планировщик/оптимизатор СУБД. Императивные вставки возможны в процедурных расширениях (PL/pgSQL), но сам SQL — декларативный. См. [postgresql/00-sql-basics-and-syntax.md](../06-databases/database-systems-catalog/postgresql/00-sql-basics-and-syntax.md).
+- Декларативный: описывается что нужно получить (какой результат), а не как его вычислять пошагово. Способ выполнения (порядок джойнов, индексы, алгоритмы) выбирает планировщик/оптимизатор СУБД. Императивные вставки возможны в процедурных расширениях (PL/pgSQL), но сам SQL — декларативный. См. [postgresql/00-sql-basics-and-syntax.md](../../06-databases/database-systems-catalog/postgresql/00-sql-basics-and-syntax.md).
 
 **Что такое первичный ключ и какие у него свойства? Может ли он быть составным?**
 
-- Первичный ключ однозначно идентифицирует строку в таблице. Свойства: уникальность, NOT NULL (не может быть пустым), неизменность (желательно), один на таблицу; СУБД автоматически строит по нему уникальный индекс. Да, ключ может быть составным (несколько столбцов) — уникальна тогда комбинация значений (напр. `(order_id, product_id)` в строках заказа). См. [postgresql/00-sql-basics-and-syntax.md](../06-databases/database-systems-catalog/postgresql/00-sql-basics-and-syntax.md).
+- Первичный ключ однозначно идентифицирует строку в таблице. Свойства: уникальность, NOT NULL (не может быть пустым), неизменность (желательно), один на таблицу; СУБД автоматически строит по нему уникальный индекс. Да, ключ может быть составным (несколько столбцов) — уникальна тогда комбинация значений (напр. `(order_id, product_id)` в строках заказа). См. [postgresql/00-sql-basics-and-syntax.md](../../06-databases/database-systems-catalog/postgresql/00-sql-basics-and-syntax.md).
 
 **Что такое нормализация БД?**
 
-- Процесс проектирования схемы по нормальным формам (1NF–3NF/BCNF): данные раскладывают по таблицам так, чтобы убрать избыточность и аномалии вставки/обновления/удаления, а связи выражались через внешние ключи. Каждый факт хранится в одном месте. См. [postgresql/00-sql-basics-and-syntax.md](../06-databases/database-systems-catalog/postgresql/00-sql-basics-and-syntax.md).
+- Процесс проектирования схемы по нормальным формам (1NF–3NF/BCNF): данные раскладывают по таблицам так, чтобы убрать избыточность и аномалии вставки/обновления/удаления, а связи выражались через внешние ключи. Каждый факт хранится в одном месте. См. [postgresql/00-sql-basics-and-syntax.md](../../06-databases/database-systems-catalog/postgresql/00-sql-basics-and-syntax.md).
 
 **Зачем применяют денормализацию и какие у неё минусы?**
 
-- Денормализация — намеренное дублирование/предрасчёт данных (объединение таблиц, кэш-колонки, materialized view) ради ускорения чтения: меньше JOIN и агрегаций на горячем пути. Минусы: избыточность и рост объёма, риск рассинхронизации копий, усложнение записи (надо обновлять в нескольких местах), нагрузка на консистентность. Применяют точечно под конкретный read-паттерн. См. [database-fundamentals/03-oltp-vs-olap.md](../06-databases/database-fundamentals/03-oltp-vs-olap.md).
+- Денормализация — намеренное дублирование/предрасчёт данных (объединение таблиц, кэш-колонки, materialized view) ради ускорения чтения: меньше JOIN и агрегаций на горячем пути. Минусы: избыточность и рост объёма, риск рассинхронизации копий, усложнение записи (надо обновлять в нескольких местах), нагрузка на консистентность. Применяют точечно под конкретный read-паттерн. См. [database-fundamentals/03-oltp-vs-olap.md](../../06-databases/database-fundamentals/03-oltp-vs-olap.md).
 
 **Какие инструменты и методы используете для отладки медленных SQL-запросов?**
 
-- `EXPLAIN ANALYZE` — реальный план выполнения (seq scan vs index scan, оценки vs факт, узкие узлы). Поиск проблемных запросов — `pg_stat_statements` (агрегаты по запросам), лог медленных запросов (`log_min_duration_statement`), `auto_explain`. Дальше: добавить/поправить индексы, переписать запрос, убрать N+1, проверить статистику (`ANALYZE`), пагинацию по keyset. См. [postgresql/03-query-planning.md](../06-databases/database-systems-catalog/postgresql/03-query-planning.md) и [postgresql/10-monitoring-and-diagnostics.md](../06-databases/database-systems-catalog/postgresql/10-monitoring-and-diagnostics.md).
+- `EXPLAIN ANALYZE` — реальный план выполнения (seq scan vs index scan, оценки vs факт, узкие узлы). Поиск проблемных запросов — `pg_stat_statements` (агрегаты по запросам), лог медленных запросов (`log_min_duration_statement`), `auto_explain`. Дальше: добавить/поправить индексы, переписать запрос, убрать N+1, проверить статистику (`ANALYZE`), пагинацию по keyset. См. [postgresql/03-query-planning.md](../../06-databases/database-systems-catalog/postgresql/03-query-planning.md) и [postgresql/10-monitoring-and-diagnostics.md](../../06-databases/database-systems-catalog/postgresql/10-monitoring-and-diagnostics.md).
 
 **Что делать, если запрос тормозит?**
 
@@ -378,7 +378,7 @@
 - Если индекс есть, но не используется — разбор причин в вопросе «Индекс построили, но запрос всё равно тормозит» выше в этом разделе.
 - Если данные большие — партиционирование, материализованные представления.
 - Принцип — правка → перемерить план.
-- См. [postgresql/03-query-planning.md](../06-databases/database-systems-catalog/postgresql/03-query-planning.md).
+- См. [postgresql/03-query-planning.md](../../06-databases/database-systems-catalog/postgresql/03-query-planning.md).
 
 **Запрос обычно работает быстро, но иногда тормозит — что делать?**
 
@@ -389,11 +389,11 @@
   - Пики нагрузки / фоновые процессы — насыщение CPU/IO в час пик, идущие `autovacuum`/`checkpoint`, соседние тяжёлые запросы. Коррелировать медленные моменты с системными метриками.
   - Исчерпание пула соединений — время уходит на ожидание коннекта, а не на сам запрос. Смотреть метрики пула.
   - Раздувание таблицы (bloat) — накопились dead tuples, скан читает больше; лечится `VACUUM`.
-- Итог: стабильно медленный → чинить запрос/индекс (см. выше); иногда медленный → искать нестабильный план, локи, кэш, нагрузку — и ловить проблему в момент проявления. См. [postgresql/10-monitoring-and-diagnostics.md](../06-databases/database-systems-catalog/postgresql/10-monitoring-and-diagnostics.md) и [postgresql/04-transactions-and-locking.md](../06-databases/database-systems-catalog/postgresql/04-transactions-and-locking.md).
+- Итог: стабильно медленный → чинить запрос/индекс (см. выше); иногда медленный → искать нестабильный план, локи, кэш, нагрузку — и ловить проблему в момент проявления. См. [postgresql/10-monitoring-and-diagnostics.md](../../06-databases/database-systems-catalog/postgresql/10-monitoring-and-diagnostics.md) и [postgresql/04-transactions-and-locking.md](../../06-databases/database-systems-catalog/postgresql/04-transactions-and-locking.md).
 
 **Чем отличается EXPLAIN от EXPLAIN ANALYZE?**
 
-- `EXPLAIN` показывает предполагаемый план и оценки стоимости/строк, не выполняя запрос. `EXPLAIN ANALYZE` реально выполняет запрос и показывает фактическое время и число строк на каждом узле — видно расхождение оценок с реальностью (признак устаревшей статистики). Важно: `EXPLAIN ANALYZE` выполняет и `INSERT/UPDATE/DELETE` (поэтому такие гоняют внутри транзакции с `ROLLBACK`). Полезные опции: `BUFFERS`, `VERBOSE`. См. [postgresql/03-query-planning.md](../06-databases/database-systems-catalog/postgresql/03-query-planning.md).
+- `EXPLAIN` показывает предполагаемый план и оценки стоимости/строк, не выполняя запрос. `EXPLAIN ANALYZE` реально выполняет запрос и показывает фактическое время и число строк на каждом узле — видно расхождение оценок с реальностью (признак устаревшей статистики). Важно: `EXPLAIN ANALYZE` выполняет и `INSERT/UPDATE/DELETE` (поэтому такие гоняют внутри транзакции с `ROLLBACK`). Полезные опции: `BUFFERS`, `VERBOSE`. См. [postgresql/03-query-planning.md](../../06-databases/database-systems-catalog/postgresql/03-query-planning.md).
 
 **На основании чего работает EXPLAIN, если он не выполняет запрос?**
 
@@ -401,7 +401,7 @@
 - Что в ней лежит — число строк и страниц таблицы, доля NULL, число уникальных значений (n_distinct), самые частые значения (MCV), гистограммы распределения.
 - Как используется — планировщик оценивает по ней селективность условий и стоимость вариантов плана (модель cost) и выбирает дешевейший.
 - Риск — если статистика устарела, оценки врут и план получается плохим; лечится `ANALYZE`.
-- См. [postgresql/03-query-planning.md](../06-databases/database-systems-catalog/postgresql/03-query-planning.md).
+- См. [postgresql/03-query-planning.md](../../06-databases/database-systems-catalog/postgresql/03-query-planning.md).
 
 **На уровне Serializable две транзакции апдейтят одну строку — что произойдёт?**
 
@@ -411,7 +411,7 @@
 - Обязанность приложения — ловить `40001` и повторять транзакцию (retry).
 - Что добавляет именно Serializable — SSI (Serializable Snapshot Isolation): помимо write-write конфликта на одной строке откатываются и опасные read-write зависимости, когда итог не эквивалентен ни одному последовательному порядку.
 - Контраст с Read Committed — «вторая дописывает поверх» это про него: там после ожидания транзакция перечитывает актуальную версию строки и обновляет её.
-- См. [postgresql/04-transactions-and-locking.md](../06-databases/database-systems-catalog/postgresql/04-transactions-and-locking.md).
+- См. [postgresql/04-transactions-and-locking.md](../../06-databases/database-systems-catalog/postgresql/04-transactions-and-locking.md).
 
 **Как бы делал INSERT 100 000 000 строк?**
 
@@ -420,7 +420,7 @@
 - Если нужен именно INSERT — батчами по 1–10k строк в multi-values (`INSERT ... VALUES (...), (...), ...`) внутри транзакций.
 - Ускорения — временно снять индексы и триггеры и построить индексы после загрузки, поднять `maintenance_work_mem`, грузить в несколько параллельных потоков по диапазонам, отключить автокоммит.
 - Что учесть — блокировки и WAL: лучше бить на несколько транзакций, чтобы не раздувать одну.
-- См. [postgresql/08-performance-tuning.md](../06-databases/database-systems-catalog/postgresql/08-performance-tuning.md).
+- См. [postgresql/08-performance-tuning.md](../../06-databases/database-systems-catalog/postgresql/08-performance-tuning.md).
 
 **Что такое партиционирование, зачем и какие виды? Партиции логические или физические? Можно ли партиционировать партицию?**
 
@@ -429,7 +429,7 @@
 - Виды (в PostgreSQL — декларативные) — RANGE (по диапазону, напр. по дате), LIST (по списку значений, напр. по региону), HASH (равномерно по остатку хэша).
 - Физические или логические: для пользователя/приложения таблица логически одна (запросы идут к родительской), но физически это отдельные таблицы-партиции на диске со своими файлами и индексами. То есть «логически одно, физически много».
 - Партиция партиции: да — поддерживается sub-partitioning (вложенное партиционирование): партицию можно сама объявить партиционированной таблицей (напр. RANGE по дате → внутри HASH по клиенту). Злоупотреблять не стоит — растёт сложность планирования.
-- См. [postgresql/05-partitioning.md](../06-databases/database-systems-catalog/postgresql/05-partitioning.md).
+- См. [postgresql/05-partitioning.md](../../06-databases/database-systems-catalog/postgresql/05-partitioning.md).
 
 **Какие есть стратегии JOIN (не left/right)? Как оптимально сджойнить маленькую и большую таблицу?**
 
@@ -439,7 +439,7 @@
   - Merge Join — обе стороны отсортированы по ключу и сливаются; хорош для уже отсортированных/индексированных диапазонов.
 - Маленькая + большая — обычно выигрывает Hash Join: хэш строится по маленькой таблице (влезает в `work_mem`), большая сканируется один раз. Либо Nested Loop с индексом по ключу join в большой таблице, если из маленькой идёт мало строк.
 - Кто решает — планировщик по статистике; если он ошибся, проверить `work_mem`, статистику (`ANALYZE`), индексы.
-- Принудительное переключение (`enable_hashjoin=off` и т.п.) — только для отладки. См. [postgresql/03-query-planning.md](../06-databases/database-systems-catalog/postgresql/03-query-planning.md).
+- Принудительное переключение (`enable_hashjoin=off` и т.п.) — только для отладки. См. [postgresql/03-query-planning.md](../../06-databases/database-systems-catalog/postgresql/03-query-planning.md).
 
 **Что такое консистентность (C в ACID) и как достигается в PostgreSQL?**
 
@@ -447,7 +447,7 @@
 - Чем обеспечивается — ограничениями: `PRIMARY KEY`/`UNIQUE`, `NOT NULL`, `CHECK`, внешние ключи (`FOREIGN KEY`), домены и триггеры; при коммите все они проверяются, и при нарушении транзакция откатывается.
 - Роль изоляции и атомарности — изоляция (через MVCC: каждый видит свой снимок данных) и атомарность не дают другим увидеть промежуточное некорректное состояние.
 - Итог — C обеспечивается связкой «ограничения + атомарность + изоляция», а ответственность за прикладные инварианты лежит на схеме и коде.
-- См. [database-fundamentals/01-acid.md](../06-databases/database-fundamentals/01-acid.md).
+- См. [database-fundamentals/01-acid.md](../../06-databases/database-fundamentals/01-acid.md).
 
 **Как заблокировать строку?**
 
@@ -458,7 +458,7 @@
   - `FOR UPDATE NOWAIT` — не ждать, сразу ошибка.
   - `FOR UPDATE SKIP LOCKED` — пропустить занятые; удобно для очередей задач в БД.
 - Зачем — паттерн «прочитал → проверил → обновил» без гонок.
-- См. [postgresql/04-transactions-and-locking.md](../06-databases/database-systems-catalog/postgresql/04-transactions-and-locking.md).
+- См. [postgresql/04-transactions-and-locking.md](../../06-databases/database-systems-catalog/postgresql/04-transactions-and-locking.md).
 
 **Что такое оптимистичные и пессимистичные блокировки?**
 
@@ -466,7 +466,7 @@
   - Пессимистичная — исходит из того, что конфликт вероятен, поэтому блокирует сразу: перед изменением берём лок на строку (`SELECT … FOR UPDATE`), остальные ждут. Конфликтов не будет, но падает параллелизм и появляется риск deadlock и долгих ожиданий. Хороша при высокой конкуренции за одни и те же строки — списание денег, остатки на складе.
   - Оптимистичная — исходит из того, что конфликт редок, поэтому не блокирует, а проверяет при коммите: читаем строку с колонкой `version` или timestamp и пишем `UPDATE … SET …, version = version + 1 WHERE id = ? AND version = ?`. Если затронуто 0 строк, значит кто-то уже обновил запись и версия не совпала — конфликт, надо повторить или отдать ошибку. Реализуется на уровне приложения или ORM, а не блокировками БД. Хороша при низкой конкуренции и преобладании чтения.
 - Как это ложится на PostgreSQL — пессимистичная это блокировки БД (`FOR UPDATE`, см. вопрос выше), а Serializable с SSI по сути оптимистичный контроль: конфликт ловится откатом `40001` на коммите.
-- См. [postgresql/04-transactions-and-locking.md](../06-databases/database-systems-catalog/postgresql/04-transactions-and-locking.md).
+- См. [postgresql/04-transactions-and-locking.md](../../06-databases/database-systems-catalog/postgresql/04-transactions-and-locking.md).
 
 ---
 
@@ -476,13 +476,13 @@
 
 - Kafka — распределённый durable лог: сообщения пишутся в партиции на диск, потребители читают по offset, при чтении сообщение не удаляется (retention по времени/размеру), pull-модель, высокий throughput, возможен реплей и много независимых consumer-групп.
 - RabbitMQ — классический брокер очередей (AMQP): умная маршрутизация через exchange/binding/routing key, push-модель, сообщение удаляется после ack, per-message приоритеты и TTL, гибкие топологии.
-- Когда что: Kafka — событийные стримы, большой поток, аналитика, реплей; RabbitMQ — task-queue, RPC, сложная маршрутизация и приоритеты. См. [07-message-brokers-and-streaming/01-kafka.md](../07-message-brokers-and-streaming/01-kafka.md), [02-rabbitmq.md](../07-message-brokers-and-streaming/02-rabbitmq.md) и [00-comparison.md](../07-message-brokers-and-streaming/00-comparison.md).
+- Когда что: Kafka — событийные стримы, большой поток, аналитика, реплей; RabbitMQ — task-queue, RPC, сложная маршрутизация и приоритеты. См. [07-message-brokers-and-streaming/01-kafka.md](../../07-message-brokers-and-streaming/01-kafka.md), [02-rabbitmq.md](../../07-message-brokers-and-streaming/02-rabbitmq.md) и [00-comparison.md](../../07-message-brokers-and-streaming/00-comparison.md).
 
 **Какие плюсы и минусы у Kafka?**
 
 - Плюсы: очень высокий throughput, горизонтальное масштабирование через партиции, durable-лог с retention и реплеем, гарантия порядка внутри партиции, много независимых consumer-групп, богатая экосистема (Connect, Streams, ksqlDB).
 - Минусы: операционная сложность (координация — ZooKeeper, в новых версиях KRaft), порядок только в пределах партиции (не глобальный), не подходит для сложной маршрутизации/приоритетов, латентность выше in-memory-решений, избыточен для маленьких нагрузок.
-- См. [07-message-brokers-and-streaming/01-kafka.md](../07-message-brokers-and-streaming/01-kafka.md).
+- См. [07-message-brokers-and-streaming/01-kafka.md](../../07-message-brokers-and-streaming/01-kafka.md).
 
 **Какие основные компоненты в Kafka?**
 
@@ -493,7 +493,7 @@
 - Offset — позиция чтения в партиции.
 - Реплики — leader и follower, плюс ISR (набор догнавших реплик) для отказоустойчивости.
 - Контроллер — координация кластера: ZooKeeper в старых версиях, встроенный KRaft в новых.
-- См. [07-message-brokers-and-streaming/01-kafka.md](../07-message-brokers-and-streaming/01-kafka.md).
+- См. [07-message-brokers-and-streaming/01-kafka.md](../../07-message-brokers-and-streaming/01-kafka.md).
 
 **Чем занимается брокер?**
 
@@ -520,7 +520,7 @@
 - Но это «effectively once» именно внутри Kafka, а не магия для внешнего мира.
 - Где ломается — если обработчик делает побочный эффект во внешней системе (HTTP-вызов, запись в другую БД), сквозной exactly-once там не гарантирован.
 - Что нужно — идемпотентность на стороне приёмника (дедуп по ключу).
-- См. [reliability-patterns/06-idempotency.md](../05-system-design/reliability-patterns/06-idempotency.md).
+- См. [reliability-patterns/06-idempotency.md](../../05-system-design/reliability-patterns/06-idempotency.md).
 
 **Что такое consumer group?**
 
@@ -545,7 +545,7 @@
 - Итог — 10 реплик = 10 групп → fan-out, все обрабатывают все сообщения.
 - Как это называется — «pub/sub» (broadcast), в отличие от «одной общей группы» (work-sharing).
 - Нюанс про партиции — в каждой такой группе один консьюмер, поэтому он читает все партиции сам; число партиций тут ни на что не влияет и ограничит масштабирование только позже, если какую-то из групп захотят расширить до нескольких консьюмеров.
-- См. [07-message-brokers-and-streaming/01-kafka.md](../07-message-brokers-and-streaming/01-kafka.md).
+- См. [07-message-brokers-and-streaming/01-kafka.md](../../07-message-brokers-and-streaming/01-kafka.md).
 
 ---
 
@@ -553,7 +553,7 @@
 
 **В чём отличия TCP и UDP?**
 
-- TCP — с установлением соединения (handshake), надёжный, упорядоченный, с контролем потока и перегрузки; накладные расходы выше. UDP — без соединения, без гарантий доставки и порядка, минимальный оверхед и латентность. TCP — HTTP/БД; UDP — DNS, видео/голос, игры, QUIC. См. [linux/03-tcp-sockets.md](../10-devops-and-observability/linux/03-tcp-sockets.md).
+- TCP — с установлением соединения (handshake), надёжный, упорядоченный, с контролем потока и перегрузки; накладные расходы выше. UDP — без соединения, без гарантий доставки и порядка, минимальный оверхед и латентность. TCP — HTTP/БД; UDP — DNS, видео/голос, игры, QUIC. См. [linux/03-tcp-sockets.md](../../10-devops-and-observability/linux/03-tcp-sockets.md).
 
 **Какие протоколы прикладного уровня поверх TCP и UDP?**
 
@@ -563,15 +563,15 @@
 
 **Из каких частей состоит HTTP-запрос?**
 
-- Стартовая строка (метод + URL/path + версия, напр. `GET /v1/items HTTP/1.1`), заголовки (`Host`, `Content-Type`, `Authorization`…), пустая строка-разделитель и опциональное тело (body, для POST/PUT). См. [02-http/02-server-in-go.md](../08-networking-and-api/protocols/02-http/02-server-in-go.md).
+- Стартовая строка (метод + URL/path + версия, напр. `GET /v1/items HTTP/1.1`), заголовки (`Host`, `Content-Type`, `Authorization`…), пустая строка-разделитель и опциональное тело (body, для POST/PUT). См. [02-http/02-server-in-go.md](../../08-networking-and-api/protocols/02-http/02-server-in-go.md).
 
 **В чём отличия HTTP и HTTPS? Для чего нужен HTTPS?**
 
-- HTTPS — это HTTP поверх TLS: handshake устанавливает шифрованный канал, сервер подтверждает подлинность сертификатом (цепочка до доверенного CA), обеспечивается целостность данных. HTTP передаёт всё открытым текстом. HTTPS нужен для конфиденциальности, защиты от перехвата/MITM и подмены. См. [request-lifecycle/03-tcp-tls-and-http-request.md](../08-networking-and-api/request-lifecycle/03-tcp-tls-and-http-request.md).
+- HTTPS — это HTTP поверх TLS: handshake устанавливает шифрованный канал, сервер подтверждает подлинность сертификатом (цепочка до доверенного CA), обеспечивается целостность данных. HTTP передаёт всё открытым текстом. HTTPS нужен для конфиденциальности, защиты от перехвата/MITM и подмены. См. [request-lifecycle/03-tcp-tls-and-http-request.md](../../08-networking-and-api/request-lifecycle/03-tcp-tls-and-http-request.md).
 
 **Зачем нужны таймауты в HTTP-запросах и как их подобрать?**
 
-- Чтобы не висеть бесконечно на медленном/мёртвом пире, не копить горутины и соединения, давать быстрый отказ и работать с ретраями. Раздельные таймауты: connect, TLS, response-header, общий. Подбирают от p99 латентности зависимости с запасом, увязывают с дедлайном вызывающего (`context`) и ретраями, чтобы суммарный бюджет не превышал SLA. См. [reliability-patterns/01-timeouts-and-deadlines.md](../05-system-design/reliability-patterns/01-timeouts-and-deadlines.md) и [02-http/03-client-in-go.md](../08-networking-and-api/protocols/02-http/03-client-in-go.md).
+- Чтобы не висеть бесконечно на медленном/мёртвом пире, не копить горутины и соединения, давать быстрый отказ и работать с ретраями. Раздельные таймауты: connect, TLS, response-header, общий. Подбирают от p99 латентности зависимости с запасом, увязывают с дедлайном вызывающего (`context`) и ретраями, чтобы суммарный бюджет не превышал SLA. См. [reliability-patterns/01-timeouts-and-deadlines.md](../../05-system-design/reliability-patterns/01-timeouts-and-deadlines.md) и [02-http/03-client-in-go.md](../../08-networking-and-api/protocols/02-http/03-client-in-go.md).
 
 **Зачем нужны HTTP-коды и какие бывают?**
 
@@ -582,11 +582,11 @@
   - 3xx — редиректы и кэш: 301, 304.
   - 4xx — ошибка клиента: 400, 401, 403, 404, 409, 429.
   - 5xx — ошибка сервера: 500, 502, 503, 504.
-- См. [03-api-styles/01-rest-and-http-semantics.md](../08-networking-and-api/protocols/03-api-styles/01-rest-and-http-semantics.md).
+- См. [03-api-styles/01-rest-and-http-semantics.md](../../08-networking-and-api/protocols/03-api-styles/01-rest-and-http-semantics.md).
 
 **Что такое сокеты и какими они бывают?**
 
-- Сокет — конечная точка сетевого соединения (пара IP:порт) и API ОС для обмена данными. Бывают потоковые (`SOCK_STREAM`, TCP), датаграммные (`SOCK_DGRAM`, UDP) и Unix-domain (локальный IPC между процессами на одной машине). См. [linux/03-tcp-sockets.md](../10-devops-and-observability/linux/03-tcp-sockets.md).
+- Сокет — конечная точка сетевого соединения (пара IP:порт) и API ОС для обмена данными. Бывают потоковые (`SOCK_STREAM`, TCP), датаграммные (`SOCK_DGRAM`, UDP) и Unix-domain (локальный IPC между процессами на одной машине). См. [linux/03-tcp-sockets.md](../../10-devops-and-observability/linux/03-tcp-sockets.md).
 
 **Что такое WebSocket?**
 
@@ -594,7 +594,7 @@
 - Как открывается — через HTTP Upgrade (обычный GET с `Upgrade: websocket`); дальше это уже не HTTP, а постоянный двусторонний канал.
 - Где нужен — realtime: чаты, нотификации, лайв-обновления, игры; в отличие от HTTP-поллинга держит одно соединение.
 - Альтернатива — для однонаправленного сервер→клиент проще SSE (поверх HTTP).
-- См. [04-realtime/01-websocket.md](../08-networking-and-api/protocols/04-realtime/01-websocket.md).
+- См. [04-realtime/01-websocket.md](../../08-networking-and-api/protocols/04-realtime/01-websocket.md).
 
 **Какие протоколы работают поверх HTTP?**
 
@@ -621,7 +621,7 @@
   - OTLP/HTTP — экспорт телеметрии OpenTelemetry.
 - Чего в списке нет — WebRTC: сигналинг ходит по HTTP или WebSocket, но сам медиапоток идёт по UDP мимо HTTP.
 - Не путать с уровнем ниже — вопрос «протоколы поверх TCP/UDP» про другое: там HTTP сам одна из позиций списка.
-- См. [protocols/00-protocol-comparison.md](../08-networking-and-api/protocols/00-protocol-comparison.md), [04-realtime/02-sse.md](../08-networking-and-api/protocols/04-realtime/02-sse.md) и [05-integration-patterns/01-webhooks.md](../08-networking-and-api/protocols/05-integration-patterns/01-webhooks.md).
+- См. [protocols/00-protocol-comparison.md](../../08-networking-and-api/protocols/00-protocol-comparison.md), [04-realtime/02-sse.md](../../08-networking-and-api/protocols/04-realtime/02-sse.md) и [05-integration-patterns/01-webhooks.md](../../08-networking-and-api/protocols/05-integration-patterns/01-webhooks.md).
 
 **А что работает не поверх HTTP?**
 
@@ -638,7 +638,7 @@
 - Без сети вообще — Unix domain sockets для обмена между процессами на одной машине.
 - Частая ошибка — считать, что gRPC «не HTTP». gRPC работает поверх HTTP/2, поэтому относится к предыдущему вопросу, а не к этому.
 - Практический вывод — HTTP живёт только на границе: хендлер принял HTTP-запрос, а дальше походы в PostgreSQL, Redis и Kafka идут тремя разными не-HTTP протоколами.
-- См. [01-transport/01-tcp-mechanics.md](../08-networking-and-api/protocols/01-transport/01-tcp-mechanics.md), [01-transport/02-udp.md](../08-networking-and-api/protocols/01-transport/02-udp.md) и [linux/03-tcp-sockets.md](../10-devops-and-observability/linux/03-tcp-sockets.md).
+- См. [01-transport/01-tcp-mechanics.md](../../08-networking-and-api/protocols/01-transport/01-tcp-mechanics.md), [01-transport/02-udp.md](../../08-networking-and-api/protocols/01-transport/02-udp.md) и [linux/03-tcp-sockets.md](../../10-devops-and-observability/linux/03-tcp-sockets.md).
 
 **Что такое NAT?**
 
@@ -646,7 +646,7 @@
 - Как работает — роутер ведёт таблицу трансляций (внутренний IP:порт ↔ внешний порт) и сопоставляет ответы обратно.
 - Плюсы — экономит дефицитные IPv4 и скрывает внутреннюю топологию.
 - Минус — ломает входящие соединения: для p2p/WebRTC нужны port-forwarding, STUN/TURN.
-- См. [linux/03-tcp-sockets.md](../10-devops-and-observability/linux/03-tcp-sockets.md) и [04-realtime/03-webrtc.md](../08-networking-and-api/protocols/04-realtime/03-webrtc.md).
+- См. [linux/03-tcp-sockets.md](../../10-devops-and-observability/linux/03-tcp-sockets.md) и [04-realtime/03-webrtc.md](../../08-networking-and-api/protocols/04-realtime/03-webrtc.md).
 
 **Что такое модель OSI?**
 
@@ -662,7 +662,7 @@
 - Рабочая формулировка — OSI это язык для разговора о сетях, TCP/IP это то, что реально установлено на машине. Противопоставлять их как конкурирующие модели смысла нет.
 - Зачем знать — из OSI берётся нумерация в разговоре и в названиях продуктов («проблема на L4», «балансировка L7»), и она же задаёт порядок диагностики: есть ли маршрут (L3), слушает ли порт (L4), отвечает ли сам сервис (L7).
 - Где модель не сходится — TLS формально это уровни 5–6, а по факту библиотека поверх сокета; QUIC это транспорт поверх транспорта; ARP обслуживает L3, но едет в кадрах L2. Вопрос «какой это уровень» полезнее заменять на «что этот участник видит и что он может сломать».
-- См. [protocols/01-osi-and-tcp-ip-model.md](../08-networking-and-api/protocols/01-osi-and-tcp-ip-model.md).
+- См. [protocols/01-osi-and-tcp-ip-model.md](../../08-networking-and-api/protocols/01-osi-and-tcp-ip-model.md).
 
 **Чем балансировка L4 отличается от L7?**
 
@@ -682,14 +682,14 @@
 - Чем платят за L7 — разбором протокола на каждый запрос (больше CPU и латентности) и тем, что для чтения HTTP внутри TLS соединение надо расшифровать: приватный ключ и точка расшифровки появляются на краю сети.
 - Типовая production-схема — L4 снаружи принимает соединения, L7 внутри принимает решения по содержимому запроса.
 - Пограничный случай — балансировщик L4, читающий SNI: имя сервера лежит в первом сообщении рукопожатия TLS, то есть выше транспорта, но устройство всё равно называют L4, потому что оно не терминирует соединение и не разбирает HTTP.
-- См. [protocols/01-osi-and-tcp-ip-model.md](../08-networking-and-api/protocols/01-osi-and-tcp-ip-model.md) и [request-lifecycle/04-cdn-load-balancer-reverse-proxy.md](../08-networking-and-api/request-lifecycle/04-cdn-load-balancer-reverse-proxy.md).
+- См. [protocols/01-osi-and-tcp-ip-model.md](../../08-networking-and-api/protocols/01-osi-and-tcp-ip-model.md) и [request-lifecycle/04-cdn-load-balancer-reverse-proxy.md](../../08-networking-and-api/request-lifecycle/04-cdn-load-balancer-reverse-proxy.md).
 
 **Чем отличаются симметричные и асимметричные алгоритмы шифрования?**
 
 - Симметричное — один общий секретный ключ и для шифрования, и для расшифровки (AES, ChaCha20). Быстрое, годится для больших объёмов; проблема — как безопасно передать ключ обеим сторонам.
 - Асимметричное — пара ключей: публичный (шифрует/проверяет) и приватный (расшифровывает/подписывает) — RSA, ECDSA. Решает обмен ключами и подписи, но медленное.
 - На практике их комбинируют (как в TLS) — асимметрией согласуют общий сеансовый ключ, дальше быстро шифруют симметрично.
-- См. [service-to-service-tls/01-tls-termination-re-encryption-and-mtls.md](../11-security/service-to-service-tls/01-tls-termination-re-encryption-and-mtls.md).
+- См. [service-to-service-tls/01-tls-termination-re-encryption-and-mtls.md](../../11-security/service-to-service-tls/01-tls-termination-re-encryption-and-mtls.md).
 
 **По каким критериям роутер направляет пакет?**
 
@@ -698,7 +698,7 @@
 - Если маршрута нет — пакет уходит в маршрут по умолчанию (default gateway).
 - Попутно — уменьшается TTL (защита от петель), при необходимости применяется NAT.
 - Откуда маршруты — статически или из протоколов (OSPF, BGP).
-- См. [linux/03-tcp-sockets.md](../10-devops-and-observability/linux/03-tcp-sockets.md).
+- См. [linux/03-tcp-sockets.md](../../10-devops-and-observability/linux/03-tcp-sockets.md).
 
 **Как TCP гарантирует доставку пакетов?**
 
@@ -708,7 +708,7 @@
 - Контроль потока — sliding window, чтобы не завалить получателя.
 - Контроль перегрузки — slow start, congestion avoidance, чтобы не завалить сеть.
 - Установка соединения — 3-way handshake (SYN / SYN-ACK / ACK).
-- См. [linux/03-tcp-sockets.md](../10-devops-and-observability/linux/03-tcp-sockets.md).
+- См. [linux/03-tcp-sockets.md](../../10-devops-and-observability/linux/03-tcp-sockets.md).
 
 **Почему DNS работает поверх UDP, а не TCP?**
 
@@ -717,7 +717,7 @@
 - Потеря не страшна — клиент просто переспросит.
 - TCP тоже используется — когда ответ большой (раньше не влезал при >512 байт, с EDNS порог выше), при zone transfer между серверами и для DNS-over-TLS/HTTPS.
 - Итог — UDP по умолчанию ради скорости, TCP как фолбэк.
-- См. [request-lifecycle/02-dns-resolution-and-getting-ip.md](../08-networking-and-api/request-lifecycle/02-dns-resolution-and-getting-ip.md).
+- См. [request-lifecycle/02-dns-resolution-and-getting-ip.md](../../08-networking-and-api/request-lifecycle/02-dns-resolution-and-getting-ip.md).
 
 **Что такое QUIC?**
 
@@ -726,7 +726,7 @@
 - Мультиплексирование стримов без head-of-line blocking — потеря в одном стриме не тормозит другие, в отличие от TCP.
 - Connection migration — переключение Wi-Fi↔LTE без разрыва соединения, по connection id.
 - Где живёт логика — надёжность и контроль перегрузки реализованы в самом QUIC (в user space), а не в ядре.
-- См. [protocols/00-protocol-comparison.md](../08-networking-and-api/protocols/00-protocol-comparison.md).
+- См. [protocols/00-protocol-comparison.md](../../08-networking-and-api/protocols/00-protocol-comparison.md).
 
 **Какие есть HTTP-методы и что про идемпотентность?**
 
@@ -735,14 +735,14 @@
 - Идемпотентные (повтор даёт тот же результат) — GET, PUT, DELETE, HEAD, OPTIONS.
 - Не идемпотентны — POST и обычно PATCH; для их безопасного ретрая нужен idempotency-key.
 - Коды ответов — см. вопрос «Зачем нужны HTTP-коды» выше в этом разделе.
-- См. [api-design/03-http-methods.md](../08-networking-and-api/api-design/03-http-methods.md).
+- См. [api-design/03-http-methods.md](../../08-networking-and-api/api-design/03-http-methods.md).
 
 **В чём разница HTTP/1.1, HTTP/2 и HTTP/3?**
 
 - HTTP/1.1 — текстовый, постоянные соединения (keep-alive), но head-of-line blocking: ответы по соединению идут строго по очереди.
 - HTTP/2 — бинарный фрейминг, мультиплексирование множества запросов в одном TCP-соединении, сжатие заголовков HPACK, server push (по факту deprecated — браузеры его отключили). HoL убран на уровне HTTP, но остаётся на уровне TCP: потеря сегмента тормозит все стримы.
 - HTTP/3 — поверх QUIC (UDP): убирает и TCP-HoL (стримы независимы), встроенный TLS 1.3, быстрее установка, connection migration.
-- См. [protocols/00-protocol-comparison.md](../08-networking-and-api/protocols/00-protocol-comparison.md).
+- См. [protocols/00-protocol-comparison.md](../../08-networking-and-api/protocols/00-protocol-comparison.md).
 
 **Как устроен TLS-handshake и проверка сертификата? Чем подлинный сертификат отличается от самоподписанного?**
 
@@ -755,7 +755,7 @@
 - Самоподписанный подписан сам собой, в доверенных CA его нет → браузер ругается («не доверенный»).
 - В чём реальная разница — шифрование технически то же, но нет подтверждённой подлинности: кто угодно может выпустить самоподписанный на любой домен.
 - Где применим — локалка и внутренние сервисы (можно добавить в доверенные вручную), не публичный прод.
-- См. [request-lifecycle/03-tcp-tls-and-http-request.md](../08-networking-and-api/request-lifecycle/03-tcp-tls-and-http-request.md).
+- См. [request-lifecycle/03-tcp-tls-and-http-request.md](../../08-networking-and-api/request-lifecycle/03-tcp-tls-and-http-request.md).
 
 **В чём разница между Cookie, Session и JWT?**
 
@@ -763,7 +763,7 @@
 - Session — состояние на сервере (в памяти, Redis, БД): клиент держит в cookie только `session_id`, сервер по нему находит данные. Легко отозвать (удалить сессию), но нужен стейт и хранилище, и это хуже масштабируется.
 - JWT — самодостаточный подписанный токен (`header.payload.signature`): все данные внутри, сервер проверяет подпись и не хранит состояние (stateless, удобно для микросервисов). Минусы — токен трудно отозвать до истечения и он больше по размеру.
 - Коротко — cookie это где хранить, session — стейт на сервере, JWT — стейт в токене.
-- См. [authentication/02-sessions-and-session-security.md](../11-security/authentication/02-sessions-and-session-security.md) и [authentication/06-jwt.md](../11-security/authentication/06-jwt.md).
+- См. [authentication/02-sessions-and-session-security.md](../../11-security/authentication/02-sessions-and-session-security.md) и [authentication/06-jwt.md](../../11-security/authentication/06-jwt.md).
 
 **HTTP/2 и gRPC: мультиплексирование, стриминг, плюсы/минусы против REST, protobuf, типы RPC.**
 
@@ -773,7 +773,7 @@
 - Плюсы против REST/JSON — меньше payload и латентность, строгий контракт и кодоген, стриминг, удобно service-to-service.
 - Минусы — не читается глазами, слабая поддержка в браузере (нужен gRPC-Web или grpc-gateway для REST-фасада), сложнее дебажить.
 - Versioning — через эволюцию proto: не переиспользовать номера полей, только добавлять.
-- См. [03-api-styles/02-grpc.md](../08-networking-and-api/protocols/03-api-styles/02-grpc.md).
+- См. [03-api-styles/02-grpc.md](../../08-networking-and-api/protocols/03-api-styles/02-grpc.md).
 
 **Как проверить, открыт ли порт на сервере? Какой процесс его слушает?**
 
@@ -783,7 +783,7 @@
   - `lsof -i :8080` — кто держит конкретный порт.
   - `fuser 8080/tcp` — то же самое одним числом-ответом.
   - `ss -ulnp` — вариант для UDP.
-- См. [linux/03-tcp-sockets.md](../10-devops-and-observability/linux/03-tcp-sockets.md).
+- См. [linux/03-tcp-sockets.md](../../10-devops-and-observability/linux/03-tcp-sockets.md).
 
 ---
 
@@ -791,27 +791,27 @@
 
 **Чем отличаются потоки и процессы?**
 
-- Процесс — изолированная единица с собственным адресным пространством и ресурсами. Поток — единица исполнения внутри процесса; потоки одного процесса делят память и дескрипторы, поэтому переключение и обмен дешевле, но нужна синхронизация. См. [hardware-and-os/06-processes-and-threads.md](../10-devops-and-observability/hardware-and-os/06-processes-and-threads.md).
+- Процесс — изолированная единица с собственным адресным пространством и ресурсами. Поток — единица исполнения внутри процесса; потоки одного процесса делят память и дескрипторы, поэтому переключение и обмен дешевле, но нужна синхронизация. См. [hardware-and-os/06-processes-and-threads.md](../../10-devops-and-observability/hardware-and-os/06-processes-and-threads.md).
 
 **Какие есть виды межпроцессного взаимодействия (IPC)?**
 
-- Pipes/named pipes, сигналы, разделяемая память (shared memory), очереди сообщений, семафоры, сокеты (в т.ч. Unix-domain), memory-mapped files. Выбор — по объёму данных и границе (одна машина vs сеть). См. [linux/04-signals-and-processes.md](../10-devops-and-observability/linux/04-signals-and-processes.md).
+- Pipes/named pipes, сигналы, разделяемая память (shared memory), очереди сообщений, семафоры, сокеты (в т.ч. Unix-domain), memory-mapped files. Выбор — по объёму данных и границе (одна машина vs сеть). См. [linux/04-signals-and-processes.md](../../10-devops-and-observability/linux/04-signals-and-processes.md).
 
 **В чём разница кооперативной и вытесняющей многозадачности?**
 
-- Кооперативная — задача сама уступает управление в точках yield (риск: зависшая задача держит CPU). Вытесняющая — планировщик принудительно прерывает задачу по таймеру/прерыванию, гарантируя справедливость. Планировщик Go исторически был кооперативным, с 1.14 — асинхронно вытесняющий. См. [runtime-scheduler/01-scheduler-and-preemption.md](../01-go-core/runtime-scheduler/01-scheduler-and-preemption.md).
+- Кооперативная — задача сама уступает управление в точках yield (риск: зависшая задача держит CPU). Вытесняющая — планировщик принудительно прерывает задачу по таймеру/прерыванию, гарантируя справедливость. Планировщик Go исторически был кооперативным, с 1.14 — асинхронно вытесняющий. См. [runtime-scheduler/01-scheduler-and-preemption.md](../../01-go-core/runtime-scheduler/01-scheduler-and-preemption.md).
 
 **Что такое переключение контекста?**
 
-- Сохранение состояния (регистры, указатель стека, счётчик команд) текущего потока/процесса и загрузка состояния другого, чтобы CPU переключился между задачами. Стоит недёшево: инвалидация кэшей/TLB, режимные переходы. См. [hardware-and-os/07-context-switching-and-scheduling.md](../10-devops-and-observability/hardware-and-os/07-context-switching-and-scheduling.md).
+- Сохранение состояния (регистры, указатель стека, счётчик команд) текущего потока/процесса и загрузка состояния другого, чтобы CPU переключился между задачами. Стоит недёшево: инвалидация кэшей/TLB, режимные переходы. См. [hardware-and-os/07-context-switching-and-scheduling.md](../../10-devops-and-observability/hardware-and-os/07-context-switching-and-scheduling.md).
 
 **Что такое файловый дескриптор и зачем нужен?**
 
-- Целочисленный хендл, который ОС выдаёт процессу на открытый ресурс (файл, сокет, pipe). Через него выполняются read/write. У процесса лимит на число fd (`ulimit -n`); утечка дескрипторов — частая причина «too many open files». См. [linux/02-file-descriptors-and-io.md](../10-devops-and-observability/linux/02-file-descriptors-and-io.md).
+- Целочисленный хендл, который ОС выдаёт процессу на открытый ресурс (файл, сокет, pipe). Через него выполняются read/write. У процесса лимит на число fd (`ulimit -n`); утечка дескрипторов — частая причина «too many open files». См. [linux/02-file-descriptors-and-io.md](../../10-devops-and-observability/linux/02-file-descriptors-and-io.md).
 
 **Какой командой убить процесс? А если не умирает?**
 
-- `kill <pid>` шлёт `SIGTERM` (мягко, даёт прибраться). Если процесс игнорирует — `kill -9 <pid>` (`SIGKILL`, безусловное завершение ядром, без shutdown-хуков). Массово — `pkill <name>`/`killall`. См. [linux/04-signals-and-processes.md](../10-devops-and-observability/linux/04-signals-and-processes.md).
+- `kill <pid>` шлёт `SIGTERM` (мягко, даёт прибраться). Если процесс игнорирует — `kill -9 <pid>` (`SIGKILL`, безусловное завершение ядром, без shutdown-хуков). Массово — `pkill <name>`/`killall`. См. [linux/04-signals-and-processes.md](../../10-devops-and-observability/linux/04-signals-and-processes.md).
 
 **Какой командой проверить потребляемые ресурсы на Unix?**
 
@@ -820,11 +820,11 @@
 - `free -h` — сколько памяти занято и сколько под кэшем.
 - `df -h` и `du` — свободное место и кто его занял.
 - `iostat`/`vmstat` — дисковый I/O и общая картина по системе.
-- См. [linux/06-linux-commands.md](../10-devops-and-observability/linux/06-linux-commands.md).
+- См. [linux/06-linux-commands.md](../../10-devops-and-observability/linux/06-linux-commands.md).
 
 **Что происходит, когда в коде просим выделить 1 КБ памяти?**
 
-- Сначала аллокатор пытается выдать память из уже зарезервированных у ОС арен/спанов (в Go — per-P кэш `mcache` → `mcentral` → `mheap`), без syscall. Если своей памяти нет — процесс просит у ОС страницы (`mmap`/`brk`), и физическая RAM подключается лениво при первом обращении (page fault). 1 КБ обычно попадает в готовый size-class, syscall не нужен. См. [memory-internals/02-allocator.md](../01-go-core/memory-internals/02-allocator.md) и [linux/01-virtual-memory.md](../10-devops-and-observability/linux/01-virtual-memory.md).
+- Сначала аллокатор пытается выдать память из уже зарезервированных у ОС арен/спанов (в Go — per-P кэш `mcache` → `mcentral` → `mheap`), без syscall. Если своей памяти нет — процесс просит у ОС страницы (`mmap`/`brk`), и физическая RAM подключается лениво при первом обращении (page fault). 1 КБ обычно попадает в готовый size-class, syscall не нужен. См. [memory-internals/02-allocator.md](../../01-go-core/memory-internals/02-allocator.md) и [linux/01-virtual-memory.md](../../10-devops-and-observability/linux/01-virtual-memory.md).
 
 **За счёт чего стала возможна виртуализация?**
 
@@ -832,7 +832,7 @@
 - Расширения виртуализации (Intel VT-x / AMD-V) — дают гипервизору отдельный уровень привилегий, на котором гостевые ОС думают, что работают на «голом» железе, а привилегированные инструкции перехватываются (trap-and-emulate) без программной эмуляции каждой команды.
 - Аппаратная виртуализация памяти (EPT/NPT) — вторая ступень таблиц страниц для трансляции гость→хост; для устройств — IOMMU.
 - Итог — гипервизор исполняет гостевой код нативно на CPU, с минимальными накладными расходами.
-- См. [docker/03-virtual-machines.md](../10-devops-and-observability/docker/03-virtual-machines.md).
+- См. [docker/03-virtual-machines.md](../../10-devops-and-observability/docker/03-virtual-machines.md).
 
 **Что такое эмуляция?**
 
@@ -840,7 +840,7 @@
 - Как работает — эмулятор интерпретирует каждую гостевую инструкцию или JIT-транслирует её.
 - Что даёт — запуск ПО для чужой архитектуры (ARM-бинарь на x86, ретро-консоль на ПК), но медленно.
 - Отличие от виртуализации — виртуализация исполняет гостевой код нативно на том же CPU (та же архитектура, аппаратная поддержка) и потому быстра; эмуляция симулирует железо программно — гибко, но дорого. QEMU умеет и то, и другое.
-- См. [docker/03-virtual-machines.md](../10-devops-and-observability/docker/03-virtual-machines.md).
+- См. [docker/03-virtual-machines.md](../../10-devops-and-observability/docker/03-virtual-machines.md).
 
 **Какие знаешь syscalls? (и как с ними работает Go)**
 
@@ -849,14 +849,14 @@
   - Блокирующий сисколл (например, чтение файла): рантайм отвязывает `P` от заблокированного `M` (handoff) и отдаёт `P` другому потоку, чтобы остальные горутины работали; заблокированная горутина висит со своим `M` до возврата. Отсюда эффект «GOMAXPROCS=1, но потоков больше».
   - Сетевые операции не блокируют `M`: fd переводится в неблокирующий режим и регистрируется в netpoller (`epoll`/`kqueue`), горутина паркуется и будится по готовности — так тысячи соединений обслуживают немного потоков.
   - Каждый вход в сисколл — переключение в kernel mode (недёшево), поэтому Go батчит I/O буферами (`bufio`) и мультиплексирует сеть.
-- См. [runtime-scheduler/02-syscall.md](../01-go-core/runtime-scheduler/02-syscall.md) и [runtime-scheduler/03-netpoller.md](../01-go-core/runtime-scheduler/03-netpoller.md).
+- См. [runtime-scheduler/02-syscall.md](../../01-go-core/runtime-scheduler/02-syscall.md) и [runtime-scheduler/03-netpoller.md](../../01-go-core/runtime-scheduler/03-netpoller.md).
 
 **Чем отличается hard link от soft link (symlink)?**
 
 - Hard link — ещё одно имя для того же inode (тех же данных): все хардлинки равноправны, данные живут, пока есть хоть один. Нельзя ссылаться на другой раздел ФС и на директории.
 - Soft link (символическая ссылка) — отдельный файл, хранящий путь к цели: может указывать куда угодно (другой раздел, директория), но «повисает» (dangling), если цель удалили или переместили.
 - Коротко — hardlink это второе имя данных, symlink — указатель на путь.
-- См. [linux/02-file-descriptors-and-io.md](../10-devops-and-observability/linux/02-file-descriptors-and-io.md).
+- См. [linux/02-file-descriptors-and-io.md](../../10-devops-and-observability/linux/02-file-descriptors-and-io.md).
 
 **Что такое swap и зачем он нужен?**
 
@@ -864,18 +864,18 @@
 - Плюс — сервер не падает сразу при пике потребления.
 - Минус — диск на порядки медленнее RAM: при активном свопинге начинается thrashing и деградация.
 - На практике — на серверах БД swap часто уменьшают или выключают ради предсказуемой латентности.
-- См. [linux/01-virtual-memory.md](../10-devops-and-observability/linux/01-virtual-memory.md).
+- См. [linux/01-virtual-memory.md](../../10-devops-and-observability/linux/01-virtual-memory.md).
 
 **На голом сервере сервис течёт по памяти. Что произойдёт, когда память закончится?**
 
 - Сначала — деградация. Ядро начинает свопить неактивные страницы на диск и сбрасывать page cache: растёт I/O, начинается thrashing, латентность падает.
 - Потом — OOM Killer. Когда исчерпаны и RAM, и swap, ядро выбирает процесс с наибольшим `oom_score` (обычно самый прожорливый — наш текущий) и убивает его `SIGKILL`.
 - На что смотрит выбор жертвы — на анонимную резидентную память (RSS/heap), которую нельзя просто сбросить, а не на page cache: его ядро освобождает само.
-- См. [linux/01-virtual-memory.md](../10-devops-and-observability/linux/01-virtual-memory.md).
+- См. [linux/01-virtual-memory.md](../../10-devops-and-observability/linux/01-virtual-memory.md).
 
 **Как узнать, какой процесс грузит CPU?**
 
-- `top`/`htop` (сортировка по %CPU по умолчанию), `ps aux --sort=-%cpu | head`, `pidstat 1`. `top -H` / `htop` покажут по потокам, что для Go-сервиса помогает понять, какая часть грузит. Для «что именно внутри процесса» — уже профилирование (pprof). См. [linux/06-linux-commands.md](../10-devops-and-observability/linux/06-linux-commands.md).
+- `top`/`htop` (сортировка по %CPU по умолчанию), `ps aux --sort=-%cpu | head`, `pidstat 1`. `top -H` / `htop` покажут по потокам, что для Go-сервиса помогает понять, какая часть грузит. Для «что именно внутри процесса» — уже профилирование (pprof). См. [linux/06-linux-commands.md](../../10-devops-and-observability/linux/06-linux-commands.md).
 
 **Чем отличается top от htop?**
 
@@ -890,11 +890,11 @@
   - la меньше числа ядер — есть запас.
 - Не только CPU — высокий la даёт и ожидание I/O, поэтому одно число ещё не означает нехватку процессора.
 - Зачем три значения — по их соотношению видно, растёт нагрузка или спадает.
-- См. [linux/06-linux-commands.md](../10-devops-and-observability/linux/06-linux-commands.md).
+- См. [linux/06-linux-commands.md](../../10-devops-and-observability/linux/06-linux-commands.md).
 
 **Как найти файлы больше 1 GB в системе?**
 
-- `find / -type f -size +1G` (при желании `-exec ls -lh {} \;` или `... | xargs du -h | sort -rh`). Для быстрого «кто съел диск» — `du -h --max-depth=1 / | sort -rh | head` (на macOS/BSD флаг другой: `du -d 1`) или `ncdu`. См. [linux/06-linux-commands.md](../10-devops-and-observability/linux/06-linux-commands.md).
+- `find / -type f -size +1G` (при желании `-exec ls -lh {} \;` или `... | xargs du -h | sort -rh`). Для быстрого «кто съел диск» — `du -h --max-depth=1 / | sort -rh | head` (на macOS/BSD флаг другой: `du -d 1`) или `ncdu`. См. [linux/06-linux-commands.md](../../10-devops-and-observability/linux/06-linux-commands.md).
 
 **Какими командами шелла пользуешься каждый день?**
 
@@ -904,7 +904,7 @@
 - Сеть — `ss`/`netstat`, `lsof`, `ping`, `curl`/`wget`, `ssh`, `scp`, `rsync`, `ifconfig`/`ip`.
 - Сборка — `make`.
 - Что важнее перечня — умение комбинировать команды через пайпы (`grep … | awk | sort | uniq -c`) и понимание стандартных потоков и перенаправления.
-- См. [linux/06-linux-commands.md](../10-devops-and-observability/linux/06-linux-commands.md).
+- См. [linux/06-linux-commands.md](../../10-devops-and-observability/linux/06-linux-commands.md).
 
 ---
 
@@ -912,7 +912,7 @@
 
 **Что такое pod в Kubernetes?**
 
-- Минимальная единица деплоя: один или несколько контейнеров, делящих сетевой namespace (один IP), тома и жизненный цикл. Обычно один основной контейнер + sidecar-ы. Pod эфемерен — управляется Deployment/ReplicaSet, при падении пересоздаётся. См. [kubernetes/04-pod-vs-container.md](../10-devops-and-observability/kubernetes/04-pod-vs-container.md).
+- Минимальная единица деплоя: один или несколько контейнеров, делящих сетевой namespace (один IP), тома и жизненный цикл. Обычно один основной контейнер + sidecar-ы. Pod эфемерен — управляется Deployment/ReplicaSet, при падении пересоздаётся. См. [kubernetes/04-pod-vs-container.md](../../10-devops-and-observability/kubernetes/04-pod-vs-container.md).
 
 **Для чего нужны Deployment и Service?**
 
@@ -922,15 +922,15 @@
   - ClusterIP — доступ только внутри кластера, вариант по умолчанию.
   - NodePort — порт на каждой ноде наружу.
   - LoadBalancer — внешний балансировщик от облачного провайдера.
-- См. [kubernetes/03-core-objects-and-deployment-flow.md](../10-devops-and-observability/kubernetes/03-core-objects-and-deployment-flow.md).
+- См. [kubernetes/03-core-objects-and-deployment-flow.md](../../10-devops-and-observability/kubernetes/03-core-objects-and-deployment-flow.md).
 
 **Что такое Ingress?**
 
-- Объект L7-маршрутизации HTTP/HTTPS-трафика снаружи в Service’ы по хосту и пути (`api.example.com/v1 → service-a`), с терминацией TLS в одной точке. Сам по себе Ingress — лишь правила; их исполняет Ingress-контроллер (nginx, Traefik и т.п.). Заменяет россыпь LoadBalancer-ов одним входом. См. [kubernetes/03-core-objects-and-deployment-flow.md](../10-devops-and-observability/kubernetes/03-core-objects-and-deployment-flow.md).
+- Объект L7-маршрутизации HTTP/HTTPS-трафика снаружи в Service’ы по хосту и пути (`api.example.com/v1 → service-a`), с терминацией TLS в одной точке. Сам по себе Ingress — лишь правила; их исполняет Ingress-контроллер (nginx, Traefik и т.п.). Заменяет россыпь LoadBalancer-ов одним входом. См. [kubernetes/03-core-objects-and-deployment-flow.md](../../10-devops-and-observability/kubernetes/03-core-objects-and-deployment-flow.md).
 
 **Чем отличается ReplicaSet от Deployment?**
 
-- ReplicaSet держит заданное число одинаковых подов (следит, чтобы реплик было ровно N, пересоздаёт упавшие) — но не умеет обновлять версию. Deployment — уровень выше: управляет ReplicaSet’ами и делает rolling-update / rollback (создаёт новый RS с новой версией и плавно переливает поды, старый RS оставляет для отката). На практике работают с Deployment, а ReplicaSet он создаёт под капотом. См. [kubernetes/03-core-objects-and-deployment-flow.md](../10-devops-and-observability/kubernetes/03-core-objects-and-deployment-flow.md).
+- ReplicaSet держит заданное число одинаковых подов (следит, чтобы реплик было ровно N, пересоздаёт упавшие) — но не умеет обновлять версию. Deployment — уровень выше: управляет ReplicaSet’ами и делает rolling-update / rollback (создаёт новый RS с новой версией и плавно переливает поды, старый RS оставляет для отката). На практике работают с Deployment, а ReplicaSet он создаёт под капотом. См. [kubernetes/03-core-objects-and-deployment-flow.md](../../10-devops-and-observability/kubernetes/03-core-objects-and-deployment-flow.md).
 
 **Разница между ConfigMap и Secret?**
 
@@ -939,26 +939,26 @@
 - Secret — для чувствительных (пароли, токены, ключи, TLS-сертификаты): значения в base64 — это кодирование, а не шифрование.
 - Что реально защищает Secret — RBAC, шифрование etcd at-rest, значения не светятся в описании пода.
 - Суть различия — семантический сигнал «это чувствительное» плюс дополнительная защита.
-- См. [kubernetes/10-config-and-secret-delivery.md](../10-devops-and-observability/kubernetes/10-config-and-secret-delivery.md).
+- См. [kubernetes/10-config-and-secret-delivery.md](../../10-devops-and-observability/kubernetes/10-config-and-secret-delivery.md).
 
 **Что такое Namespace?**
 
-- Логическое разбиение кластера на изолированные «пространства имён» — виртуальные под-кластеры для команд/окружений (dev/stage/prod) в одном физическом кластере. Даёт изоляцию имён (ресурсы уникальны в пределах namespace), квоты (ResourceQuota/LimitRange), разграничение доступа (RBAC). Не изолирует сеть по умолчанию — для этого NetworkPolicy. См. [kubernetes/02-kubernetes-cluster-and-ha.md](../10-devops-and-observability/kubernetes/02-kubernetes-cluster-and-ha.md).
+- Логическое разбиение кластера на изолированные «пространства имён» — виртуальные под-кластеры для команд/окружений (dev/stage/prod) в одном физическом кластере. Даёт изоляцию имён (ресурсы уникальны в пределах namespace), квоты (ResourceQuota/LimitRange), разграничение доступа (RBAC). Не изолирует сеть по умолчанию — для этого NetworkPolicy. См. [kubernetes/02-kubernetes-cluster-and-ha.md](../../10-devops-and-observability/kubernetes/02-kubernetes-cluster-and-ha.md).
 
 **Разница между StatefulSet и Deployment? Когда использовать StatefulSet?**
 
 - Deployment — для stateless-подов: они взаимозаменяемы, имена и сеть эфемерны, порядок не важен.
 - StatefulSet — для stateful: даёт подам стабильную идентичность (постоянное имя `pod-0`, `pod-1`, стабильный сетевой hostname через headless-service) и своё персистентное хранилище (PVC на каждый под), плюс упорядоченные rollout и scale.
 - Когда использовать StatefulSet — БД и кластеры (Kafka, Zookeeper, Elasticsearch, Redis): там, где под должен помнить, «кто он», и иметь свои данные.
-- См. [kubernetes/03-core-objects-and-deployment-flow.md](../10-devops-and-observability/kubernetes/03-core-objects-and-deployment-flow.md).
+- См. [kubernetes/03-core-objects-and-deployment-flow.md](../../10-devops-and-observability/kubernetes/03-core-objects-and-deployment-flow.md).
 
 **Что такое Job и CronJob?**
 
-- Job — запуск пода до успешного завершения (batch-задача: миграция, обработка, разовый скрипт); следит за завершением и ретраит при падении, можно параллелить. CronJob — Job по расписанию (cron-синтаксис): бэкапы, периодические выгрузки, чистки. В отличие от Deployment (сервис работает вечно), Job — «сделал и вышел». См. [kubernetes/03-core-objects-and-deployment-flow.md](../10-devops-and-observability/kubernetes/03-core-objects-and-deployment-flow.md).
+- Job — запуск пода до успешного завершения (batch-задача: миграция, обработка, разовый скрипт); следит за завершением и ретраит при падении, можно параллелить. CronJob — Job по расписанию (cron-синтаксис): бэкапы, периодические выгрузки, чистки. В отличие от Deployment (сервис работает вечно), Job — «сделал и вышел». См. [kubernetes/03-core-objects-and-deployment-flow.md](../../10-devops-and-observability/kubernetes/03-core-objects-and-deployment-flow.md).
 
 **Что такое StorageClass?**
 
-- Описание «класса» динамически выделяемого хранилища: какой провайдер (EBS, GCE PD, Ceph…), тип диска (ssd/hdd), параметры, политика reclaim. Когда под через PersistentVolumeClaim просит том с определённым StorageClass, кластер автоматически создаёт под него PersistentVolume — без ручного выделения дисков. Разные классы = разные тиры хранилища. См. [kubernetes/11-persistent-storage-pv-pvc-and-storageclass.md](../10-devops-and-observability/kubernetes/11-persistent-storage-pv-pvc-and-storageclass.md).
+- Описание «класса» динамически выделяемого хранилища: какой провайдер (EBS, GCE PD, Ceph…), тип диска (ssd/hdd), параметры, политика reclaim. Когда под через PersistentVolumeClaim просит том с определённым StorageClass, кластер автоматически создаёт под него PersistentVolume — без ручного выделения дисков. Разные классы = разные тиры хранилища. См. [kubernetes/11-persistent-storage-pv-pvc-and-storageclass.md](../../10-devops-and-observability/kubernetes/11-persistent-storage-pv-pvc-and-storageclass.md).
 
 **Какими командами kubectl пользовался?**
 
@@ -966,7 +966,7 @@
 - Отладка — `kubectl logs <pod> [-f] [-c container] [--previous]`, `kubectl exec -it <pod> -- sh`, `kubectl port-forward`, `kubectl top pod`.
 - Изменения — `kubectl apply -f`, `kubectl rollout status/undo deploy/<d>`, `kubectl scale`, `kubectl set image`, `kubectl delete`.
 - Контекст — `kubectl config use-context`.
-- См. [kubernetes/05-kubectl-commands.md](../10-devops-and-observability/kubernetes/05-kubectl-commands.md).
+- См. [kubernetes/05-kubectl-commands.md](../../10-devops-and-observability/kubernetes/05-kubectl-commands.md).
 
 **Какими UI для Kubernetes пользовался?**
 
@@ -981,11 +981,11 @@
   - `--previous` — лог упавшего предыдущего инстанса; главный флаг при CrashLoopBackOff.
   - `--since=10m` и `--tail=100` — ограничить выборку по времени и числу строк.
 - Ограничение — `kubectl logs` эфемерен и умирает вместе с подом, поэтому в проде логи собирает агент (Fluent Bit, Promtail) в Loki или ELK.
-- См. [kubernetes/05-kubectl-commands.md](../10-devops-and-observability/kubernetes/05-kubectl-commands.md).
+- См. [kubernetes/05-kubectl-commands.md](../../10-devops-and-observability/kubernetes/05-kubectl-commands.md).
 
 **Как войти внутрь контейнера в поде?**
 
-- `kubectl exec -it <pod> -- sh` (или `bash`), в многоконтейнерном — `-c <container>`. В минимальных образах (distroless/scratch) шелла нет — тогда ephemeral debug container: `kubectl debug -it <pod> --image=busybox --target=<container>`. Как и `docker exec`, запускает новый процесс в неймспейсах пода для отладки. См. [kubernetes/05-kubectl-commands.md](../10-devops-and-observability/kubernetes/05-kubectl-commands.md).
+- `kubectl exec -it <pod> -- sh` (или `bash`), в многоконтейнерном — `-c <container>`. В минимальных образах (distroless/scratch) шелла нет — тогда ephemeral debug container: `kubectl debug -it <pod> --image=busybox --target=<container>`. Как и `docker exec`, запускает новый процесс в неймспейсах пода для отладки. См. [kubernetes/05-kubectl-commands.md](../../10-devops-and-observability/kubernetes/05-kubectl-commands.md).
 
 **Какие бывают статусы пода (CrashLoopBackOff, Pending и т.п.)?**
 
@@ -998,15 +998,15 @@
 - Completed — успешно завершился (для Job).
 - Evicted — вытеснен с ноды из-за нехватки ресурсов.
 - Диагностика — `kubectl describe pod` (события) плюс логи.
-- См. [kubernetes/07-probes-and-graceful-shutdown.md](../10-devops-and-observability/kubernetes/07-probes-and-graceful-shutdown.md).
+- См. [kubernetes/07-probes-and-graceful-shutdown.md](../../10-devops-and-observability/kubernetes/07-probes-and-graceful-shutdown.md).
 
 **Что такое Docker? Чем отличается от виртуализации?**
 
-- Docker — платформа контейнеризации: упаковывает приложение с зависимостями в образ, запускает как изолированный процесс через namespaces/cgroups, разделяя ядро хоста. ВМ виртуализирует железо и тащит полноценную гостевую ОС с собственным ядром через гипервизор. Контейнеры легче, стартуют за секунды, плотнее; ВМ дают более сильную изоляцию. См. [docker/01-container-vs-virtual-machine.md](../10-devops-and-observability/docker/01-container-vs-virtual-machine.md).
+- Docker — платформа контейнеризации: упаковывает приложение с зависимостями в образ, запускает как изолированный процесс через namespaces/cgroups, разделяя ядро хоста. ВМ виртуализирует железо и тащит полноценную гостевую ОС с собственным ядром через гипервизор. Контейнеры легче, стартуют за секунды, плотнее; ВМ дают более сильную изоляцию. См. [docker/01-container-vs-virtual-machine.md](../../10-devops-and-observability/docker/01-container-vs-virtual-machine.md).
 
 **Что такое Docker image и чем отличается от контейнера?**
 
-- Образ (image) — неизменяемый шаблон из слоёв (read-only): код + зависимости + метаданные (какой процесс запускать). Контейнер — запущенный экземпляр образа: к слоям образа добавляется writable-слой (copy-on-write) и запускается процесс в своих namespaces/cgroups. Аналогия: образ — класс, контейнер — объект; из одного образа поднимают много контейнеров. См. [docker/02-containers.md](../10-devops-and-observability/docker/02-containers.md).
+- Образ (image) — неизменяемый шаблон из слоёв (read-only): код + зависимости + метаданные (какой процесс запускать). Контейнер — запущенный экземпляр образа: к слоям образа добавляется writable-слой (copy-on-write) и запускается процесс в своих namespaces/cgroups. Аналогия: образ — класс, контейнер — объект; из одного образа поднимают много контейнеров. См. [docker/02-containers.md](../../10-devops-and-observability/docker/02-containers.md).
 
 **Как работает Docker под капотом?**
 
@@ -1017,13 +1017,13 @@
   - capabilities, seccomp, AppArmor — ограничение прав процесса.
 - Кто это собирает — демон `dockerd` через `containerd` и `runc` создаёт контейнер как обычный процесс хоста с этими ограничениями.
 - Ключевой вывод — своей ОС и своего ядра у контейнера нет.
-- См. [docker/02-containers.md](../10-devops-and-observability/docker/02-containers.md).
+- См. [docker/02-containers.md](../../10-devops-and-observability/docker/02-containers.md).
 
 **Как настроить Docker, чтобы всё работало быстро и безопасно?**
 
 - Быстро — multi-stage build (билд-стадия отдельно, в финал только бинарь), минимальный базовый образ (distroless/alpine/scratch), правильный порядок слоёв для кэша (сначала `go.mod` + `go.sum` и `go mod download`, потом код), `.dockerignore`.
 - Безопасно — не запускать от root (`USER app`), read-only rootfs, drop capabilities, не зашивать секреты в образ, пинить версии базовых образов по digest, сканировать образы (trivy/grype), минимизировать поверхность (в distroless нет shell и пакетов).
-- См. [dockerfiles-for-go/03-dockerfiles-for-go-projects.md](../10-devops-and-observability/dockerfiles-for-go/03-dockerfiles-for-go-projects.md).
+- См. [dockerfiles-for-go/03-dockerfiles-for-go-projects.md](../../10-devops-and-observability/dockerfiles-for-go/03-dockerfiles-for-go-projects.md).
 
 **Как уменьшить размер образа?**
 
@@ -1033,15 +1033,15 @@
 - Аккуратные слои — объединять `RUN`, чистить кэши пакетов в том же слое, где они появились.
 - `.dockerignore` — не тащить в контекст сборки `.git`, тесты и локальные артефакты.
 - Итог для Go — образы в единицы и десятки мегабайт.
-- См. [dockerfiles-for-go/03-dockerfiles-for-go-projects.md](../10-devops-and-observability/dockerfiles-for-go/03-dockerfiles-for-go-projects.md).
+- См. [dockerfiles-for-go/03-dockerfiles-for-go-projects.md](../../10-devops-and-observability/dockerfiles-for-go/03-dockerfiles-for-go-projects.md).
 
 **Чем отличается COPY от ADD в Dockerfile?**
 
-- `COPY` просто копирует файлы/директории из контекста сборки в образ — предсказуемо, и это рекомендованный способ. `ADD` умеет больше: распаковывать локальные tar-архивы и скачивать по URL — но эта «магия» делает сборку менее очевидной, поэтому по гайдлайнам используют `COPY`, а `ADD` — только когда реально нужна авто-распаковка архива. См. [dockerfiles-for-go/02-dockerfile-anatomy.md](../10-devops-and-observability/dockerfiles-for-go/02-dockerfile-anatomy.md).
+- `COPY` просто копирует файлы/директории из контекста сборки в образ — предсказуемо, и это рекомендованный способ. `ADD` умеет больше: распаковывать локальные tar-архивы и скачивать по URL — но эта «магия» делает сборку менее очевидной, поэтому по гайдлайнам используют `COPY`, а `ADD` — только когда реально нужна авто-распаковка архива. См. [dockerfiles-for-go/02-dockerfile-anatomy.md](../../10-devops-and-observability/dockerfiles-for-go/02-dockerfile-anatomy.md).
 
 **Чем отличается ENTRYPOINT от CMD?**
 
-- `ENTRYPOINT` задаёт саму команду, которую контейнер выполняет (что это за контейнер), а `CMD` — аргументы по умолчанию к ней (или команду, если ENTRYPOINT не задан). Аргументы `docker run <image> ...` переопределяют `CMD`, но не `ENTRYPOINT`. Типовой паттерн: `ENTRYPOINT ["myapp"]` + `CMD ["--config=/etc/app.yaml"]`. Использовать exec-форму (`["..."]`), а не shell-форму — тогда сигналы (SIGTERM) доходят до процесса напрямую. См. [dockerfiles-for-go/02-dockerfile-anatomy.md](../10-devops-and-observability/dockerfiles-for-go/02-dockerfile-anatomy.md).
+- `ENTRYPOINT` задаёт саму команду, которую контейнер выполняет (что это за контейнер), а `CMD` — аргументы по умолчанию к ней (или команду, если ENTRYPOINT не задан). Аргументы `docker run <image> ...` переопределяют `CMD`, но не `ENTRYPOINT`. Типовой паттерн: `ENTRYPOINT ["myapp"]` + `CMD ["--config=/etc/app.yaml"]`. Использовать exec-форму (`["..."]`), а не shell-форму — тогда сигналы (SIGTERM) доходят до процесса напрямую. См. [dockerfiles-for-go/02-dockerfile-anatomy.md](../../10-devops-and-observability/dockerfiles-for-go/02-dockerfile-anatomy.md).
 
 **Какие типы сетей поддерживает Docker?**
 
@@ -1050,15 +1050,15 @@
 - none — сети нет вообще.
 - overlay — сеть поверх нескольких хостов, для Swarm и кластера.
 - macvlan — контейнер получает свой MAC и IP прямо в физической сети.
-- См. [docker/04-docker-for-go-services.md](../10-devops-and-observability/docker/04-docker-for-go-services.md).
+- См. [docker/04-docker-for-go-services.md](../../10-devops-and-observability/docker/04-docker-for-go-services.md).
 
 **Что такое volume и чем отличается от bind mount?**
 
-- Оба монтируют данные в контейнер, но: volume управляется Docker (лежит в его области `/var/lib/docker/volumes`, создаётся/удаляется командами docker) — переносимо, не зависит от структуры хоста, лучше для продакшн-данных. Bind mount монтирует конкретный путь хоста в контейнер — удобно для разработки (примонтировать исходники и hot-reload), но привязан к ФС хоста. См. [docker/04-docker-for-go-services.md](../10-devops-and-observability/docker/04-docker-for-go-services.md).
+- Оба монтируют данные в контейнер, но: volume управляется Docker (лежит в его области `/var/lib/docker/volumes`, создаётся/удаляется командами docker) — переносимо, не зависит от структуры хоста, лучше для продакшн-данных. Bind mount монтирует конкретный путь хоста в контейнер — удобно для разработки (примонтировать исходники и hot-reload), но привязан к ФС хоста. См. [docker/04-docker-for-go-services.md](../../10-devops-and-observability/docker/04-docker-for-go-services.md).
 
 **Как сделать, чтобы данные не потерялись после удаления контейнера?**
 
-- Хранить их не в writable-слое контейнера (он умирает вместе с контейнером), а в volume (`docker volume create` / `-v data:/var/lib/pg`) или bind mount на хост. Тогда `docker rm` контейнера не трогает данные — новый контейнер подхватит тот же volume. Для БД в контейнере это обязательно. См. [docker/04-docker-for-go-services.md](../10-devops-and-observability/docker/04-docker-for-go-services.md).
+- Хранить их не в writable-слое контейнера (он умирает вместе с контейнером), а в volume (`docker volume create` / `-v data:/var/lib/pg`) или bind mount на хост. Тогда `docker rm` контейнера не трогает данные — новый контейнер подхватит тот же volume. Для БД в контейнере это обязательно. См. [docker/04-docker-for-go-services.md](../../10-devops-and-observability/docker/04-docker-for-go-services.md).
 
 **Как работать с секретами?**
 
@@ -1069,7 +1069,7 @@
   - В Kubernetes — Secrets вместе с external-managers.
   - Для сборки — `RUN --mount=type=secret` в BuildKit: секрет не попадает в слой.
 - Общий принцип — секреты подкладываются в рантайме, а не встраиваются в образ.
-- См. [secrets-management/04-kubernetes-secrets-and-external-managers.md](../11-security/secrets-management/04-kubernetes-secrets-and-external-managers.md).
+- См. [secrets-management/04-kubernetes-secrets-and-external-managers.md](../../11-security/secrets-management/04-kubernetes-secrets-and-external-managers.md).
 
 **Как ограничить использование CPU и памяти контейнером?**
 
@@ -1078,14 +1078,14 @@
 - CPU — `--cpus=1.5` задаёт долю ядер, `--cpu-shares` и `--cpuset-cpus` — вес и привязку к конкретным ядрам.
 - В compose — секция `deploy.resources.limits`.
 - Нюанс для Go — до версии 1.25 рантайм берёт `GOMAXPROCS` от числа ядер хоста, а не от лимита cgroup, поэтому `GOMAXPROCS` и `GOMEMLIMIT` выставляют под лимиты контейнера вручную.
-- См. [docker/04-docker-for-go-services.md](../10-devops-and-observability/docker/04-docker-for-go-services.md).
+- См. [docker/04-docker-for-go-services.md](../../10-devops-and-observability/docker/04-docker-for-go-services.md).
 
 **Что знаешь про docker-compose? Чем отличается от Docker Swarm?**
 
 - docker-compose — описание много-контейнерного приложения в одном YAML (сервисы, сети, тома, зависимости) и запуск на одной машине (`docker compose up`); идеально для локальной разработки и простых стендов.
 - Docker Swarm — встроенный оркестратор кластера: тот же формат, но раскатывает сервисы на много узлов с репликами, service discovery, rolling-update, overlay-сетью и балансировкой.
 - Коротко — compose это один хост и дев, Swarm — кластер и прод (хотя в проде чаще берут Kubernetes).
-- См. [docker-compose/01-docker-compose-anatomy.md](../10-devops-and-observability/docker-compose/01-docker-compose-anatomy.md).
+- См. [docker-compose/01-docker-compose-anatomy.md](../../10-devops-and-observability/docker-compose/01-docker-compose-anatomy.md).
 
 **Как подождать другой сервис при старте (в compose)?**
 
@@ -1094,7 +1094,7 @@
 - Через приложение — ретраи подключения с backoff, чтобы не падать на первой неудаче.
 - Через обёртку — wait-скрипт (`wait-for-it`, `dockerize`).
 - Что надёжнее — ретраи в коде: сеть в распределёнке всё равно может моргнуть.
-- См. [docker-compose/02-docker-compose-for-go-projects.md](../10-devops-and-observability/docker-compose/02-docker-compose-for-go-projects.md).
+- См. [docker-compose/02-docker-compose-for-go-projects.md](../../10-devops-and-observability/docker-compose/02-docker-compose-for-go-projects.md).
 
 **Зачем `docker exec -it <c> bash`?**
 
@@ -1114,11 +1114,11 @@
 - `docker image prune` — dangling-образы без тега; с флагом `-a` — все неиспользуемые.
 - `docker system prune` — всё разом; `-a --volumes` чистит агрессивно, вместе с томами, поэтому может снести и нужные данные.
 - Точечно — `docker rm <container>` и `docker rmi <image>`.
-- См. [docker/04-docker-for-go-services.md](../10-devops-and-observability/docker/04-docker-for-go-services.md).
+- См. [docker/04-docker-for-go-services.md](../../10-devops-and-observability/docker/04-docker-for-go-services.md).
 
 **Как мониторить контейнеры?**
 
-- Быстро — `docker stats` (CPU/RAM/сеть/IO по контейнерам) и `docker logs`/`docker events`. В проде — cAdvisor (метрики контейнеров) + Prometheus + Grafana, экспортеры на уровне оркестратора (kube-state-metrics в k8s), healthcheck’и, централизованные логи (Loki/ELK) и трейсинг (OpenTelemetry). Метрики: использование vs лимиты cgroup, рестарты, OOM-kill. См. [prometheus-and-metrics/01-metric-types-and-design.md](../10-devops-and-observability/prometheus-and-metrics/01-metric-types-and-design.md).
+- Быстро — `docker stats` (CPU/RAM/сеть/IO по контейнерам) и `docker logs`/`docker events`. В проде — cAdvisor (метрики контейнеров) + Prometheus + Grafana, экспортеры на уровне оркестратора (kube-state-metrics в k8s), healthcheck’и, централизованные логи (Loki/ELK) и трейсинг (OpenTelemetry). Метрики: использование vs лимиты cgroup, рестарты, OOM-kill. См. [prometheus-and-metrics/01-metric-types-and-design.md](../../10-devops-and-observability/prometheus-and-metrics/01-metric-types-and-design.md).
 
 ---
 
@@ -1126,7 +1126,7 @@
 
 **Что такое интерфейсы, зачем нужны, чем отличаются от классов?**
 
-- Интерфейс — набор сигнатур методов (контракт поведения) без реализации; даёт полиморфизм и развязку (depend on abstractions). В Go реализация неявная (duck typing — тип соответствует интерфейсу, если имеет методы). В отличие от классов, интерфейс не хранит данные и не задаёт реализацию; в Go нет классов и наследования — есть структуры + интерфейсы + композиция. См. [03-interfaces-method-sets-and-nil.md](../01-go-core/03-interfaces-method-sets-and-nil.md).
+- Интерфейс — набор сигнатур методов (контракт поведения) без реализации; даёт полиморфизм и развязку (depend on abstractions). В Go реализация неявная (duck typing — тип соответствует интерфейсу, если имеет методы). В отличие от классов, интерфейс не хранит данные и не задаёт реализацию; в Go нет классов и наследования — есть структуры + интерфейсы + композиция. См. [03-interfaces-method-sets-and-nil.md](../../01-go-core/03-interfaces-method-sets-and-nil.md).
 
 **Что такое SOLID?**
 
@@ -1137,7 +1137,7 @@
   - Interface Segregation — узкие интерфейсы вместо одного большого.
   - Dependency Inversion — зависеть от абстракций, а не от конкретных реализаций.
 - Что из этого естественно в Go — ISP и DIP: мелкие интерфейсы объявляются на стороне потребителя.
-- См. [patterns/06-solid-in-go.md](../04-architecture-and-patterns/patterns/06-solid-in-go.md).
+- См. [patterns/06-solid-in-go.md](../../04-architecture-and-patterns/patterns/06-solid-in-go.md).
 
 **Какие основные правила при проектировании по DDD?**
 
@@ -1147,7 +1147,7 @@
 - Богатая доменная модель — бизнес-логика внутри модели, а не в сервисах.
 - Строительные блоки — Entities (идентичность важнее значений), Value Objects (иммутабельны, равны по значению), Aggregates (границы консистентности), Domain Services, Repositories (доступ к агрегатам), Domain Events.
 - Направление зависимостей — домен не зависит от инфраструктуры; зависимости направлены внутрь, как в чистой и гексагональной архитектуре.
-- См. [patterns/05-ddd-in-go.md](../04-architecture-and-patterns/patterns/05-ddd-in-go.md).
+- См. [patterns/05-ddd-in-go.md](../../04-architecture-and-patterns/patterns/05-ddd-in-go.md).
 
 **Что такое агрегаты в DDD?**
 
@@ -1157,7 +1157,7 @@
 - Ссылки между агрегатами — по id, а не по прямой ссылке.
 - Репозиторий работает на уровне агрегата: грузит и сохраняет его целиком.
 - Размер — агрегат держат маленьким: большой создаёт контеншн и блокировки.
-- См. [patterns/05-ddd-in-go.md](../04-architecture-and-patterns/patterns/05-ddd-in-go.md).
+- См. [patterns/05-ddd-in-go.md](../../04-architecture-and-patterns/patterns/05-ddd-in-go.md).
 
 **Что такое анемичная модель?**
 
@@ -1165,7 +1165,7 @@
 - Чем плохо — формально объектно, по сути процедурный стиль: модель ничего не гарантирует о своих инвариантах, их легко нарушить извне.
 - Противоположность — богатая модель, где логика и проверки живут рядом с данными (методы агрегата).
 - Нюанс для Go — анемичные DTO на границах (хендлеры, хранение) это норма; антипаттерн — именно когда поведения лишено доменное ядро.
-- См. [patterns/05-ddd-in-go.md](../04-architecture-and-patterns/patterns/05-ddd-in-go.md).
+- См. [patterns/05-ddd-in-go.md](../../04-architecture-and-patterns/patterns/05-ddd-in-go.md).
 
 **Что такое пирамида тестирования?**
 
@@ -1174,19 +1174,19 @@
   - Середина — меньше integration-тестов на связки компонентов.
   - Вершина — совсем мало медленных e2e и UI-тестов.
 - Цель — быстрый фидбэк и стабильность прогона: верх не перегружают дорогими и хрупкими тестами.
-- См. [09-testing-and-quality/01-testing-strategy.md](../09-testing-and-quality/01-testing-strategy.md).
+- См. [09-testing-and-quality/01-testing-strategy.md](../../09-testing-and-quality/01-testing-strategy.md).
 
 **Что такое асинхронное API? Зачем и как реализуется?**
 
-- Клиент не ждёт результат в том же запросе: сервер принимает задачу, отвечает `202 Accepted` с id, обрабатывает в фоне, результат отдаёт через polling, callback/webhook или подписку (SSE/WebSocket). Нужно для долгих операций, развязки и сглаживания нагрузки. Реализуется через очередь/брокер и воркеры. См. [external-request-flows/03-write-request-with-queue-and-async-processing.md](../05-system-design/external-request-flows/03-write-request-with-queue-and-async-processing.md).
+- Клиент не ждёт результат в том же запросе: сервер принимает задачу, отвечает `202 Accepted` с id, обрабатывает в фоне, результат отдаёт через polling, callback/webhook или подписку (SSE/WebSocket). Нужно для долгих операций, развязки и сглаживания нагрузки. Реализуется через очередь/брокер и воркеры. См. [external-request-flows/03-write-request-with-queue-and-async-processing.md](../../05-system-design/external-request-flows/03-write-request-with-queue-and-async-processing.md).
 
 **Что такое идемпотентность запросов?**
 
-- Повторное выполнение запроса даёт тот же результат, что и однократное, без побочных эффектов-дублей. Критично для ретраев и at-least-once доставки. Реализуют через idempotency-key + дедупликацию на сервере; GET/PUT/DELETE идемпотентны по семантике, POST — нет (нужен ключ). См. [reliability-patterns/06-idempotency.md](../05-system-design/reliability-patterns/06-idempotency.md) и [05-integration-patterns/02-idempotency.md](../08-networking-and-api/protocols/05-integration-patterns/02-idempotency.md).
+- Повторное выполнение запроса даёт тот же результат, что и однократное, без побочных эффектов-дублей. Критично для ретраев и at-least-once доставки. Реализуют через idempotency-key + дедупликацию на сервере; GET/PUT/DELETE идемпотентны по семантике, POST — нет (нужен ключ). См. [reliability-patterns/06-idempotency.md](../../05-system-design/reliability-patterns/06-idempotency.md) и [05-integration-patterns/02-idempotency.md](../../08-networking-and-api/protocols/05-integration-patterns/02-idempotency.md).
 
 **В чём разница устойчивой и неустойчивой сортировки?**
 
-- Устойчивая (stable) сохраняет относительный порядок элементов с равными ключами; неустойчивая может его переставить. Важно при многоключевой сортировке (сначала по одному полю, потом по другому). В Go `sort.Stable`/`slices.SortStableFunc` — устойчивые, `sort.Sort`/`slices.Sort` — нет. См. [02-go-stdlib-and-tools/01-sort-and-slices.md](../02-go-stdlib-and-tools/01-sort-and-slices.md).
+- Устойчивая (stable) сохраняет относительный порядок элементов с равными ключами; неустойчивая может его переставить. Важно при многоключевой сортировке (сначала по одному полю, потом по другому). В Go `sort.Stable`/`slices.SortStableFunc` — устойчивые, `sort.Sort`/`slices.Sort` — нет. См. [02-go-stdlib-and-tools/01-sort-and-slices.md](../../02-go-stdlib-and-tools/01-sort-and-slices.md).
 
 **Что такое паттерны GoF?**
 
@@ -1196,7 +1196,7 @@
   - Поведенческие (про взаимодействие) — Strategy, Observer, Command, Iterator, State, Template Method, Chain of Responsibility.
 - В Go многие выглядят иначе или не нужны — интерфейсы и функции как значения заменяют Strategy/Command, каналы — Observer, встраивание — Decorator, Singleton делают через `sync.Once`.
 - Вывод — полезно знать как словарь, но не натягивать ООП-иерархии на Go.
-- См. [patterns/go-code-patterns/README.md](../04-architecture-and-patterns/patterns/go-code-patterns/README.md).
+- См. [patterns/go-code-patterns/README.md](../../04-architecture-and-patterns/patterns/go-code-patterns/README.md).
 
 **Что такое CQRS?**
 
@@ -1204,7 +1204,7 @@
 - Зачем — read и write масштабируются и оптимизируются независимо: нормализованная модель для записи и денормализованные read-модели/проекции для быстрых запросов; часто в связке с event sourcing.
 - Цена — сложность и eventual consistency между write- и read-стороной.
 - Как применять — точечно, в горячих на чтение доменах, а не везде.
-- См. [patterns/02-architecture-patterns.md](../04-architecture-and-patterns/patterns/02-architecture-patterns.md).
+- См. [patterns/02-architecture-patterns.md](../../04-architecture-and-patterns/patterns/02-architecture-patterns.md).
 
 ---
 
@@ -1221,7 +1221,7 @@
 
 **Есть ли линтер, проверяющий выравнивание полей в структурах? Как называется?**
 
-- Да — fieldalignment из `golang.org/x/tools/go/analysis/passes/fieldalignment` (есть и как отдельная утилита `fieldalignment`, и внутри `govet`/golangci-lint). Он находит структуры, где перестановка полей уменьшит размер за счёт устранения padding (выравнивания), и умеет авто-фиксить порядок. Полезно для «горячих» структур, которых много в памяти. См. [memory-internals/01-stack-and-heap.md](../01-go-core/memory-internals/01-stack-and-heap.md).
+- Да — fieldalignment из `golang.org/x/tools/go/analysis/passes/fieldalignment` (есть и как отдельная утилита `fieldalignment`, и внутри `govet`/golangci-lint). Он находит структуры, где перестановка полей уменьшит размер за счёт устранения padding (выравнивания), и умеет авто-фиксить порядок. Полезно для «горячих» структур, которых много в памяти. См. [memory-internals/01-stack-and-heap.md](../../01-go-core/memory-internals/01-stack-and-heap.md).
 
 **Какие ORM для Go знаете? Какие задачи решает ORM и когда оправдан?**
 
@@ -1230,7 +1230,7 @@
 - Когда оправдан — типовой CRUD, быстрый старт, много однообразных моделей.
 - Когда нет — сложные и тяжёлые запросы, жёсткие требования к производительности и плану: ORM генерирует неоптимальный SQL и прячет N+1, тогда лучше `sqlc`/`pgx` с ручным SQL.
 - Настроение в Go-сообществе — чаще предпочитают явный SQL поверх «магии» ORM.
-- См. [go-database-libraries/05-orm-and-query-builder-options.md](../06-databases/go-database-libraries/05-orm-and-query-builder-options.md) и [go-database-libraries/06-choosing-a-library-for-a-go-service.md](../06-databases/go-database-libraries/06-choosing-a-library-for-a-go-service.md).
+- См. [go-database-libraries/05-orm-and-query-builder-options.md](../../06-databases/go-database-libraries/05-orm-and-query-builder-options.md) и [go-database-libraries/06-choosing-a-library-for-a-go-service.md](../../06-databases/go-database-libraries/06-choosing-a-library-for-a-go-service.md).
 
 **Какие инструменты использовали для поиска утечки памяти?**
 
@@ -1239,7 +1239,7 @@
 - goroutine-профиль — найти зависшие горутины, удерживающие память.
 - Непрерывное профилирование (Pyroscope, Parca) — ловит медленный рост в проде.
 - Метод — воспроизвести нагрузку → снять базовый профиль → снять второй спустя время → искать растущую разницу.
-- См. [profiling/03-memory-profiling.md](../01-go-core/profiling/03-memory-profiling.md) и [symptom-driven troubleshooting](../10-devops-and-observability/incident-response-and-investigation/02-symptom-driven-troubleshooting.md).
+- См. [profiling/03-memory-profiling.md](../../01-go-core/profiling/03-memory-profiling.md) и [symptom-driven troubleshooting](../../10-devops-and-observability/incident-response-and-investigation/02-symptom-driven-troubleshooting.md).
 
 **Какие способы мониторинга производительности Go-приложения в проде знаете?**
 
@@ -1248,7 +1248,7 @@
 - Трейсинг — OpenTelemetry для распределённых запросов.
 - Рантайм-трейс — `runtime/trace` для планировщика и латентности.
 - Логи — структурный `slog` плюс сбор (Loki, ELK).
-- См. [profiling/01-pprof-tools-and-workflow.md](../01-go-core/profiling/01-pprof-tools-and-workflow.md), [symptom-driven troubleshooting](../10-devops-and-observability/incident-response-and-investigation/02-symptom-driven-troubleshooting.md) и [prometheus-and-metrics/01-metric-types-and-design.md](../10-devops-and-observability/prometheus-and-metrics/01-metric-types-and-design.md).
+- См. [profiling/01-pprof-tools-and-workflow.md](../../01-go-core/profiling/01-pprof-tools-and-workflow.md), [symptom-driven troubleshooting](../../10-devops-and-observability/incident-response-and-investigation/02-symptom-driven-troubleshooting.md) и [prometheus-and-metrics/01-metric-types-and-design.md](../../10-devops-and-observability/prometheus-and-metrics/01-metric-types-and-design.md).
 
 **Опиши алгоритм действий при инциденте в проде: пришёл на работу — система упала. С чего начать?**
 
@@ -1259,7 +1259,7 @@
   4. Коммуникация. Регулярные апдейты стейкхолдерам/статус-страница, чтобы не дёргали и был единый источник правды.
   5. Подтвердить восстановление. Убедиться по метрикам, что сервис здоров, и какое-то время понаблюдать (не «полегчало», а реально зелено).
   6. Постмортем — blameless. После инцидента: таймлайн, истинная причина (5 whys), конкретные action items, чтобы не повторилось. Разбор процесса, а не поиск виноватого.
-- Главный принцип на собесе: mitigate first, investigate later; rollback — часто самый быстрый путь, если он безопасен для схемы данных и контрактов; постоянная коммуникация; blameless postmortem. См. [incident response workflow](../10-devops-and-observability/incident-response-and-investigation/01-incident-response-workflow.md) и [reliability-patterns/09-postmortem.md](../05-system-design/reliability-patterns/09-postmortem.md).
+- Главный принцип на собесе: mitigate first, investigate later; rollback — часто самый быстрый путь, если он безопасен для схемы данных и контрактов; постоянная коммуникация; blameless postmortem. См. [incident response workflow](../../10-devops-and-observability/incident-response-and-investigation/01-incident-response-workflow.md) и [reliability-patterns/09-postmortem.md](../../05-system-design/reliability-patterns/09-postmortem.md).
 
 ---
 
@@ -1271,7 +1271,7 @@
 - Логи — дискретные события с деталями: отвечают на «что именно произошло» в конкретном случае (стектрейс, параметры).
 - Трейсы — путь одного запроса через все сервисы: отвечают на «где именно» тормозит или падает в распределённой системе.
 - Как складывается вместе — метрики заметить проблему, трейсы локализовать сервис, логи понять причину.
-- См. [tracing-and-opentelemetry/01-opentelemetry-and-tracing-flow.md](../10-devops-and-observability/tracing-and-opentelemetry/01-opentelemetry-and-tracing-flow.md).
+- См. [tracing-and-opentelemetry/01-opentelemetry-and-tracing-flow.md](../../10-devops-and-observability/tracing-and-opentelemetry/01-opentelemetry-and-tracing-flow.md).
 
 **Три типа метрик?**
 
@@ -1279,7 +1279,7 @@
 - Gauge — мгновенное значение, которое может расти и падать: текущая память, число горутин, глубина очереди.
 - Histogram — распределение по бакетам для латентностей и размеров; из него считают перцентили и SLI.
 - Четвёртый тип — Summary: перцентили считает сам клиент, на практике чаще берут Histogram.
-- См. [prometheus-and-metrics/01-metric-types-and-design.md](../10-devops-and-observability/prometheus-and-metrics/01-metric-types-and-design.md).
+- См. [prometheus-and-metrics/01-metric-types-and-design.md](../../10-devops-and-observability/prometheus-and-metrics/01-metric-types-and-design.md).
 
 **Как измерять SLI, SLO и SLA?**
 
@@ -1287,7 +1287,7 @@
 - SLO (Objective) — внутренняя цель по SLI (например, 99.9% за 30 дней); от неё считают error budget — допустимую долю ошибок.
 - SLA (Agreement) — внешнее обязательство перед клиентом с санкциями за нарушение; обычно слабее SLO, чтобы был запас.
 - Как измеряют — по метрикам (histogram/counter), за фиксированное окно.
-- См. [reliability-patterns/08-slo-sli-error-budgets.md](../05-system-design/reliability-patterns/08-slo-sli-error-budgets.md).
+- См. [reliability-patterns/08-slo-sli-error-budgets.md](../../05-system-design/reliability-patterns/08-slo-sli-error-budgets.md).
 
 **Что такое high-cardinality метрик и чем опасно?**
 
@@ -1295,11 +1295,11 @@
 - Опасность — лейблы с большим числом значений (`user_id`, `request_id`, `email`, полный URL с параметрами) порождают взрывной рост числа рядов.
 - Последствия — раздувается память и диск TSDB, тормозят запросы, вплоть до падения Prometheus.
 - Классическая ошибка — положить id-шники в лейблы.
-- См. [prometheus-and-metrics/01-metric-types-and-design.md](../10-devops-and-observability/prometheus-and-metrics/01-metric-types-and-design.md).
+- См. [prometheus-and-metrics/01-metric-types-and-design.md](../../10-devops-and-observability/prometheus-and-metrics/01-metric-types-and-design.md).
 
 **Как уменьшить high-cardinality?**
 
-- Не класть в лейблы неограниченные значения (id, email, raw URL) — только с малым фиксированным набором (метод, статус-код, endpoint-шаблон `/users/:id`, а не `/users/123`). Нормализовать пути, убирать query-параметры, ограничивать enum’ы. Высокодетальное — в логи/трейсы, а не в метрики. При необходимости — агрегировать/дропать лишние лейблы через relabeling. См. [prometheus-and-metrics/01-metric-types-and-design.md](../10-devops-and-observability/prometheus-and-metrics/01-metric-types-and-design.md).
+- Не класть в лейблы неограниченные значения (id, email, raw URL) — только с малым фиксированным набором (метод, статус-код, endpoint-шаблон `/users/:id`, а не `/users/123`). Нормализовать пути, убирать query-параметры, ограничивать enum’ы. Высокодетальное — в логи/трейсы, а не в метрики. При необходимости — агрегировать/дропать лишние лейблы через relabeling. См. [prometheus-and-metrics/01-metric-types-and-design.md](../../10-devops-and-observability/prometheus-and-metrics/01-metric-types-and-design.md).
 
 **Почему TSDB Prometheus хороша для метрик?**
 
@@ -1308,7 +1308,7 @@
 - Модель работы — локальное хранение, pull-модель со scrape, мощный запросный язык PromQL для агрегаций по времени и лейблам.
 - Сравнение — на порядок эффективнее, чем лить метрики в реляционную БД.
 - Минус — не для долгого хранения и глобального масштаба: тогда Thanos, Cortex, Mimir.
-- См. [prometheus-and-metrics/01-metric-types-and-design.md](../10-devops-and-observability/prometheus-and-metrics/01-metric-types-and-design.md).
+- См. [prometheus-and-metrics/01-metric-types-and-design.md](../../10-devops-and-observability/prometheus-and-metrics/01-metric-types-and-design.md).
 
 **Чем отличается 90-й перцентиль от 95-го?**
 
@@ -1316,11 +1316,11 @@
 - p95 — значение, ниже которого 95% (5% медленнее); строже и «видит» более редкие, но более медленные случаи, поэтому всегда выше p90.
 - Зачем перцентили — показывают хвосты латентности, которые прячет среднее: average может быть отличным, а p95/p99 — плохим из-за редких тормозов, бьющих по части пользователей.
 - Следствие — SLO обычно ставят на p95/p99, а не на avg.
-- См. [prometheus-and-metrics/01-metric-types-and-design.md](../10-devops-and-observability/prometheus-and-metrics/01-metric-types-and-design.md).
+- См. [prometheus-and-metrics/01-metric-types-and-design.md](../../10-devops-and-observability/prometheus-and-metrics/01-metric-types-and-design.md).
 
 **Что такое структурированные логи и почему они лучше plain text?**
 
-- Структурированный лог — запись в машиночитаемом формате (обычно JSON) с полями «ключ-значение» (`{"level":"error","trace_id":"...","user_id":42,"msg":"..."}`), а не свободная строка. Лучше тем, что по полям можно фильтровать, искать, агрегировать и строить дашборды в Loki/ELK без хрупкого парсинга регулярками; поля стабильны, легко коррелировать с трейсами. В Go — стандартный `log/slog`. См. [logging-and-log-shipping/02-logging-in-go-and-why-wrap-logger.md](../10-devops-and-observability/logging-and-log-shipping/02-logging-in-go-and-why-wrap-logger.md).
+- Структурированный лог — запись в машиночитаемом формате (обычно JSON) с полями «ключ-значение» (`{"level":"error","trace_id":"...","user_id":42,"msg":"..."}`), а не свободная строка. Лучше тем, что по полям можно фильтровать, искать, агрегировать и строить дашборды в Loki/ELK без хрупкого парсинга регулярками; поля стабильны, легко коррелировать с трейсами. В Go — стандартный `log/slog`. См. [logging-and-log-shipping/02-logging-in-go-and-why-wrap-logger.md](../../10-devops-and-observability/logging-and-log-shipping/02-logging-in-go-and-why-wrap-logger.md).
 
 **Какие обязательные поля стоит включать в лог?**
 
@@ -1330,7 +1330,7 @@
 - Для ошибок — поле `error` со стектрейсом.
 - Самое важное — `trace_id`: без него не собрать логи одного запроса из разных сервисов.
 - Чего не должно быть в логах — секреты и персональные данные.
-- См. [logging-and-log-shipping/02-logging-in-go-and-why-wrap-logger.md](../10-devops-and-observability/logging-and-log-shipping/02-logging-in-go-and-why-wrap-logger.md).
+- См. [logging-and-log-shipping/02-logging-in-go-and-why-wrap-logger.md](../../10-devops-and-observability/logging-and-log-shipping/02-logging-in-go-and-why-wrap-logger.md).
 
 **Уровни логирования?**
 
@@ -1344,21 +1344,21 @@
 
 **Какие инструменты для логирования знаешь?**
 
-- Стек ELK/Elastic (Elasticsearch + Logstash + Kibana) или EFK (Fluentd/Fluent Bit), Grafana Loki (легче ELK, лейблы как в Prometheus), Graylog, облачные — Datadog, Splunk, AWS CloudWatch, GCP Cloud Logging. Агенты сбора — Fluent Bit / Promtail / Vector. См. [logging-and-log-shipping/03-log-platforms-comparison-table.md](../10-devops-and-observability/logging-and-log-shipping/03-log-platforms-comparison-table.md).
+- Стек ELK/Elastic (Elasticsearch + Logstash + Kibana) или EFK (Fluentd/Fluent Bit), Grafana Loki (легче ELK, лейблы как в Prometheus), Graylog, облачные — Datadog, Splunk, AWS CloudWatch, GCP Cloud Logging. Агенты сбора — Fluent Bit / Promtail / Vector. См. [logging-and-log-shipping/03-log-platforms-comparison-table.md](../../10-devops-and-observability/logging-and-log-shipping/03-log-platforms-comparison-table.md).
 
 **Что такое distributed tracing и зачем он нужен?**
 
 - Что это — сквозная трассировка одного запроса через все сервисы микросистемы.
 - Как работает — каждому запросу присваивается `trace_id`, который пробрасывается по вызовам; видно, через какие сервисы он прошёл и сколько занял на каждом шаге.
 - Зачем нужен — в микросервисах метрики и логи одного сервиса не показывают, где именно в цепочке из 10 сервисов тормоз или ошибка; трейс это визуализирует.
-- См. [tracing-and-opentelemetry/01-opentelemetry-and-tracing-flow.md](../10-devops-and-observability/tracing-and-opentelemetry/01-opentelemetry-and-tracing-flow.md).
+- См. [tracing-and-opentelemetry/01-opentelemetry-and-tracing-flow.md](../../10-devops-and-observability/tracing-and-opentelemetry/01-opentelemetry-and-tracing-flow.md).
 
 **Что такое span и trace?**
 
 - Trace — весь путь запроса через систему, дерево операций с общим `trace_id`.
 - Span — одна операция внутри трейса: HTTP-хендлер, запрос в БД, вызов другого сервиса. У него есть имя, время начала и длительность, `span_id`, ссылка на родителя и атрибуты с событиями.
 - Как связаны — trace это дерево связанных span’ов, а их вложенность показывает, что внутри чего вызывалось и сколько заняло.
-- См. [tracing-and-opentelemetry/01-opentelemetry-and-tracing-flow.md](../10-devops-and-observability/tracing-and-opentelemetry/01-opentelemetry-and-tracing-flow.md).
+- См. [tracing-and-opentelemetry/01-opentelemetry-and-tracing-flow.md](../../10-devops-and-observability/tracing-and-opentelemetry/01-opentelemetry-and-tracing-flow.md).
 
 **Как добавить OpenTelemetry в микросервис?**
 
@@ -1366,7 +1366,7 @@
 - Включить propagation — W3C TraceContext, то есть проброс `traceparent` между сервисами.
 - Навесить инструментацию — готовые middleware/interceptor для HTTP (`otelhttp`), gRPC (`otelgrpc`), БД, чтобы span’ы создавались автоматически; плюс ручные span’ы вокруг важной бизнес-логики.
 - Прокинуть `context.Context` по всей цепочке — в нём живёт span.
-- См. [tracing-and-opentelemetry/02-opentelemetry-in-go-services.md](../10-devops-and-observability/tracing-and-opentelemetry/02-opentelemetry-in-go-services.md).
+- См. [tracing-and-opentelemetry/02-opentelemetry-in-go-services.md](../../10-devops-and-observability/tracing-and-opentelemetry/02-opentelemetry-in-go-services.md).
 
 **Как подключить OTLP exporter и куда он может слать данные?**
 
@@ -1374,7 +1374,7 @@
 - Как подключить — задать endpoint коллектора (`OTEL_EXPORTER_OTLP_ENDPOINT`); обычно шлют в OpenTelemetry Collector.
 - Куда Collector отправляет дальше — Jaeger и Tempo (трейсы), Prometheus/Mimir (метрики), Loki (логи), облачные Datadog, Honeycomb, AWS X-Ray.
 - Зачем прослойка Collector — батчинг, sampling, ретраи, переписывание атрибутов.
-- См. [tracing-and-opentelemetry/02-opentelemetry-in-go-services.md](../10-devops-and-observability/tracing-and-opentelemetry/02-opentelemetry-in-go-services.md).
+- См. [tracing-and-opentelemetry/02-opentelemetry-in-go-services.md](../../10-devops-and-observability/tracing-and-opentelemetry/02-opentelemetry-in-go-services.md).
 
 ---
 
@@ -1396,7 +1396,7 @@
 - Амортизированная сложность — усреднённая стоимость операции в длинной серии. `append` в слайс амортизированно O(1), хотя отдельная вставка с реаллокацией стоит O(n).
 - Практический ориентир — при примерно 10⁸ простых операций в секунду O(n log n) тянет миллионы элементов, O(n²) — уже только десятки тысяч, а O(2ⁿ) неприменим начиная примерно с n = 30.
 - Типичная ошибка на собесе — забыть про скрытую сложность внутри вызова: конкатенация строк в цикле, `copy` слайса или поиск подстроки внутри внешнего цикла легко превращают O(n) в O(n²).
-- См. [16-algorithms-and-data-structures/01-time-and-space-complexity.md](../16-algorithms-and-data-structures/01-time-and-space-complexity.md).
+- См. [16-algorithms-and-data-structures/01-time-and-space-complexity.md](../../16-algorithms-and-data-structures/01-time-and-space-complexity.md).
 
 **Назовите алгоритмы и операции под каждый класс сложности.**
 
@@ -1410,7 +1410,7 @@
 - O(2ⁿ), экспоненциальная — перебор всех подмножеств, наивная рекурсия для чисел Фибоначчи без мемоизации, динамика Хелда — Карпа для коммивояжёра.
 - O(n!), факториальная — перебор всех перестановок, полный брутфорс задачи коммивояжёра.
 - Отдельный случай — графы: их сложность выражают через число вершин V и рёбер E, а не через одно `n`. BFS и DFS дают O(V + E), Дейкстра на бинарной куче — O(E log V).
-- См. [16-algorithms-and-data-structures/01-time-and-space-complexity.md](../16-algorithms-and-data-structures/01-time-and-space-complexity.md) и [16-algorithms-and-data-structures/06-sorting-and-heap.md](../16-algorithms-and-data-structures/06-sorting-and-heap.md).
+- См. [16-algorithms-and-data-structures/01-time-and-space-complexity.md](../../16-algorithms-and-data-structures/01-time-and-space-complexity.md) и [16-algorithms-and-data-structures/06-sorting-and-heap.md](../../16-algorithms-and-data-structures/06-sorting-and-heap.md).
 
 **Что такое хеш-таблицы, назначение и ограничения?**
 
@@ -1421,7 +1421,7 @@
   - Деградация при плохой хеш-функции и массовых коллизиях.
   - Расходы на рехеш при росте таблицы.
   - Нестабильная латентность — отдельная операция может попасть на рост.
-- См. [map-internals](../01-go-core/map-internals/README.md) и [16-algorithms-and-data-structures/01-time-and-space-complexity.md](../16-algorithms-and-data-structures/01-time-and-space-complexity.md).
+- См. [map-internals](../../01-go-core/map-internals/README.md) и [16-algorithms-and-data-structures/01-time-and-space-complexity.md](../../16-algorithms-and-data-structures/01-time-and-space-complexity.md).
 
 **Что такое динамический массив, назначение и ограничения?**
 
@@ -1431,8 +1431,8 @@
   - Вставка и удаление в середине — O(n) из-за сдвига элементов.
   - При росте — реаллокация и копирование всего содержимого.
   - Перерасход памяти из-за запаса `cap` сверх фактической длины.
-- См. [04-slices.md](../01-go-core/04-slices.md) и [16-algorithms-and-data-structures/01-time-and-space-complexity.md](../16-algorithms-and-data-structures/01-time-and-space-complexity.md).
+- См. [04-slices.md](../../01-go-core/04-slices.md) и [16-algorithms-and-data-structures/01-time-and-space-complexity.md](../../16-algorithms-and-data-structures/01-time-and-space-complexity.md).
 
 **Что такое куча (heap) и где применяется?**
 
-- Бинарная куча — дерево с heap-свойством (родитель ≤/≥ детей), даёт минимум/максимум за O(1) и вставку/извлечение за O(log n). Применяется в приоритетных очередях, heapsort, поиске top-K, алгоритмах на графах (Дейкстра). В Go — `container/heap`. (Не путать с heap как областью памяти для аллокаций.) См. [16-algorithms-and-data-structures/06-sorting-and-heap.md](../16-algorithms-and-data-structures/06-sorting-and-heap.md).
+- Бинарная куча — дерево с heap-свойством (родитель ≤/≥ детей), даёт минимум/максимум за O(1) и вставку/извлечение за O(log n). Применяется в приоритетных очередях, heapsort, поиске top-K, алгоритмах на графах (Дейкстра). В Go — `container/heap`. (Не путать с heap как областью памяти для аллокаций.) См. [16-algorithms-and-data-structures/06-sorting-and-heap.md](../../16-algorithms-and-data-structures/06-sorting-and-heap.md).

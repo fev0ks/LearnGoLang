@@ -25,7 +25,7 @@
 
 - **Code review** обязательный, маленькие PR, чек-лист; защита веток (мерж только через зелёный pipeline).
 - **Definition of Done** (тесты, доки, метрики), коддинг-стандарты, trunk-based / GitFlow.
-- **Тестовая пирамида** и TDD; pair/mob programming на сложных участках. См. [01-testing-strategy.md](../09-testing-and-quality/01-testing-strategy.md).
+- **Тестовая пирамида** и TDD; pair/mob programming на сложных участках. См. [01-testing-strategy.md](../../09-testing-and-quality/01-testing-strategy.md).
 - **Постмортемы без обвинений** — учимся на инцидентах.
 - Как TL подчеркнуть: качество — это процесс и культура, инструменты лишь автоматизируют рутину.
 
@@ -47,7 +47,7 @@
 - **Eventual consistency** — явно решить, где допустимо отставание, а где нужна строгая консистентность.
 - **Stale cache** — стратегии инвалидации: cache-aside + TTL, write-through/write-behind, event-driven invalidation.
 - **Dual-write problem** — атомарно записать в БД и опубликовать событие нельзя напрямую; решение — Transactional Outbox + CDC (Debezium) или event sourcing.
-- **Идемпотентность консьюмеров** — события приходят дважды (at-least-once); нужен dedup по event id. См. [06-idempotency.md](../05-system-design/reliability-patterns/06-idempotency.md).
+- **Идемпотентность консьюмеров** — события приходят дважды (at-least-once); нужен dedup по event id. См. [06-idempotency.md](../../05-system-design/reliability-patterns/06-idempotency.md).
 - **Порядок событий** — гарантирован только внутри партиции (Kafka); ключ партиционирования по entity id.
 - **Saga / компенсации** вместо распределённых транзакций (2PC); read-your-writes для собственных данных пользователя.
 - Главная мысль: выбрать уровень консистентности под каждый сценарий, а не «строгую везде».
@@ -56,15 +56,15 @@
 
 - **Коммуникация:** API Gateway, BFF, Service Discovery, sync (REST/gRPC) vs async (события/брокер).
 - **Данные:** Database per service, Saga (хореография или оркестрация), CQRS, Event Sourcing, Transactional Outbox и CDC.
-- **Надёжность:** Circuit Breaker, Retry + backoff + jitter, Bulkhead, Timeout, Rate limiting, Idempotency. См. [reliability-patterns](../05-system-design/reliability-patterns/).
+- **Надёжность:** Circuit Breaker, Retry + backoff + jitter, Bulkhead, Timeout, Rate limiting, Idempotency. См. [reliability-patterns](../../05-system-design/reliability-patterns/).
 - **Эксплуатация/observability:** distributed tracing (correlation id, OpenTelemetry), Sidecar и Service Mesh, Strangler Fig для миграции из монолита.
 - Принципы декомпозиции — по bounded context (DDD), а не по техническим слоям.
 
 **Синхронный вызов, вторая сторона не отвечает, но данные важны — как быть?**
 
-- **Защита вызова:** обязательный timeout (`context.WithTimeout`), retry с backoff и jitter только для идемпотентных операций, circuit breaker, чтобы не добивать мёртвую зависимость. См. [01-timeouts-and-deadlines.md](../05-system-design/reliability-patterns/01-timeouts-and-deadlines.md).
-- **Чтобы не потерять важные данные (суть вопроса):** снять зависимость от живости второй стороны — положить запрос в очередь или Transactional Outbox и доставить, когда она оживёт. Sync RPC превращается в надёжную доставку. См. [03-write-request-with-queue-and-async-processing.md](../05-system-design/external-request-flows/03-write-request-with-queue-and-async-processing.md).
-- **Persist + retry позже** фоновым воркером; at-least-once плюс идемпотентность на приёмнике; Dead Letter Queue для недоставленного вместо потери. См. [06-idempotency.md](../05-system-design/reliability-patterns/06-idempotency.md).
+- **Защита вызова:** обязательный timeout (`context.WithTimeout`), retry с backoff и jitter только для идемпотентных операций, circuit breaker, чтобы не добивать мёртвую зависимость. См. [01-timeouts-and-deadlines.md](../../05-system-design/reliability-patterns/01-timeouts-and-deadlines.md).
+- **Чтобы не потерять важные данные (суть вопроса):** снять зависимость от живости второй стороны — положить запрос в очередь или Transactional Outbox и доставить, когда она оживёт. Sync RPC превращается в надёжную доставку. См. [03-write-request-with-queue-and-async-processing.md](../../05-system-design/external-request-flows/03-write-request-with-queue-and-async-processing.md).
+- **Persist + retry позже** фоновым воркером; at-least-once плюс идемпотентность на приёмнике; Dead Letter Queue для недоставленного вместо потери. См. [06-idempotency.md](../../05-system-design/reliability-patterns/06-idempotency.md).
 - **Деградация:** отдать кэш/частичный ответ или `202 Accepted` вместо ошибки.
 - Ключевая мысль: если данные критичны — запрос становится персистентным сообщением с гарантированной доставкой и идемпотентным приёмом, а не блокирующим RPC.
 
@@ -90,7 +90,7 @@
 - **Integration / service (~20%)** — связка компонентов: код + БД/брокер, два сервиса; в Go удобно через testcontainers.
 - **E2E / UI (~10%)** — сквозной сценарий через всю систему: медленные, хрупкие (flaky), только критичные user-journeys.
 - **Зачем это форма пирамиды** — скорость и стабильность фидбэка. Антипаттерны: ice cream cone (перевёрнутая пирамида — много e2e, мало unit) и hourglass (дыра в интеграционных, где живёт большинство багов).
-- Для микросервисов уместно упомянуть «testing trophy» — упор на integration. См. [01-testing-strategy.md](../09-testing-and-quality/01-testing-strategy.md).
+- Для микросервисов уместно упомянуть «testing trophy» — упор на integration. См. [01-testing-strategy.md](../../09-testing-and-quality/01-testing-strategy.md).
 
 **Greenfield-проект: как подойти к CI/CD pipeline?**
 

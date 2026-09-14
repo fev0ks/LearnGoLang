@@ -45,7 +45,7 @@
 - Уточнение к формулировке «`make` создаёт объект со значениями по умолчанию» — `make` строит внутреннюю структуру рантайма (`hmap`, `hchan`, backing-массив). Элементы слайса при этом действительно нулевые, а map создаётся пустой, без каких-либо ключей.
 - Чем `new` отличается от `make` — `new(map[string]int)` вернёт указатель на nil-map, то есть неработающий на запись объект. `new` полезен для указателя на примитив (`new(int)`), но для структур обычно пишут `&T{}`.
 - Где окажется память — решает не программист, а escape analysis компилятора; `new` не означает «куча».
-- См. [01-primitive-types-and-zero-values.md](../01-go-core/01-primitive-types-and-zero-values.md).
+- См. [01-primitive-types-and-zero-values.md](../../01-go-core/01-primitive-types-and-zero-values.md).
 
 **Стек и куча. Как компилятор решает, куда положить объект?**
 
@@ -61,7 +61,7 @@
   - слишком крупный объект или размер, неизвестный на этапе компиляции (`make([]byte, n)` с переменной `n`).
 - Уточнение к формулировке «указатели и структуры под ними уходят в кучу» — само по себе взятие адреса escape не вызывает: `p := &local; *p = 5` спокойно остаётся в стеке, если `p` не покидает функцию.
 - Как проверить — `go build -gcflags='-m -m' ./...` печатает решения анализатора, а `go test -bench . -benchmem` показывает число аллокаций на операцию.
-- См. [memory-internals/01-stack-and-heap.md](../01-go-core/memory-internals/01-stack-and-heap.md) и [memory-internals/03-escape-analysis.md](../01-go-core/memory-internals/03-escape-analysis.md).
+- См. [memory-internals/01-stack-and-heap.md](../../01-go-core/memory-internals/01-stack-and-heap.md) и [memory-internals/03-escape-analysis.md](../../01-go-core/memory-internals/03-escape-analysis.md).
 
 **Как реализовать ООП-подход в Go? Есть ли наследование?**
 
@@ -89,7 +89,7 @@ func main() {
 - Как получить нужное поведение — вынести изменяемую часть в интерфейс и передать её явно, то есть заменить «является» на «умеет».
 - Чего в языке нет вовсе — классов, конструкторов как языковой конструкции (их роль играют функции `NewX`), перегрузки методов, обобщённого `super`.
 - Итоговая формулировка — Go объектно-ориентирован без иерархии типов: поведение собирается композицией, а абстракция описывается интерфейсом на стороне потребителя.
-- См. [03-interfaces-method-sets-and-nil.md](../01-go-core/03-interfaces-method-sets-and-nil.md) и [go-code-patterns/01-dependencies-and-composition.md](../04-architecture-and-patterns/patterns/go-code-patterns/01-dependencies-and-composition.md).
+- См. [03-interfaces-method-sets-and-nil.md](../../01-go-core/03-interfaces-method-sets-and-nil.md) и [go-code-patterns/01-dependencies-and-composition.md](../../04-architecture-and-patterns/patterns/go-code-patterns/01-dependencies-and-composition.md).
 
 ---
 
@@ -111,7 +111,7 @@ fmt.Println(err == nil) // false: тип есть, значение nil
 - `reflect` — крайняя мера: динамическая работа с типами для сериализации, ORM и валидации. Цена — аллокации, потеря проверок компилятора и заметно более медленный код.
 - Правило проектирования — интерфейс объявляется там, где используется, а не рядом с реализацией. Маленький интерфейс на один-два метода лучше, чем «интерфейс на весь сервис».
 - Где интерфейс лишний — если реализация одна и подменять её не нужно, интерфейс добавляет только косвенность и аллокации при упаковке.
-- См. [03-interfaces-method-sets-and-nil.md](../01-go-core/03-interfaces-method-sets-and-nil.md).
+- См. [03-interfaces-method-sets-and-nil.md](../../01-go-core/03-interfaces-method-sets-and-nil.md).
 
 **Массивы, слайсы, строки. Внутреннее устройство. Как передаются?**
 
@@ -135,7 +135,7 @@ s := make([]int, 3, 5)
 - Строка — заголовок `{ptr, len}` (16 байт), содержимое неизменяемо. `len(s)` возвращает байты, а не символы; `range` по строке идёт по рунам UTF-8.
 - Конвертации — `[]byte(s)` и `string(b)` копируют данные, потому что иначе неизменяемость строки нарушилась бы. Компилятор оптимизирует лишь узкие случаи: сравнение, `range`, поиск ключа в map.
 - Как строить строку без лишних копий — `strings.Builder` вместо конкатенации в цикле: конкатенация каждый раз создаёт новую строку и даёт квадратичную работу.
-- См. [04-slices.md](../01-go-core/04-slices.md) и [07-strings.md](../01-go-core/07-strings.md).
+- См. [04-slices.md](../../01-go-core/04-slices.md) и [07-strings.md](../../01-go-core/07-strings.md).
 
 ---
 
@@ -183,7 +183,7 @@ default:
 - Как проверить, что канал закрыт — `v, ok := <-ch`: `ok == false` означает «канал закрыт и пуст». Отдельного способа спросить «закрыт ли канал» без чтения нет, и это осознанное решение: ответ устарел бы сразу после получения.
 - Что вернёт `len` направленного канала (`chan<- T`, `<-chan T`) — то же, что и у обычного: число элементов, лежащих в буфере прямо сейчас; `cap` — размер буфера. У небуферизованного канала оба значения всегда 0.
 - Почему на `len(ch)` нельзя строить логику — значение неактуально уже в следующей строке. Для метрик и логов годится, для принятия решений — нет.
-- См. [concurrency-and-performance/02-goroutines-and-channels.md](../01-go-core/concurrency-and-performance/02-goroutines-and-channels.md).
+- См. [concurrency-and-performance/02-goroutines-and-channels.md](../../01-go-core/concurrency-and-performance/02-goroutines-and-channels.md).
 
 **Дженерики. Что это и как устроены в Go?**
 
@@ -205,7 +205,7 @@ func MapSlice[T, R any](in []T, f func(T) R) []R {
 - Чего дженерики не умеют — методов с собственными типовыми параметрами, специализации тела под конкретный тип, любой формы ковариантности (`[]Dog` не подходит под `[]Animal`).
 - Как жили раньше — `interface{}` с приведением типа в рантайме, кодогенерация через `go:generate`, и просто копирование функции под каждый тип.
 - Когда применять — контейнеры и алгоритмы над данными (`slices`, `maps`, пулы, кэши). Когда не применять — для описания поведения: там по-прежнему уместнее интерфейс.
-- См. [06-generics.md](../01-go-core/06-generics.md).
+- См. [06-generics.md](../../01-go-core/06-generics.md).
 
 ---
 
@@ -223,7 +223,7 @@ func MapSlice[T, R any](in []T, f func(T) R) []R {
   - для I/O-bound тысячи горутин нормальны, потому что почти все они спят на сети и P не занимают.
 - `GOMAXPROCS` по умолчанию — число доступных ядер; с Go 1.25 на Linux учитывается ещё и ограничение процессорного времени в cgroup, поэтому в контейнере значение больше не завышается.
 - Почему число горутин всё равно ограничивают — не ради планировщика, а ради внешних ресурсов: соединений к БД, лимитов API, памяти под буферы. Отсюда worker pool и `errgroup.SetLimit`.
-- См. [runtime-scheduler/01-scheduler-and-preemption.md](../01-go-core/runtime-scheduler/01-scheduler-and-preemption.md).
+- См. [runtime-scheduler/01-scheduler-and-preemption.md](../../01-go-core/runtime-scheduler/01-scheduler-and-preemption.md).
 
 **Что даёт пакет `runtime`?**
 
@@ -236,7 +236,7 @@ func MapSlice[T, R any](in []T, f func(T) R) []R {
 - Трассировка — брать не внутренние `runtime.StartTrace`/`StopTrace`, а публичный пакет `runtime/trace`: `trace.Start(w)` и `trace.Stop()`, либо `/debug/pprof/trace?seconds=5` у `net/http/pprof`. Разбор — `go tool trace`.
 - Что видно в трассировке — работа планировщика, паузы GC, блокировки на синхронизации, задержки сети: то, чего не показывает CPU-профиль.
 - Документация — [pkg.go.dev/runtime](https://pkg.go.dev/runtime).
-- См. [profiling/05-execution-tracer.md](../01-go-core/profiling/05-execution-tracer.md).
+- См. [profiling/05-execution-tracer.md](../../01-go-core/profiling/05-execution-tracer.md).
 
 **Как горутины общаются между собой?**
 
@@ -245,7 +245,7 @@ func MapSlice[T, R any](in []T, f func(T) R) []R {
 - Как выбирать — канал уместен для передачи потока данных и смены владельца, мьютекс — для защиты состояния, живущего на месте.
 - `context.Context` — не канал общения, а канал управления: отмена, дедлайн и небольшие значения уровня запроса.
 - Что не работает — просто написать в общую переменную без синхронизации: без happens-before другая горутина может вообще никогда не увидеть новое значение, и это не теория, а результат оптимизаций компилятора и кэшей процессора.
-- См. [concurrency-and-performance/01-memory-model.md](../01-go-core/concurrency-and-performance/01-memory-model.md).
+- См. [concurrency-and-performance/01-memory-model.md](../../01-go-core/concurrency-and-performance/01-memory-model.md).
 
 **Как контролировать выполнение горутин: WaitGroup и errgroup?**
 
@@ -259,7 +259,7 @@ func MapSlice[T, R any](in []T, f func(T) R) []R {
 - `errgroup.WithContext(ctx)` — при первой ошибке отменяет производный контекст, и остальные горутины сворачиваются сами, если этот контекст проверяют.
 - `g.SetLimit(n)` — ограничение числа одновременно работающих горутин, готовый worker pool без ручного семафора.
 - Что WaitGroup не делает — не отменяет работу. Ожидание и отмена это разные механизмы: `WaitGroup` ждёт, `context` останавливает.
-- См. [concurrency-and-performance/03-sync-primitives.md](../01-go-core/concurrency-and-performance/03-sync-primitives.md).
+- См. [concurrency-and-performance/03-sync-primitives.md](../../01-go-core/concurrency-and-performance/03-sync-primitives.md).
 
 **Context. Какие бывают и зачем нужны?**
 
@@ -281,7 +281,7 @@ func MapSlice[T, R any](in []T, f func(T) R) []R {
   - `defer cancel()` обязателен даже при таймауте, иначе таймер и запись в родителе живут до срабатывания;
   - в `WithValue` кладут только сквозные данные запроса — идентификатор трассировки, пользователя, локаль; передавать так бизнес-аргументы значит прятать зависимости от компилятора.
 - Что context не делает — не убивает горутину. Отмена это лишь закрытый канал, и код обязан сам проверять `ctx.Done()` между шагами.
-- См. [concurrency-and-performance/04-context-patterns.md](../01-go-core/concurrency-and-performance/04-context-patterns.md).
+- См. [concurrency-and-performance/04-context-patterns.md](../../01-go-core/concurrency-and-performance/04-context-patterns.md).
 
 **Утечки горутин. Как их избежать?**
 
@@ -320,7 +320,7 @@ func fixed(ctx context.Context) <-chan int {
   - для ответа «выстрелил и забыл» берут буфер на один элемент.
 - Как обнаружить — рост `runtime.NumGoroutine()` на графике, профиль `/debug/pprof/goroutine?debug=2` со стеками всех горутин, `go.uber.org/goleak` в тестах.
 - Почему это не мелочь — утечка проявляется не сразу, а как медленный рост памяти и деградация планировщика через часы работы.
-- См. [concurrency-and-performance/02-goroutines-and-channels.md](../01-go-core/concurrency-and-performance/02-goroutines-and-channels.md).
+- См. [concurrency-and-performance/02-goroutines-and-channels.md](../../01-go-core/concurrency-and-performance/02-goroutines-and-channels.md).
 
 ---
 
@@ -348,7 +348,7 @@ func fixed(ctx context.Context) <-chan int {
   - `GOMEMLIMIT` (Go 1.19) — мягкий предел всей памяти рантайма, в контейнере ставят около 90% лимита cgroup, чтобы сборщик успевал раньше OOM killer.
 - Свежее состояние — Green Tea GC, экспериментальный в Go 1.25 и включённый по умолчанию в Go 1.26: пометка идёт крупными блоками памяти ради локальности обращений, что снижает накладные расходы на нагрузках с большой кучей.
 - Как посмотреть своими глазами — `GODEBUG=gctrace=1` печатает по строке на цикл: доли процессора, размеры кучи и длительности пауз.
-- См. [memory-internals/04-garbage-collector.md](../01-go-core/memory-internals/04-garbage-collector.md).
+- См. [memory-internals/04-garbage-collector.md](../../01-go-core/memory-internals/04-garbage-collector.md).
 
 **Аллокации и sync.Pool. Что не освобождает память?**
 
@@ -381,7 +381,7 @@ func handle(w io.Writer, data []byte) {
   - обрезать переросшие буферы перед возвратом, иначе пул закрепит пиковый размер;
   - подтверждать выигрыш бенчмарком `-benchmem`: на дешёвых объектах пул часто медленнее прямой аллокации.
 - Порядок оптимизации — сначала убрать лишнюю работу и предвыделить ёмкость (`make([]T, 0, n)`), и только потом браться за пул.
-- См. [memory-internals/02-allocator.md](../01-go-core/memory-internals/02-allocator.md).
+- См. [memory-internals/02-allocator.md](../../01-go-core/memory-internals/02-allocator.md).
 
 **Data race и race condition. Чем отличаются и как бороться?**
 
@@ -398,7 +398,7 @@ func handle(w io.Writer, data []byte) {
 - Что такое мьютекс в Go — не обёртка над мьютексом ОС: быстрый путь это атомарный CAS в пользовательском пространстве, при конкуренции горутина немного крутится и затем паркуется рантаймом. Есть режим голодания: если горутина ждёт больше 1 мс, мьютекс переходит в честную очередь, чтобы никто не ждал бесконечно.
 - Мьютексы в ОС — тот же принцип, но с futex: без конкуренции всё решает атомарная операция в userspace, в ядро вызов уходит только когда действительно надо усыпить поток. Защищается при этом не «область памяти» аппаратно, а соблюдение протокола всеми участниками.
 - Когда RWMutex не помогает — на коротких критических секциях и большом числе ядер `RLock` тоже пишет в общий счётчик, и обычный `Mutex` оказывается быстрее. Для действительно read-mostly данных лучше атомарная замена указателя на неизменяемую копию или `sync.Map`.
-- См. [concurrency-and-performance/03-sync-primitives.md](../01-go-core/concurrency-and-performance/03-sync-primitives.md) и [11-race-fuzz-and-benchmarks.md](../09-testing-and-quality/11-race-fuzz-and-benchmarks.md).
+- См. [concurrency-and-performance/03-sync-primitives.md](../../01-go-core/concurrency-and-performance/03-sync-primitives.md) и [11-race-fuzz-and-benchmarks.md](../../09-testing-and-quality/11-race-fuzz-and-benchmarks.md).
 
 ---
 
@@ -428,7 +428,7 @@ func handle(w io.Writer, data []byte) {
   - вместо ручных снимков в проде удобнее непрерывное профилирование (Pyroscope, облачные профайлеры): оно даёт историю и позволяет сравнить «до релиза» и «после»;
   - `/debug/pprof` не должен смотреть в интернет: это и раскрытие внутренностей, и способ нагрузить сервис запросом длинного профиля.
 - С чего начинать разбор — с метрик, а не с профиля: они показывают, во что упёрлись, а профиль отвечает, где именно.
-- См. [profiling/01-pprof-tools-and-workflow.md](../01-go-core/profiling/01-pprof-tools-and-workflow.md).
+- См. [profiling/01-pprof-tools-and-workflow.md](../../01-go-core/profiling/01-pprof-tools-and-workflow.md).
 
 ---
 
@@ -445,7 +445,7 @@ func handle(w io.Writer, data []byte) {
 - DRY — дублируется знание, а не текст. Две одинаковые строки в разных доменах это совпадение; объединение их в общую абстракцию создаёт связанность там, где её не было.
 - YAGNI — не строить обобщение под гипотетическое будущее требование. Интерфейс с одной реализацией «на будущее» это чистая цена без выгоды.
 - Как это звучит в ответе — принципы не самоцель: они описывают, где проходят границы модулей, чтобы изменение требования затрагивало один пакет, а не пять.
-- См. [patterns/06-solid-in-go.md](../04-architecture-and-patterns/patterns/06-solid-in-go.md) и [patterns/10-dry-kiss-yagni.md](../04-architecture-and-patterns/patterns/10-dry-kiss-yagni.md).
+- См. [patterns/06-solid-in-go.md](../../04-architecture-and-patterns/patterns/06-solid-in-go.md) и [patterns/10-dry-kiss-yagni.md](../../04-architecture-and-patterns/patterns/10-dry-kiss-yagni.md).
 
 **Инверсия зависимостей и Dependency Injection — в чём разница?**
 
@@ -454,7 +454,7 @@ func handle(w io.Writer, data []byte) {
 - Почему их путают — DI это самый частый способ выполнить DIP, но не единственный, и сам по себе DI ещё не означает инверсии: можно внедрять конкретный тип и остаться связанным.
 - Что даёт DI на практике — подмена реализации в тестах, единая точка сборки приложения, явный граф зависимостей вместо скрытых глобальных переменных.
 - Как это делают в Go — руками в `main` или `cmd/app`: там создаются пул к базе, клиенты, репозитории, сервисы и передаются дальше конструкторами. Контейнеры (`wire` с кодогенерацией, `fx` и `dig` через reflect) нужны, когда граф действительно большой.
-- См. [go-code-patterns/01-dependencies-and-composition.md](../04-architecture-and-patterns/patterns/go-code-patterns/01-dependencies-and-composition.md).
+- См. [go-code-patterns/01-dependencies-and-composition.md](../../04-architecture-and-patterns/patterns/go-code-patterns/01-dependencies-and-composition.md).
 
 **Constructor Injection, Setter Injection, Interface Injection — плюсы и минусы?**
 
@@ -503,7 +503,7 @@ func NewService(repo Repository, logger *slog.Logger) (*Service, error) {
   - репозиторий — доступ к агрегатам без деталей хранилища.
 - Что чаще всего спрашивают дальше — как граница агрегата связана с транзакцией: изменения внутри одного агрегата согласованы сразу, между агрегатами — через события и eventual consistency.
 - Когда DDD не нужен — CRUD-сервис без нетривиальных правил: слои и мэпперы там дают цену без выигрыша.
-- См. [patterns/05-ddd-in-go.md](../04-architecture-and-patterns/patterns/05-ddd-in-go.md) и [01-testing-strategy.md](../09-testing-and-quality/01-testing-strategy.md).
+- См. [patterns/05-ddd-in-go.md](../../04-architecture-and-patterns/patterns/05-ddd-in-go.md) и [01-testing-strategy.md](../../09-testing-and-quality/01-testing-strategy.md).
 
 ---
 
@@ -530,7 +530,7 @@ func NewService(repo Repository, logger *slog.Logger) (*Service, error) {
 - Откуда берётся O(n²) — если опорный элемент каждый раз оказывается минимумом или максимумом (например, на уже отсортированных данных при выборе первого элемента), одна часть пуста, и глубина становится n.
 - Как с этим борются — медиана из трёх или из девяти, случайный выбор опорного, ограничение глубины с переходом на heap sort.
 - Что ещё стоит упомянуть — на практике почти никогда не пишут свою сортировку, а важнее правильный компаратор: он обязан задавать строгий порядок, иначе результат непредсказуем.
-- См. [06-sorting-and-heap.md](../16-algorithms-and-data-structures/06-sorting-and-heap.md).
+- См. [06-sorting-and-heap.md](../../16-algorithms-and-data-structures/06-sorting-and-heap.md).
 
 **Задача: отсортировать строку по алфавиту, но у гласной заглавная буква больше, а у согласной — меньше**
 
@@ -658,7 +658,7 @@ fmt.Println("F" + 1)         // ошибка компиляции: mismatched ty
 - Объектные (S3 и аналоги) — не база в привычном смысле, а хранилище блобов для файлов, бэкапов и медиа.
 - Индексы — не тип базы, а механизм внутри неё: дополнительная структура, ускоряющая поиск ценой замедления записи и лишнего места.
 - Как выбирать — по модели данных, шаблону доступа (чтение по ключу, диапазон, поиск, аналитика) и требованиям к согласованности, а не по популярности.
-- См. [database-systems-catalog/01-comparison-table.md](../06-databases/database-systems-catalog/01-comparison-table.md).
+- См. [database-systems-catalog/01-comparison-table.md](../../06-databases/database-systems-catalog/01-comparison-table.md).
 
 **PostgreSQL. Какие бывают индексы? Какие есть уровни изоляции?**
 
@@ -690,7 +690,7 @@ fmt.Println("F" + 1)         // ошибка компиляции: mismatched ty
   - Repeatable Read реализован как снимок на всю транзакцию, поэтому фантомов тоже нет, в отличие от классического определения стандарта. Конфликтующая запись приводит к ошибке `could not serialize access`;
   - Serializable использует SSI — отслеживает опасные пересечения и откатывает одну из транзакций, а не сериализует их блокировками.
 - Что из этого следует для кода — на уровнях выше Read Committed приложение обязано уметь повторять транзакцию после ошибки сериализации.
-- См. [postgresql/02-indexes.md](../06-databases/database-systems-catalog/postgresql/02-indexes.md) и [postgresql/04-transactions-and-locking.md](../06-databases/database-systems-catalog/postgresql/04-transactions-and-locking.md).
+- См. [postgresql/02-indexes.md](../../06-databases/database-systems-catalog/postgresql/02-indexes.md) и [postgresql/04-transactions-and-locking.md](../../06-databases/database-systems-catalog/postgresql/04-transactions-and-locking.md).
 
 **Способы масштабирования базы данных**
 
@@ -704,7 +704,7 @@ fmt.Println("F" + 1)         // ошибка компиляции: mismatched ty
 - Шаг 7, шардирование — разные части данных на разных серверах. Снимает потолок записи, но ломает JOIN и транзакции между шардами, требует ключа шардирования и плана ребалансировки.
 - Шаг 8, разделение нагрузок — вынести аналитику в OLAP-хранилище (ClickHouse), а поиск в Elasticsearch, чтобы тяжёлые запросы не конкурировали с транзакционными.
 - Что важно проговорить — вертикальное масштабирование и реплики оставляют одну точку записи, поэтому упор в запись лечится только партиционированием и шардированием.
-- См. [postgresql/12-sharding.md](../06-databases/database-systems-catalog/postgresql/12-sharding.md) и [highload-design-patterns.md](../05-system-design/highload-design-patterns.md).
+- См. [postgresql/12-sharding.md](../../06-databases/database-systems-catalog/postgresql/12-sharding.md) и [highload-design-patterns.md](../../05-system-design/highload-design-patterns.md).
 
 **Задача: маркетплейс. Найти продавца, у которого сумма покупок от вас на втором месте. Построить таблицу**
 
@@ -760,7 +760,7 @@ WHERE rnk = 2;
 - Почему это оконная функция, а не подзапрос с `MAX` — ранг считается за один проход по уже сгруппированному результату, без повторного чтения таблицы.
 - Граничные случаи — если продавец всего один, оба запроса корректно возвращают пустой результат; приложение должно быть к этому готово, а не ждать ровно одну строку.
 - Почему индекс именно такой — условие идёт по `buyer_id`, группировка по `seller_id`, а `INCLUDE (amount)` позволяет посчитать сумму, не заглядывая в саму таблицу.
-- См. [postgresql/00-sql-basics-and-syntax.md](../06-databases/database-systems-catalog/postgresql/00-sql-basics-and-syntax.md) и [sql-tasks](../06-databases/database-systems-catalog/postgresql/sql-tasks/README.md).
+- См. [postgresql/00-sql-basics-and-syntax.md](../../06-databases/database-systems-catalog/postgresql/00-sql-basics-and-syntax.md) и [sql-tasks](../../06-databases/database-systems-catalog/postgresql/sql-tasks/README.md).
 
 ---
 
@@ -790,7 +790,7 @@ WHERE rnk = 2;
 | Сильная сторона | поток событий, аналитика, большой объём | задачи, сложная маршрутизация, приоритеты |
 
 - Что действует для всех — доставка обычно at-least-once, значит дубли неизбежны и обработчик обязан быть идемпотентным. Exactly-once существует лишь в узких сценариях внутри одной системы.
-- См. [00-comparison.md](../07-message-brokers-and-streaming/00-comparison.md) и [reliability-patterns/06-idempotency.md](../05-system-design/reliability-patterns/06-idempotency.md).
+- См. [00-comparison.md](../../07-message-brokers-and-streaming/00-comparison.md) и [reliability-patterns/06-idempotency.md](../../05-system-design/reliability-patterns/06-idempotency.md).
 
 ---
 
@@ -805,7 +805,7 @@ WHERE rnk = 2;
 - Надёжность и обслуживание — функции RAS, диагностика, удалённое управление, расчёт на непрерывную работу под нагрузкой.
 - Ноутбучный — тот же кристалл, ограниченный питанием и охлаждением: низкий бюджет мощности, агрессивный троттлинг под длительной нагрузкой, гибридная схема из производительных и энергоэффективных ядер, из-за которой замеры плавают.
 - Почему это спрашивают — из этого следует, что бенчмарк с ноутбука нельзя переносить на прод: там другое число ядер, другой троттлинг и другая память.
-- См. [hardware-and-os/01-cpu-architecture.md](../10-devops-and-observability/hardware-and-os/01-cpu-architecture.md).
+- См. [hardware-and-os/01-cpu-architecture.md](../../10-devops-and-observability/hardware-and-os/01-cpu-architecture.md).
 
 **Какова типичная скорость обмена между процессором и памятью?**
 
@@ -823,7 +823,7 @@ WHERE rnk = 2;
 | RAM | ~80 нс | десятки-сотни ГБ |
 
 - Практический вывод для кода — последовательный обход слайса структур на порядок быстрее обхода слайса указателей: в первом случае работает предвыборка и данные лежат в одной линии кэша, во втором каждый переход это потенциальный промах.
-- См. [hardware-and-os/02-memory-hierarchy.md](../10-devops-and-observability/hardware-and-os/02-memory-hierarchy.md).
+- См. [hardware-and-os/02-memory-hierarchy.md](../../10-devops-and-observability/hardware-and-os/02-memory-hierarchy.md).
 
 **Какова типичная скорость обмена с накопителями?**
 
@@ -872,7 +872,7 @@ WHERE rnk = 2;
 - Типичный прикладной сервер — 32–128 ГБ; узел под базу данных — 256 ГБ–1 ТБ; специализированные машины под кэш и аналитику — несколько терабайт.
 - Как считают под сервис — размер рабочего набора плюс запас на пики и на сборщик мусора. Для Go-сервиса ориентируются на `GOMEMLIMIT` около 90% лимита контейнера.
 - Почему важна не только ёмкость — на многосокетном сервере действует NUMA: память локальна для сокета, и обращение к чужой половине заметно дороже. Отсюда привязка процессов к узлам NUMA у баз данных.
-- См. [hardware-and-os/README.md](../10-devops-and-observability/hardware-and-os/README.md).
+- См. [hardware-and-os/README.md](../../10-devops-and-observability/hardware-and-os/README.md).
 
 ---
 
@@ -897,7 +897,7 @@ WHERE rnk = 2;
   - монтирование — подключение файловой системы в точку дерева, единого корня дисков нет, всё растёт из `/`;
   - виртуальные файловые системы — `/proc` и `/sys` не лежат на диске, а отдают состояние ядра.
 - Практическая деталь — место может кончиться двумя способами: закончились блоки (`df -h`) или закончились inode (`df -i`) из-за миллионов мелких файлов.
-- См. [linux/06-linux-commands.md](../10-devops-and-observability/linux/06-linux-commands.md).
+- См. [linux/06-linux-commands.md](../../10-devops-and-observability/linux/06-linux-commands.md).
 
 **Приложение, процесс и поток. В чём разница?**
 
@@ -908,7 +908,7 @@ WHERE rnk = 2;
 - Как это устроено в Linux — ядро не различает процессы и потоки, у него есть только задача (task). `clone()` с разными флагами даёт либо новый процесс, либо поток, разделяющий память с родителем.
 - Где здесь горутина — это единица планирования пользовательского пространства, о которой ядро вообще не знает. Рантайм Go раскладывает горутины по потокам ОС, поэтому создание горутины не требует системного вызова и стоит на порядки дешевле создания потока.
 - Как отвечать коротко — процесс это изоляция, поток это параллелизм внутри изоляции, горутина это параллелизм внутри потока без участия ядра.
-- См. [hardware-and-os/06-processes-and-threads.md](../10-devops-and-observability/hardware-and-os/06-processes-and-threads.md).
+- См. [hardware-and-os/06-processes-and-threads.md](../../10-devops-and-observability/hardware-and-os/06-processes-and-threads.md).
 
 **Файловые дескрипторы. Какие есть ограничения?**
 
@@ -930,7 +930,7 @@ WHERE rnk = 2;
 - Как выглядит исчерпание — ошибки `too many open files`, `accept: EMFILE`, отказ открывать соединения к базе при живом сервисе.
 - Как диагностировать — `ls /proc/<pid>/fd | wc -l` для счёта, `lsof -p <pid>` для содержимого. Постоянный рост означает утечку: незакрытые тела ответов, соединения или файлы.
 - Частая причина утечки в Go — отсутствие `defer resp.Body.Close()`: соединение не возвращается в пул и дескриптор остаётся занят.
-- См. [linux/02-file-descriptors-and-io.md](../10-devops-and-observability/linux/02-file-descriptors-and-io.md).
+- См. [linux/02-file-descriptors-and-io.md](../../10-devops-and-observability/linux/02-file-descriptors-and-io.md).
 
 **Сколько соединений можно открыть на сервере?**
 
@@ -946,7 +946,7 @@ WHERE rnk = 2;
 - Где 65535 действительно упирается — у клиента: диапазон эфемерных портов (`net.ipv4.ip_local_port_range`, обычно около 28 тысяч) ограничивает число одновременных соединений к одной паре «адрес и порт». Лечится расширением диапазона, дополнительными адресами или переиспользованием соединений.
 - Практические ориентиры — десятки тысяч соединений на обычной конфигурации без настройки, сотни тысяч и миллион (задача C10M) после тюнинга дескрипторов, буферов и conntrack.
 - Почему Go здесь удобен — сетевой опрашиватель (netpoller) поверх `epoll` держит десятки тысяч соединений на нескольких потоках ОС, а код при этом остаётся линейным, по горутине на соединение.
-- См. [linux/03-tcp-sockets.md](../10-devops-and-observability/linux/03-tcp-sockets.md).
+- См. [linux/03-tcp-sockets.md](../../10-devops-and-observability/linux/03-tcp-sockets.md).
 
 ---
 
@@ -961,7 +961,7 @@ WHERE rnk = 2;
 - Как это видно в HTTP — 401 Unauthorized означает «не опознан или сессия истекла», и клиенту следует обновить токен; 403 Forbidden означает «опознан, но прав нет», и повторять с тем же токеном бесполезно. Название кода 401 исторически неточно: речь именно об аутентификации.
 - Где проверяют — аутентификацию удобно вынести на шлюз, а авторизацию почти всегда приходится делать в сервисе, потому что права зависят от объекта: владелец заказа, участник проекта, роль в организации.
 - Модели авторизации — RBAC (по ролям), ABAC (по атрибутам субъекта, объекта и контекста), ACL (список прав у объекта).
-- См. [authentication/07-authorization-and-rbac.md](../11-security/authentication/07-authorization-and-rbac.md).
+- См. [authentication/07-authorization-and-rbac.md](../../11-security/authentication/07-authorization-and-rbac.md).
 
 **Какие бывают способы аутентификации?**
 
@@ -976,7 +976,7 @@ WHERE rnk = 2;
 - WebAuthn и passkeys — асимметричная пара ключей, привязанная к домену; фишинг перестаёт работать, потому что подписи для чужого домена не будет. Наиболее устойчивый из массовых способов.
 - Корпоративные — SAML, LDAP, Kerberos для единого входа внутри организации.
 - Как выбирать — по цене компрометации: внутренний инструмент обходится сессией, платёжный сервис требует второго фактора и коротких токенов.
-- См. [authentication/05-authentication-methods-overview.md](../11-security/authentication/05-authentication-methods-overview.md) и [authentication/06-jwt.md](../11-security/authentication/06-jwt.md).
+- См. [authentication/05-authentication-methods-overview.md](../../11-security/authentication/05-authentication-methods-overview.md) и [authentication/06-jwt.md](../../11-security/authentication/06-jwt.md).
 
 **Шифрование. Симметричное и асимметричное**
 
@@ -996,4 +996,4 @@ WHERE rnk = 2;
   - кодирование (base64, URL-encoding) — представление данных, обратимое без всякого ключа. Base64 не защищает ничего.
 - Что важно для прикладного кода — не собирать схему самостоятельно: брать `crypto/tls` и готовые режимы с аутентификацией (AEAD, например AES-GCM), которые вместе с шифрованием защищают от подмены. Режим без проверки целостности позволяет изменить шифротекст незаметно.
 - Где взять ключи — из менеджера секретов с ротацией, а не из конфигурации в репозитории.
-- См. [service-to-service-tls/01-tls-termination-re-encryption-and-mtls.md](../11-security/service-to-service-tls/01-tls-termination-re-encryption-and-mtls.md) и [secrets-management/01-secrets-delivery-options.md](../11-security/secrets-management/01-secrets-delivery-options.md).
+- См. [service-to-service-tls/01-tls-termination-re-encryption-and-mtls.md](../../11-security/service-to-service-tls/01-tls-termination-re-encryption-and-mtls.md) и [secrets-management/01-secrets-delivery-options.md](../../11-security/secrets-management/01-secrets-delivery-options.md).

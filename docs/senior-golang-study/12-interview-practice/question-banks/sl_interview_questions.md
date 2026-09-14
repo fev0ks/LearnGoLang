@@ -21,7 +21,7 @@
 - Обязательное условие горизонтального роста — stateless-приложение. Состояние (сессии, кэш) выносится в общий Redis или БД, чтобы запрос мог уйти на любой инстанс.
 - Что станет следующим узким местом — база данных. Оттуда реплики на чтение, шардирование при упоре в запись, вынос тяжёлых задач в очередь.
 - Что нужно для корректной работы балансировщика — healthcheck’и и graceful drain, иначе трафик пойдёт на инстанс, который уже выключается.
-- См. [highload-design-patterns.md](../05-system-design/highload-design-patterns.md).
+- См. [highload-design-patterns.md](../../05-system-design/highload-design-patterns.md).
 
 **Два сервиса. Как они могут взаимодействовать?**
 
@@ -32,7 +32,7 @@
   - Плюс — развязка сервисов, сглаживание пиков, устойчивость к временной недоступности получателя.
   - Минус — eventual consistency, дубликаты, вопросы порядка сообщений.
 - Как выбирать — нужен немедленный ответ пользователю берут sync; фоновая обработка, события и развязка это async.
-- См. [service-topologies/01-monolith-vs-modular-monolith-vs-microservices.md](../04-architecture-and-patterns/service-topologies/01-monolith-vs-modular-monolith-vs-microservices.md).
+- См. [service-topologies/01-monolith-vs-modular-monolith-vs-microservices.md](../../04-architecture-and-patterns/service-topologies/01-monolith-vs-modular-monolith-vs-microservices.md).
 
 **Как логировать запросы и ответы в gRPC? Читать байты неудобно.**
 
@@ -40,7 +40,7 @@
 - Как привести к читаемому виду — `protojson.Marshal` даёт JSON-представление protobuf, `prototext` — текстовое.
 - Что обязательно сделать — вычистить чувствительные поля (пароли, токены, персональные данные): либо опцией в `.proto`, либо фильтром в интерсепторе.
 - Что ещё учесть — размер payload: большие тела нужно обрезать, иначе логи распухнут и подорожают.
-- См. [03-api-styles/02-grpc.md](../08-networking-and-api/protocols/03-api-styles/02-grpc.md).
+- См. [03-api-styles/02-grpc.md](../../08-networking-and-api/protocols/03-api-styles/02-grpc.md).
 
 **Сервис обновляет данные о юзере у себя в БД и ещё в каком-то сервисе. Что может пойти не так и как бороться?**
 
@@ -49,7 +49,7 @@
 - Решение — Transactional Outbox: в одной локальной транзакции пишем и бизнес-данные, и событие в таблицу outbox, а отдельный процесс надёжно доставляет событие во второй сервис.
 - Что требуется от получателя — идемпотентность, потому что доставка at-least-once и дубли неизбежны; дедуп по ключу события.
 - Что это даёт — eventual consistency без распределённой транзакции. Если нужны откаты по цепочке шагов, сверху добавляется Saga с компенсациями.
-- См. [patterns/09-saga-and-outbox.md](../04-architecture-and-patterns/patterns/09-saga-and-outbox.md).
+- См. [patterns/09-saga-and-outbox.md](../../04-architecture-and-patterns/patterns/09-saga-and-outbox.md).
 
 **Что делать, если нижестоящий сервис начал «пятисотить»?**
 
@@ -60,7 +60,7 @@
 - Graceful degradation — отдать данные из кэша или частичный ответ вместо ошибки.
 - Bulkhead — изолировать пул соединений под этот вызов, чтобы он не выел ресурсы всего сервиса.
 - Что нужно параллельно — алерты и трейсинг, чтобы разобрать причину, а не просто пережить инцидент.
-- См. [reliability-patterns/03-circuit-breaker.md](../05-system-design/reliability-patterns/03-circuit-breaker.md) и [reliability-patterns/02-retries-and-backoff.md](../05-system-design/reliability-patterns/02-retries-and-backoff.md).
+- См. [reliability-patterns/03-circuit-breaker.md](../../05-system-design/reliability-patterns/03-circuit-breaker.md) и [reliability-patterns/02-retries-and-backoff.md](../../05-system-design/reliability-patterns/02-retries-and-backoff.md).
 
 ---
 
@@ -73,7 +73,7 @@
 - Шаг 3, запрос — стартовая строка вида `GET / HTTP/1.1`, заголовки и опциональное тело.
 - Шаг 4, ответ — сервер (часто через CDN, балансировщик и реверс-прокси) возвращает статус-код и HTML.
 - Шаг 5, отрисовка — браузер парсит HTML в DOM и CSS в CSSOM, подгружает ресурсы отдельными запросами, строит render tree, делает layout и paint.
-- См. [request-lifecycle/01-browser-input-and-navigation-start.md](../08-networking-and-api/request-lifecycle/01-browser-input-and-navigation-start.md).
+- См. [request-lifecycle/01-browser-input-and-navigation-start.md](../../08-networking-and-api/request-lifecycle/01-browser-input-and-navigation-start.md).
 
 **В чём смысл TLS? Как проверяется, что сервер тот, за кого себя выдаёт?**
 
@@ -87,7 +87,7 @@
   - Срок действия и отзыв через CRL или OCSP.
   - Совпадение запрошенного домена с именем в сертификате (SAN).
 - Ключевой момент — сертификат сам по себе ничего не доказывает: сервер по ходу handshake доказывает владение соответствующим приватным ключом.
-- См. [request-lifecycle/03-tcp-tls-and-http-request.md](../08-networking-and-api/request-lifecycle/03-tcp-tls-and-http-request.md).
+- См. [request-lifecycle/03-tcp-tls-and-http-request.md](../../08-networking-and-api/request-lifecycle/03-tcp-tls-and-http-request.md).
 
 **DNS-сервер хранит все домены мира? Как он находит те, которых у него нет?**
 
@@ -95,7 +95,7 @@
 - Как идёт поиск — резолвер спускается сверху вниз: корневой сервер направляет к серверам зоны верхнего уровня (например `.com`), те к авторитетному серверу домена, который и знает нужную запись.
 - Почему это не медленно — промежуточные ответы кэшируются по TTL, поэтому повторные запросы не ходят к корню.
 - Итоговая модель — каждый сервер знает только свою зону и то, кому делегировать дальше.
-- См. [request-lifecycle/02-dns-resolution-and-getting-ip.md](../08-networking-and-api/request-lifecycle/02-dns-resolution-and-getting-ip.md).
+- См. [request-lifecycle/02-dns-resolution-and-getting-ip.md](../../08-networking-and-api/request-lifecycle/02-dns-resolution-and-getting-ip.md).
 
 ---
 
@@ -108,7 +108,7 @@
 - Восстановление — после аварии БД проигрывает WAL и доводит подтверждённые транзакции до конца.
 - Чем это дополняют — group commit (батчевый сброс ради производительности), репликация на другие узлы, бэкапы.
 - Уточняющий вопрос, который стоит задать самому — durable где именно: на одном узле, на кворуме, на реплике в другой зоне доступности или уже в бэкапе.
-- См. [database-fundamentals/01-acid.md](../06-databases/database-fundamentals/01-acid.md).
+- См. [database-fundamentals/01-acid.md](../../06-databases/database-fundamentals/01-acid.md).
 
 **Как происходит репликация в БД?**
 
@@ -116,7 +116,7 @@
 - Синхронная репликация — коммит подтверждается только после применения хотя бы на одной реплике: надёжнее, но каждая запись платит сетевой задержкой.
 - Асинхронная — primary подтверждает сразу, реплики догоняют с лагом: быстрее, но при падении мастера можно потерять хвост транзакций, а чтение с реплики отдаёт устаревшие данные.
 - Роль реплик — обычно read-only, обслуживают чтение и служат кандидатами на повышение при аварии.
-- См. [postgresql/06-replication.md](../06-databases/database-systems-catalog/postgresql/06-replication.md).
+- См. [postgresql/06-replication.md](../../06-databases/database-systems-catalog/postgresql/06-replication.md).
 
 **В каких базах есть автопереключение master/slave?**
 
@@ -127,7 +127,7 @@
   - MySQL — Group Replication и InnoDB Cluster.
 - В PostgreSQL встроенного автопереключения нет — primary один, а failover делают внешними инструментами: Patroni, repmgr, pg_auto_failover или облачные managed-решения, которые следят за здоровьем и промоутят реплику.
 - Почему это важно на собесе — из этого следует, что «поставили PostgreSQL с репликой» само по себе ещё не даёт отказоустойчивости.
-- См. [postgresql/06-replication.md](../06-databases/database-systems-catalog/postgresql/06-replication.md).
+- См. [postgresql/06-replication.md](../../06-databases/database-systems-catalog/postgresql/06-replication.md).
 
 **Как устроены БД из нескольких нод? Как работает consistent hashing при добавлении нод?**
 
@@ -136,7 +136,7 @@
 - Как работает consistent hashing — узлы и ключи раскладываются на логическое кольцо хешей, а ключ принадлежит первому узлу по часовой стрелке от своей позиции.
 - Что даёт — при добавлении узла переезжает лишь малая доля ключей, примерно 1/N: те, что попали в новый сектор кольца. Остальные остаются на месте.
 - Зачем виртуальные узлы (vnodes) — один физический узел занимает много позиций на кольце, это выравнивает распределение и сглаживает перекос при отказе.
-- См. [database-systems-catalog/05-cassandra.md](../06-databases/database-systems-catalog/05-cassandra.md).
+- См. [database-systems-catalog/05-cassandra.md](../../06-databases/database-systems-catalog/05-cassandra.md).
 
 **Таблица покупок (id юзера, сумма). Как найти юзеров, купивших суммарно больше $100?**
 
@@ -149,7 +149,7 @@ HAVING SUM(amount) > 100;
 
 - Логика — группируем по пользователю, считаем сумму агрегатом и фильтруем уже сгруппированный результат.
 - Почему `HAVING`, а не `WHERE` — `WHERE` отрабатывает до группировки и агрегатов ещё не видит.
-- См. [postgresql/00-sql-basics-and-syntax.md](../06-databases/database-systems-catalog/postgresql/00-sql-basics-and-syntax.md).
+- См. [postgresql/00-sql-basics-and-syntax.md](../../06-databases/database-systems-catalog/postgresql/00-sql-basics-and-syntax.md).
 
 ---
 
@@ -166,7 +166,7 @@ HAVING SUM(amount) > 100;
   - При аллокации и работе сборщика мусора.
   - По явному `runtime.Gosched()`.
 - Принудительное вытеснение — асинхронная преемпция по сигналу (с Go 1.14) выбивает горутину примерно через 10 мс, если она крутит длинный цикл без вызовов функций.
-- См. [runtime-scheduler/01-scheduler-and-preemption.md](../01-go-core/runtime-scheduler/01-scheduler-and-preemption.md).
+- См. [runtime-scheduler/01-scheduler-and-preemption.md](../../01-go-core/runtime-scheduler/01-scheduler-and-preemption.md).
 
 **Если GOMAXPROCS=1 и горутина уходит в syscall — встаёт ли вся программа?**
 
@@ -175,7 +175,7 @@ HAVING SUM(amount) > 100;
 - Что происходит с виновницей — заблокированная горутина висит вместе со своим M до возврата из сисколла.
 - Важная оговорка — параллелизма Go-кода при `GOMAXPROCS=1` по-прежнему нет, сохраняется именно конкурентность.
 - Отдельный случай — сетевые операции вообще не блокируют M, они идут через netpoller.
-- См. [runtime-scheduler/02-syscall.md](../01-go-core/runtime-scheduler/02-syscall.md).
+- См. [runtime-scheduler/02-syscall.md](../../01-go-core/runtime-scheduler/02-syscall.md).
 
 **Go — ООП или нет?**
 
@@ -184,7 +184,7 @@ HAVING SUM(amount) > 100;
 - Чего нет — классов и наследования.
 - Чем заменено наследование — композицией: встраиванием структур и интерфейсов.
 - Итоговая формулировка — Go объектно-ориентирован по-своему, без иерархии классов; вместо «является» здесь работает «умеет».
-- См. [03-interfaces-method-sets-and-nil.md](../01-go-core/03-interfaces-method-sets-and-nil.md).
+- См. [03-interfaces-method-sets-and-nil.md](../../01-go-core/03-interfaces-method-sets-and-nil.md).
 
 **Что можно использовать в качестве ключа map?**
 
@@ -210,7 +210,7 @@ HAVING SUM(amount) > 100;
   - Небезопасно — ошибки вылезают паникой в рантайме вместо ошибки компиляции.
   - Хуже читается и рефакторится, потому что связи между типами не видны компилятору.
 - Практический вывод — применять точечно и прятать за узким API; в горячем пути искать альтернативу вроде кодогенерации.
-- См. [02-go-stdlib-and-tools/04-reflect.md](../02-go-stdlib-and-tools/04-reflect.md).
+- См. [02-go-stdlib-and-tools/04-reflect.md](../../02-go-stdlib-and-tools/04-reflect.md).
 
 **Какие примитивы синхронизации есть в Go?**
 
@@ -219,7 +219,7 @@ HAVING SUM(amount) > 100;
 - Языковые средства — каналы вместе с `select` и `context` для отмены.
 - Из `golang.org/x/sync` — `errgroup`, `semaphore`, `singleflight`.
 - Как отвечать сильнее — к каждому примитиву называть сценарий, а не только имя: `Once` для ленивой инициализации, `errgroup` для параллельных задач с первой ошибкой, `singleflight` для схлопывания одинаковых запросов.
-- См. [concurrency-and-performance/03-sync-primitives.md](../01-go-core/concurrency-and-performance/03-sync-primitives.md).
+- См. [concurrency-and-performance/03-sync-primitives.md](../../01-go-core/concurrency-and-performance/03-sync-primitives.md).
 
 **Как реализовать семафор через каналы?**
 
@@ -251,7 +251,7 @@ sem <- struct{}{}             // acquire (блок, если N заняты)
 - Где граница применимости — атомик защищает ровно одну переменную и одну операцию.
 - Когда нужен мьютекс — когда несколько связанных полей должны меняться согласованно или когда критическая секция это несколько действий подряд.
 - Правило выбора — одиночный счётчик, флаг или указатель берут atomic; «несколько действий должны быть атомарны вместе» это mutex.
-- См. [concurrency-and-performance/03-sync-primitives.md](../01-go-core/concurrency-and-performance/03-sync-primitives.md).
+- См. [concurrency-and-performance/03-sync-primitives.md](../../01-go-core/concurrency-and-performance/03-sync-primitives.md).
 
 ---
 
@@ -268,7 +268,7 @@ sem <- struct{}{}             // acquire (блок, если N заняты)
   - `runtime/trace` — поведение планировщика и задержки.
 - Частые причины — лишние аллокации и давление на GC, contention на мьютексах, N+1 к базе и отсутствие индексов, синхронные внешние вызовы без таймаутов, нехватка соединений в пуле.
 - Шаг 3, замкнуть цикл — починить узкое место и перемерить, иначе непонятно, помогло ли.
-- См. [profiling/01-pprof-tools-and-workflow.md](../01-go-core/profiling/01-pprof-tools-and-workflow.md) и [symptom-driven troubleshooting](../10-devops-and-observability/incident-response-and-investigation/02-symptom-driven-troubleshooting.md).
+- См. [profiling/01-pprof-tools-and-workflow.md](../../01-go-core/profiling/01-pprof-tools-and-workflow.md) и [symptom-driven troubleshooting](../../10-devops-and-observability/incident-response-and-investigation/02-symptom-driven-troubleshooting.md).
 
 **Как запускать приложение при старте Unix-системы?**
 
@@ -276,4 +276,4 @@ sem <- struct{}{}             // acquire (блок, если N заняты)
 - Что это даёт — старт при загрузке, автоперезапуск при падении, логи в journald, объявленные зависимости и порядок старта.
 - Альтернативы — init-скрипты SysV, `cron` с `@reboot`, supervisord для окружений без systemd, а в контейнерах политика перезапуска Docker или оркестратора.
 - Что важно для Go-сервиса — systemd шлёт `SIGTERM`, поэтому приложение должно уметь graceful shutdown, иначе перезапуск будет рвать активные запросы.
-- См. [linux/04-signals-and-processes.md](../10-devops-and-observability/linux/04-signals-and-processes.md).
+- См. [linux/04-signals-and-processes.md](../../10-devops-and-observability/linux/04-signals-and-processes.md).

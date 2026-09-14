@@ -16,7 +16,7 @@
 
 Распределение по категориям во всём корпусе собеседований: Go основы — 25%, Go конкурентность — 20%, базы данных — 20%, Go runtime — 10%, архитектура — 10%, инфраструктура — 8%, сети и API — 5%, system design — 2%. То есть около 55% вопросов приходится на сам язык, а первые пятнадцать позиций ниже закрывают половину типового скрининга.
 
-Оговорка про состав списка: сюда отобраны 50 самых частых вопросов поштучно, поэтому инфраструктура и system design в него не попали. Эти темы дают заметную долю корпуса, но размазаны по множеству редких формулировок, и ни одна не набирает частоты для топ-50. Их разбор — в [interview-questions.md](interview-questions.md) и [05-system-design](../05-system-design/README.md).
+Оговорка про состав списка: сюда отобраны 50 самых частых вопросов поштучно, поэтому инфраструктура и system design в него не попали. Эти темы дают заметную долю корпуса, но размазаны по множеству редких формулировок, и ни одна не набирает частоты для топ-50. Их разбор — в [interview-questions.md](interview-questions.md) и [05-system-design](../../05-system-design/README.md).
 
 ---
 
@@ -27,7 +27,7 @@
 - Массив `[N]T` — фиксированная длина, причём длина входит в тип: `[3]int` и `[4]int` это разные типы. Копируется целиком по значению.
 - Слайс — дескриптор `{указатель, len, cap}` поверх backing-массива. Копируется только заголовок, поэтому несколько слайсов могут разделять один и тот же массив.
 - Практическое следствие — передача массива в функцию копирует все элементы, передача слайса копирует три поля, и изменения элементов видны снаружи.
-- См. [04-slices.md](../01-go-core/04-slices.md).
+- См. [04-slices.md](../../01-go-core/04-slices.md).
 
 **Что происходит при вызове append? Когда создаётся новый массив? (~70×)**
 
@@ -35,7 +35,7 @@
 - Если места нет — аллоцируется новый массив, данные копируются, возвращается новый заголовок. Старый массив живёт, пока на него есть ссылки.
 - Рост ёмкости — примерно вдвое на малых слайсах и плавнее (около ×1.25) на больших.
 - Отсюда правило — результат всегда присваивают обратно: `s = append(s, …)`, иначе изменение потеряется при реаллокации.
-- См. [04-slices.md](../01-go-core/04-slices.md).
+- См. [04-slices.md](../../01-go-core/04-slices.md).
 
 **Как устроена map под капотом до Go 1.24? Бакеты, коллизии, эвакуация? (~65×)**
 
@@ -45,7 +45,7 @@
 - Коллизии — chaining: когда 8 слотов заняты, заводится overflow-бакет и подвешивается по указателю. Длинная цепочка означает прыжки по указателям и промахи кэша.
 - Когда растёт — при load factor около 6.5 элементов на бакет либо при слишком большом числе overflow-бакетов (тогда идёт same-size grow, чистящий «дыры» от удалений).
 - Эвакуация инкрементальная — при росте выделяется новый массив вдвое больше, но элементы переносятся порциями на последующих операциях записи, а не одним проходом. Поэтому какое-то время сосуществуют старый и новый массивы.
-- См. [map-internals/02-hmap-before-1.24.md](../01-go-core/map-internals/02-hmap-before-1.24.md).
+- См. [map-internals/02-hmap-before-1.24.md](../../01-go-core/map-internals/02-hmap-before-1.24.md).
 
 **Что изменилось в map с Go 1.24? Что такое Swiss Tables?**
 
@@ -58,7 +58,7 @@
 - Удаление — оставляет маркер-«надгробие», иначе probing прервался бы на пустом слоте и не нашёл ключ, лежащий дальше по последовательности.
 - Рост устроен иначе — маленькая таблица перестраивается целиком, а большая map делится на несколько tables с общим directory, вместо постепенной эвакуации одного общего массива.
 - Откуда выигрыш — не из «более умного хеша», а из раскладки памяти и уменьшения числа дорогих полных сравнений ключей. Заметнее всего на строковых и структурных ключах.
-- См. [map-internals/01-swiss-tables-since-1.24.md](../01-go-core/map-internals/01-swiss-tables-since-1.24.md).
+- См. [map-internals/01-swiss-tables-since-1.24.md](../../01-go-core/map-internals/01-swiss-tables-since-1.24.md).
 
 **Что из себя представляют строки? Какие подводные камни? (~55×)**
 
@@ -69,7 +69,7 @@
   - `range` по строке идёт по рунам и отдаёт байтовый индекс, а не порядковый номер символа.
   - Конкатенация `+=` в цикле квадратична по времени — нужен `strings.Builder`.
   - Конверсии `[]byte(s)` и `string(b)` копируют данные, потому что строка неизменяема.
-- См. [07-strings.md](../01-go-core/07-strings.md).
+- См. [07-strings.md](../../01-go-core/07-strings.md).
 
 **Что такое интерфейс? Для чего нужен пустой интерфейс? (~50×)**
 
@@ -78,7 +78,7 @@
 - Пустой интерфейс `interface{}`/`any` не требует ничего, поэтому принимает любой тип — универсальные контейнеры и API (`fmt.Println`, `json.Unmarshal`).
 - Как достать значение — type assertion или type switch.
 - С дженериками нужен реже.
-- См. [03-interfaces-method-sets-and-nil.md](../01-go-core/03-interfaces-method-sets-and-nil.md).
+- См. [03-interfaces-method-sets-and-nil.md](../../01-go-core/03-interfaces-method-sets-and-nil.md).
 
 **Как передаются слайсы в функцию? Почему изменения иногда не видны снаружи? (~45×)**
 
@@ -86,7 +86,7 @@
 - Что видно снаружи — присваивание элемента `s[i] = x`: оно идёт в общий массив.
 - Что не видно — `s = append(s, …)`: append меняет локальную копию заголовка, а при реаллокации ещё и переезжает на другой массив.
 - Как сделать видимым — вернуть слайс из функции или передать указатель `*[]T`.
-- См. [04-slices.md](../01-go-core/04-slices.md).
+- См. [04-slices.md](../../01-go-core/04-slices.md).
 
 **Что такое defer? В каком порядке выполняются несколько defer? (~45×)**
 
@@ -102,7 +102,7 @@
 - Классическая ловушка (typed nil) — `var p *T = nil; var i I = p` даёт `i != nil`: тип `*T` в паре есть, нулевое там только значение.
 - Во что это выливается на практике — функция возвращает `*MyError` со значением nil в переменной типа `error`, и у вызывающего `err != nil` срабатывает на пустой ошибке.
 - Как не наступать — возвращать литеральный `nil`, а не nil-указатель конкретного типа, и не объявлять результат как `*MyError`, если наружу отдаётся `error`.
-- См. [03-interfaces-method-sets-and-nil.md](../01-go-core/03-interfaces-method-sets-and-nil.md).
+- См. [03-interfaces-method-sets-and-nil.md](../../01-go-core/03-interfaces-method-sets-and-nil.md).
 
 **Как len() работает со строкой на русском? Как посчитать символы? (~35×)**
 
@@ -110,7 +110,7 @@
 - Как посчитать символы — `utf8.RuneCountInString(s)` без аллокации либо `len([]rune(s))` с конверсией всей строки.
 - Как обойти по символам — `range` по строке итерирует руны и отдаёт байтовый индекс каждой.
 - Оговорка — руна это кодовая точка, а не «видимый символ»: эмодзи с модификаторами и составные символы занимают несколько рун.
-- См. [07-strings.md](../01-go-core/07-strings.md).
+- См. [07-strings.md](../../01-go-core/07-strings.md).
 
 **Что такое контекст? Для чего используется? (~35×)**
 
@@ -118,7 +118,7 @@
 - Как работает отмена — она кооперативная: при `cancel()` или по таймауту закрывается канал `Done()`, и все, кто его слушает, сворачивают работу сами.
 - Методы — `Done()`, `Err()`, `Deadline()`, `Value()`; создание — `context.Background()` плюс обёртки `WithCancel`, `WithTimeout`, `WithDeadline`, `WithValue`.
 - Правила использования — передавать первым аргументом, не хранить в структуре, в `Value` класть только request-scoped данные вроде trace id, а не зависимости.
-- См. [concurrency-and-performance/04-context-patterns.md](../01-go-core/concurrency-and-performance/04-context-patterns.md).
+- См. [concurrency-and-performance/04-context-patterns.md](../../01-go-core/concurrency-and-performance/04-context-patterns.md).
 
 **Можно ли взять указатель на элемент map? Почему? (~30×)**
 
@@ -126,7 +126,7 @@
 - Причина — при росте map элементы эвакуируются в новые бакеты, и взятый ранее адрес стал бы невалидным. Закрепить элементы на месте означало бы запретить рост.
 - Следствие того же ограничения — нельзя присвоить поле структуры-значения: `m[k].Field = v` не скомпилируется.
 - Обходные пути — хранить указатели (`map[K]*V`) и мутировать по ним либо читать копию, менять её и записывать обратно.
-- См. [map-internals/03-puzzles-and-gotchas.md](../01-go-core/map-internals/03-puzzles-and-gotchas.md).
+- См. [map-internals/03-puzzles-and-gotchas.md](../../01-go-core/map-internals/03-puzzles-and-gotchas.md).
 
 **Как эффективно склеить тысячу строк? (~25×)**
 
@@ -134,7 +134,7 @@
 - Если известен итоговый размер — `b.Grow(n)` заранее, тогда реаллокаций не будет вообще.
 - Если строки уже лежат в слайсе — `strings.Join(parts, sep)`: она сама считает нужный размер за один проход.
 - Антипаттерн — `+=` в цикле: строки неизменяемы, поэтому каждая итерация аллоцирует новую строку и копирует всё накопленное, что даёт квадратичную сложность.
-- См. [07-strings.md](../01-go-core/07-strings.md).
+- См. [07-strings.md](../../01-go-core/07-strings.md).
 
 ---
 
@@ -152,7 +152,7 @@
   - Каналы и `select` — передача владения данными вместо разделения памяти.
   - `context` — отмена и дедлайны по всему дереву вызовов.
 - Из `golang.org/x/sync` — `errgroup` (параллельные задачи с первой ошибкой и отменой), `semaphore` (ограничение параллелизма), `singleflight` (схлопывание одинаковых запросов).
-- См. [concurrency-and-performance/03-sync-primitives.md](../01-go-core/concurrency-and-performance/03-sync-primitives.md).
+- См. [concurrency-and-performance/03-sync-primitives.md](../../01-go-core/concurrency-and-performance/03-sync-primitives.md).
 
 **Что будет при записи в закрытый канал? А при чтении? (~60×)**
 
@@ -160,7 +160,7 @@
 - Чтение — не блокируется: сначала отдаётся остаток буфера, потом бесконечно нулевое значение типа.
 - Как отличить закрытый канал от нулевого значения — `v, ok := <-ch`: на закрытом и пустом `ok == false`. `range` по каналу завершается сам при закрытии.
 - Отсюда правило — закрывает канал всегда отправитель и ровно один раз. Если отправителей несколько, координировать через `sync.Once` или отдельный канал завершения.
-- См. [concurrency-and-performance/02-goroutines-and-channels.md](../01-go-core/concurrency-and-performance/02-goroutines-and-channels.md).
+- См. [concurrency-and-performance/02-goroutines-and-channels.md](../../01-go-core/concurrency-and-performance/02-goroutines-and-channels.md).
 
 **Чем горутина отличается от потока ОС? За счёт чего легковесна? (~60×)**
 
@@ -169,7 +169,7 @@
 - Переключение — без системного вызова и смены режима: сохраняется небольшой контекст горутины, тогда как смена потока идёт через ядро с инвалидацией кэшей и TLB.
 - Модель — горутины мультиплексируются M:N на потоки по схеме G-M-P, поэтому число потоков не растёт вместе с числом горутин.
 - Итог — сотни тысяч горутин это нормально, а тысячи потоков ОС уже проблема.
-- См. [runtime-scheduler/01-scheduler-and-preemption.md](../01-go-core/runtime-scheduler/01-scheduler-and-preemption.md).
+- См. [runtime-scheduler/01-scheduler-and-preemption.md](../../01-go-core/runtime-scheduler/01-scheduler-and-preemption.md).
 
 **Чем отличается буферизированный канал от небуферизированного? (~55×)**
 
@@ -177,14 +177,14 @@
 - Буферизированный (`make(chan T, n)`) — принимает без блокировки, пока буфер не заполнен, и развязывает отправителя с получателем по времени.
 - Что буфер прячет — backpressure: медленный потребитель какое-то время не замедляет производителя, и перегрузка обнаруживается позже, чем возникла.
 - Когда блокировка возвращается — на полном буфере при отправке и на пустом при приёме поведение снова блокирующее.
-- См. [concurrency-and-performance/02-goroutines-and-channels.md](../01-go-core/concurrency-and-performance/02-goroutines-and-channels.md).
+- См. [concurrency-and-performance/02-goroutines-and-channels.md](../../01-go-core/concurrency-and-performance/02-goroutines-and-channels.md).
 
 **Что такое data race? Как обнаружить и как бороться? (~45×)**
 
 - Что это — одновременный доступ двух горутин к одной памяти, хотя бы один из них запись, без синхронизации; результат непредсказуем вплоть до порчи данных.
 - Обнаружение — race-детектор: `go test -race` / `go run -race` инструментирует доступы и печатает конфликтующие стеки; в CI гонять с `-race`.
 - Лечение — Mutex или atomic, передача владения через каналы, иммутабельность.
-- См. [concurrency-and-performance/01-memory-model.md](../01-go-core/concurrency-and-performance/01-memory-model.md).
+- См. [concurrency-and-performance/01-memory-model.md](../../01-go-core/concurrency-and-performance/01-memory-model.md).
 
 **Почему map не потокобезопасна? Как организовать конкурентный доступ? (~45×)**
 
@@ -195,7 +195,7 @@
   - `map` под `RWMutex` — общий случай, подходит почти всегда.
   - Шардирование по хешу ключа — когда упирается в contention на одном мьютексе.
   - `sync.Map` — узкий случай: много чтений, стабильный набор ключей, запись редкая.
-- См. [map-internals/sync-map](../01-go-core/map-internals/sync-map/README.md).
+- См. [map-internals/sync-map](../../01-go-core/map-internals/sync-map/README.md).
 
 **Что будет при чтении/записи в nil-канал? (~40×)**
 
@@ -203,7 +203,7 @@
 - Если других живых горутин нет — рантайм это замечает и роняет процесс с `all goroutines are asleep - deadlock!`.
 - `close(nil)` — паника.
 - Где это полезно на практике — присвоив переменной канала `nil`, можно выключить его ветку в `select`: заблокированный навсегда case просто перестаёт выбираться. Типовой приём при слиянии нескольких источников.
-- См. [concurrency-and-performance/02-goroutines-and-channels.md](../01-go-core/concurrency-and-performance/02-goroutines-and-channels.md).
+- См. [concurrency-and-performance/02-goroutines-and-channels.md](../../01-go-core/concurrency-and-performance/02-goroutines-and-channels.md).
 
 **Как работает select? (~35×)**
 
@@ -212,7 +212,7 @@
 - `default` — делает `select` неблокирующим: если ничего не готово, сразу выполняется он.
 - Типовая ветка — `case <-ctx.Done()` для выхода по отмене.
 - Крайние случаи — `select {}` без веток блокируется навсегда, а ветка с nil-каналом никогда не выбирается.
-- См. [concurrency-and-performance/02-goroutines-and-channels.md](../01-go-core/concurrency-and-performance/02-goroutines-and-channels.md).
+- См. [concurrency-and-performance/02-goroutines-and-channels.md](../../01-go-core/concurrency-and-performance/02-goroutines-and-channels.md).
 
 **Чем конкурентность отличается от параллельности? (~35×)**
 
@@ -227,7 +227,7 @@
 - Перехватить из родительской нельзя — `recover` работает только внутри `defer` той же горутины, где случилась паника. У горутин нет иерархии «родитель — потомок», за которую можно было бы зацепиться.
 - Как делать правильно — ставить `defer func() { if r := recover(); r != nil { … } }()` в самой горутине, обычно в обёртке воркера.
 - Как отдать наружу — превратить панику в ошибку и передать через канал или `errgroup`.
-- См. [05-error-handling.md](../01-go-core/05-error-handling.md).
+- См. [05-error-handling.md](../../01-go-core/05-error-handling.md).
 
 **Как устроен мьютекс под капотом? Что такое голодание? (~25×)**
 
@@ -236,7 +236,7 @@
 - При конфликте — короткий спин, затем парковка горутины через семафор рантайма.
 - Голодание — если горутина ждёт дольше 1 мс, мьютекс переходит в starvation-режим: владение передаётся напрямую первому в очереди (FIFO), новички не перехватывают лок «с наскока».
 - Зачем это — так исключается бесконечное оттеснение ждущих.
-- См. [concurrency-and-performance/03-sync-primitives.md](../01-go-core/concurrency-and-performance/03-sync-primitives.md).
+- См. [concurrency-and-performance/03-sync-primitives.md](../../01-go-core/concurrency-and-performance/03-sync-primitives.md).
 
 **Что такое sync.Pool и для чего нужен? (~20×)**
 
@@ -246,7 +246,7 @@
 - Главный нюанс — содержимое может быть выброшено при GC: пул это не кэш и не хранилище состояния.
 - Гигиена — объект перед `Put` надо сбрасывать (`buf.Reset()`).
 - Устройство — per-P, почти без блокировок.
-- См. [concurrency-and-performance/03-sync-primitives.md](../01-go-core/concurrency-and-performance/03-sync-primitives.md).
+- См. [concurrency-and-performance/03-sync-primitives.md](../../01-go-core/concurrency-and-performance/03-sync-primitives.md).
 
 **Расскажи про структуру канала (hchan). Как устроен буфер? (~20×)**
 
@@ -257,7 +257,7 @@
   - Буфер полон — горутина заворачивается в `sudog` и паркуется в `sendq`.
 - Приём устроен зеркально: сначала проверяется очередь ждущих отправителей, потом буфер.
 - Что из этого важно — канал это не lock-free структура, внутри обычный мьютекс; выигрыш даёт не отсутствие блокировки, а прямая передача значения между горутинами без промежуточного копирования в буфер.
-- См. [concurrency-and-performance/02-goroutines-and-channels.md](../01-go-core/concurrency-and-performance/02-goroutines-and-channels.md).
+- См. [concurrency-and-performance/02-goroutines-and-channels.md](../../01-go-core/concurrency-and-performance/02-goroutines-and-channels.md).
 
 ---
 
@@ -269,7 +269,7 @@
 - Очереди — у каждого P локальная (LRQ, без блокировок) плюс общая глобальная (GRQ).
 - Work-stealing — при пустой локальной очереди P крадёт половину у соседа либо берёт из глобальной или у netpoller.
 - Преемпция — кооперативные точки плюс асинхронная по сигналу (~10 мс, с Go 1.14).
-- См. [runtime-scheduler/01-scheduler-and-preemption.md](../01-go-core/runtime-scheduler/01-scheduler-and-preemption.md).
+- См. [runtime-scheduler/01-scheduler-and-preemption.md](../../01-go-core/runtime-scheduler/01-scheduler-and-preemption.md).
 
 **Как работает garbage collector? Можно ли на него влиять? (~40×)**
 
@@ -278,7 +278,7 @@
 - Цена — паузы суб-миллисекундные, основной расход это CPU на маркировку.
 - Как влиять — `GOGC` (целевой рост кучи, дефолт 100), `GOMEMLIMIT` (мягкий лимит), `runtime.GC()` вручную.
 - Главный рычаг — меньше аллокаций: `sync.Pool`, предвыделение.
-- См. [memory-internals/04-garbage-collector.md](../01-go-core/memory-internals/04-garbage-collector.md).
+- См. [memory-internals/04-garbage-collector.md](../../01-go-core/memory-internals/04-garbage-collector.md).
 
 **Что такое NetPoller и для чего нужен? (~25×)**
 
@@ -286,7 +286,7 @@
 - Как работает — сетевые fd неблокирующие: если операция «ждала бы», горутина паркуется, fd регистрируется в поллере, а поток (M) освобождается под другие горутины.
 - Пробуждение — по готовности сокета горутина возвращается в очередь планировщика.
 - Итог — тысячи соединений обслуживаются несколькими потоками.
-- См. [runtime-scheduler/03-netpoller.md](../01-go-core/runtime-scheduler/03-netpoller.md).
+- См. [runtime-scheduler/03-netpoller.md](../../01-go-core/runtime-scheduler/03-netpoller.md).
 
 **Как работает escape analysis? Когда переменная попадает на кучу? (~20×)**
 
@@ -294,7 +294,7 @@
 - Типичные причины escape — возврат указателя, сохранение в интерфейс (`any`, `fmt.Println`), захват замыканием, отправка в канал, слишком большой или динамический размер.
 - Проверка — `go build -gcflags=-m`.
 - Зачем — меньше эскейпов означает меньше аллокаций и работы GC.
-- См. [memory-internals/03-escape-analysis.md](../01-go-core/memory-internals/03-escape-analysis.md).
+- См. [memory-internals/03-escape-analysis.md](../../01-go-core/memory-internals/03-escape-analysis.md).
 
 **Что такое выравнивание (padding) в структурах? Сколько памяти занимает структура? (~20×)**
 
@@ -302,7 +302,7 @@
 - Следствие — порядок полей влияет на размер: сортировка «от больших к меньшим» убирает дыры.
 - Пример — `struct{ a int32; b bool }` = 4 + 1 + 3 padding = 8 байт.
 - Проверка — `unsafe.Sizeof`, линтер `fieldalignment`.
-- См. [memory-internals/01-stack-and-heap.md](../01-go-core/memory-internals/01-stack-and-heap.md).
+- См. [memory-internals/01-stack-and-heap.md](../../01-go-core/memory-internals/01-stack-and-heap.md).
 
 ---
 
@@ -317,7 +317,7 @@
   - Serializable — эквивалент последовательного выполнения; конфликты дают ошибку `40001`, нужен retry.
 - Логика уровней — каждый отсекает свои аномалии: dirty → non-repeatable → phantom read → write skew.
 - Цена — строже означает меньше параллелизма.
-- См. [postgresql/04-transactions-and-locking.md](../06-databases/database-systems-catalog/postgresql/04-transactions-and-locking.md).
+- См. [postgresql/04-transactions-and-locking.md](../../06-databases/database-systems-catalog/postgresql/04-transactions-and-locking.md).
 
 **Какие типы индексов в PostgreSQL знаешь? Чем B-Tree отличается от Hash? (~50×)**
 
@@ -328,7 +328,7 @@
 - BRIN — компактный для «естественно отсортированных» больших таблиц.
 - Плюс partial и expression-индексы.
 - B-tree vs Hash — B-tree упорядочен, поэтому умеет диапазоны и сортировку за O(log n); Hash только точное равенство, без порядка.
-- См. [postgresql/02-indexes.md](../06-databases/database-systems-catalog/postgresql/02-indexes.md).
+- См. [postgresql/02-indexes.md](../../06-databases/database-systems-catalog/postgresql/02-indexes.md).
 
 **Что такое ACID? Расскажи про каждую букву. (~45×)**
 
@@ -339,7 +339,7 @@
   - Durability — закоммиченное переживает сбой: сначала запись в WAL с `fsync`, потом в страницы данных.
 - Где проходит граница — по одной БД. Внешний HTTP-вызов внутри транзакции откатить нельзя, а транзакция всё это время держит соединение и блокировки строк.
 - Частая путаница — C в ACID это не C в CAP: здесь речь про валидность данных после транзакции, там про то, увидят ли разные узлы одно и то же значение.
-- См. [database-fundamentals/01-acid.md](../06-databases/database-fundamentals/01-acid.md).
+- См. [database-fundamentals/01-acid.md](../../06-databases/database-fundamentals/01-acid.md).
 
 **Что такое EXPLAIN ANALYZE? На что смотреть в выводе? (~35×)**
 
@@ -351,7 +351,7 @@
   - `BUFFERS` — соотношение `shared hit` и `shared read`, то есть попаданий в кэш против чтений с диска.
   - Поле `loops` у Nested Loop: тысячи итераций обычно означают неудачный план соединения.
 - Осторожность на проде — `EXPLAIN ANALYZE` действительно выполняет `INSERT`, `UPDATE` и `DELETE`, поэтому такие запросы гоняют внутри транзакции с `ROLLBACK`.
-- См. [postgresql/03-query-planning.md](../06-databases/database-systems-catalog/postgresql/03-query-planning.md).
+- См. [postgresql/03-query-planning.md](../../06-databases/database-systems-catalog/postgresql/03-query-planning.md).
 
 **Что такое шардирование? Какие проблемы? (~35×)**
 
@@ -362,7 +362,7 @@
   - Ребалансировка при добавлении узлов — переливка данных; частично лечится consistent hashing.
   - Hot shards — перекошенный ключ, из-за которого один узел получает непропорциональную нагрузку.
   - Глобально уникальные идентификаторы — автоинкремент на узел больше не работает, нужны UUID или Snowflake.
-- См. [postgresql/12-sharding.md](../06-databases/database-systems-catalog/postgresql/12-sharding.md).
+- См. [postgresql/12-sharding.md](../../06-databases/database-systems-catalog/postgresql/12-sharding.md).
 
 **Что такое deadlock в БД? Когда возникает? (~30×)**
 
@@ -373,7 +373,7 @@
   - Держать транзакции короткими и не делать в них внешних вызовов.
   - Предусмотреть ретрай на стороне приложения: жертву откатывают, и повтор обычно проходит.
 - Не путать с блокировкой на уровне приложения — там цикла в БД нет, а есть взаимное ожидание горутин или соединений пула.
-- См. [postgresql/04-transactions-and-locking.md](../06-databases/database-systems-catalog/postgresql/04-transactions-and-locking.md).
+- См. [postgresql/04-transactions-and-locking.md](../../06-databases/database-systems-catalog/postgresql/04-transactions-and-locking.md).
 
 **В чём разница между LEFT JOIN и INNER JOIN? (~30×)**
 
@@ -382,7 +382,7 @@
 - Типовое применение LEFT — «все пользователи, включая тех, у кого нет заказов».
 - Приём «найти строки без пары» — `LEFT JOIN` вместе с `WHERE right.id IS NULL`.
 - Ловушка — условие на правую таблицу в `WHERE` вместо `ON` превращает `LEFT JOIN` в `INNER`: NULL-строки отсеиваются фильтром. Условия по правой таблице пишут в `ON`.
-- См. [postgresql/00-sql-basics-and-syntax.md](../06-databases/database-systems-catalog/postgresql/00-sql-basics-and-syntax.md).
+- См. [postgresql/00-sql-basics-and-syntax.md](../../06-databases/database-systems-catalog/postgresql/00-sql-basics-and-syntax.md).
 
 **Что такое WAL (Write-Ahead Log) и для чего нужен? (~25×)**
 
@@ -393,7 +393,7 @@
   - Репликация — реплики получают поток WAL и применяют его у себя.
   - Point-in-time recovery — восстановление на произвольный момент из базовой копии плюс архива WAL.
 - Цена — при `synchronous_commit = on` каждая транзакция ждёт `fsync`; отключение ускоряет запись, но открывает окно потери последних транзакций.
-- См. [database-fundamentals/01-acid.md](../06-databases/database-fundamentals/01-acid.md) и [postgresql/06-replication.md](../06-databases/database-systems-catalog/postgresql/06-replication.md).
+- См. [database-fundamentals/01-acid.md](../../06-databases/database-fundamentals/01-acid.md) и [postgresql/06-replication.md](../../06-databases/database-systems-catalog/postgresql/06-replication.md).
 
 **Как работает VACUUM и autovacuum? (~25×)**
 
@@ -401,7 +401,7 @@
 - Что делает `VACUUM` — вычищает их (место переиспользуется), обновляет visibility map и статистику, защищает от XID wraparound; таблицу при этом не блокирует.
 - Отличие `VACUUM FULL` — переписывает файл под эксклюзивным локом.
 - autovacuum — фоновые воркеры, запускаются по порогам изменённых строк; на нагруженных таблицах пороги тюнят, иначе bloat.
-- См. [postgresql/01-mvcc-and-vacuum.md](../06-databases/database-systems-catalog/postgresql/01-mvcc-and-vacuum.md).
+- См. [postgresql/01-mvcc-and-vacuum.md](../../06-databases/database-systems-catalog/postgresql/01-mvcc-and-vacuum.md).
 
 **Как создать индекс без блокировки таблицы на проде? (~20×)**
 
@@ -412,7 +412,7 @@
   - При сбое остаётся индекс в состоянии INVALID: он не используется планировщиком, его нужно удалить и создать заново.
 - Как проверить результат — посмотреть `indisvalid` в `pg_index`; невалидные индексы к тому же продолжают замедлять запись.
 - Тот же режим есть у `DROP INDEX CONCURRENTLY` и `REINDEX CONCURRENTLY`.
-- См. [postgresql/02-indexes.md](../06-databases/database-systems-catalog/postgresql/02-indexes.md).
+- См. [postgresql/02-indexes.md](../../06-databases/database-systems-catalog/postgresql/02-indexes.md).
 
 ---
 
@@ -424,7 +424,7 @@
 - gRPC — RPC поверх HTTP/2 плюс Protobuf: бинарный (компактнее и быстрее), строгая схема с кодогенерацией, стриминг (4 типа вызовов), дедлайны из коробки.
 - Минусы gRPC — не работает из браузера напрямую (нужен gRPC-Web или gateway), не читается глазами.
 - Выбор — внешние и публичные API это REST; внутренняя service-to-service связь с жёсткими контрактами и требованиями к латентности это gRPC.
-- См. [03-api-styles/02-grpc.md](../08-networking-and-api/protocols/03-api-styles/02-grpc.md).
+- См. [03-api-styles/02-grpc.md](../../08-networking-and-api/protocols/03-api-styles/02-grpc.md).
 
 **Чем отличается HTTP/1.1 от HTTP/2? (~25×)**
 
@@ -432,7 +432,7 @@
 - HTTP/2 — бинарный фрейминг, мультиплексирование многих стримов в одном TCP-соединении, сжатие заголовков HPACK.
 - Что из HTTP/2 не взлетело — server push и схема приоритетов на практике deprecated: браузеры push отключили.
 - Что осталось — HoL на уровне TCP; его решает уже HTTP/3 поверх QUIC.
-- См. [protocols/00-protocol-comparison.md](../08-networking-and-api/protocols/00-protocol-comparison.md).
+- См. [protocols/00-protocol-comparison.md](../../08-networking-and-api/protocols/00-protocol-comparison.md).
 
 ---
 
@@ -445,7 +445,7 @@
 - Чем это оборачивается — переключение между потоками дешевле, а обмен данными прямой, но именно поэтому нужна синхронизация. Процессы изолированы и общаются через IPC, зато сбой одного не роняет остальные.
 - Кого планирует ОС — потоки, а не процессы.
 - Связь с Go — горутина не поток: рантайм мультиплексирует горутины на небольшое число потоков, поэтому цена создания горутины несопоставима с ценой потока.
-- См. [hardware-and-os/06-processes-and-threads.md](../10-devops-and-observability/hardware-and-os/06-processes-and-threads.md).
+- См. [hardware-and-os/06-processes-and-threads.md](../../10-devops-and-observability/hardware-and-os/06-processes-and-threads.md).
 
 ---
 
@@ -461,7 +461,7 @@
 - Главная мысль — Outbox не устраняет dual-write, а переносит его туда, где повтор безопасен: событие уже лежит в БД, потерять его нельзя, а лишнюю отправку гасит дедупликация на приёме.
 - Чего не спасает — идемпотентный продюсер Kafka: он снимает дубли ретраев внутри одной сессии продюсера, а после перезапуска релея это уже другая сессия.
 - Что без Outbox — записали в БД, брокер упал, событие потеряно; либо наоборот, отправили событие, а транзакция откатилась.
-- См. [patterns/09-saga-and-outbox.md](../04-architecture-and-patterns/patterns/09-saga-and-outbox.md).
+- См. [patterns/09-saga-and-outbox.md](../../04-architecture-and-patterns/patterns/09-saga-and-outbox.md).
 
 **Расскажи про SOLID. Как принципы ложатся на Go? (~30×)**
 
@@ -472,7 +472,7 @@
 - Dependency Inversion — зависеть от абстракций.
 - Что органичнее всего в Go — ISP (идиома маленьких интерфейсов, `io.Reader` с одним методом) и DIP (интерфейс объявляет потребитель, реализация неявная).
 - Про LSP — наследования в Go нет, поэтому он выражается через композицию и контракты интерфейсов.
-- См. [patterns/06-solid-in-go.md](../04-architecture-and-patterns/patterns/06-solid-in-go.md).
+- См. [patterns/06-solid-in-go.md](../../04-architecture-and-patterns/patterns/06-solid-in-go.md).
 
 **Что такое идемпотентность? Как обеспечить для POST-запроса? (~30×)**
 
@@ -480,21 +480,21 @@
 - По семантике HTTP — GET/PUT/DELETE идемпотентны, POST нет.
 - Как обеспечить для POST — клиент шлёт Idempotency-Key, сервер атомарно фиксирует ключ (уникальный индекс в БД) и сохраняет результат.
 - Повтор с тем же ключом — отдать сохранённый ответ, не выполняя эффект второй раз.
-- См. [reliability-patterns/06-idempotency.md](../05-system-design/reliability-patterns/06-idempotency.md) и [05-integration-patterns/02-idempotency.md](../08-networking-and-api/protocols/05-integration-patterns/02-idempotency.md).
+- См. [reliability-patterns/06-idempotency.md](../../05-system-design/reliability-patterns/06-idempotency.md) и [05-integration-patterns/02-idempotency.md](../../08-networking-and-api/protocols/05-integration-patterns/02-idempotency.md).
 
 **Чем отличается Kafka от RabbitMQ? Когда что использовать? (~30×)**
 
 - Kafka — durable-лог: партиции на диске, чтение по offset без удаления (retention, реплей), pull-модель, высокий throughput, много независимых consumer-групп.
 - RabbitMQ — брокер очередей (AMQP): умная маршрутизация через exchange и routing key, push-модель, сообщение удаляется после ack, приоритеты и TTL.
 - Когда что — Kafka для событийных стримов, больших потоков и реплея; RabbitMQ для task-очередей, RPC и сложной маршрутизации.
-- См. [07-message-brokers-and-streaming/00-comparison.md](../07-message-brokers-and-streaming/00-comparison.md).
+- См. [07-message-brokers-and-streaming/00-comparison.md](../../07-message-brokers-and-streaming/00-comparison.md).
 
 **Что такое graceful shutdown? Как реализовать? (~30×)**
 
 - Что это — корректное завершение: перестать принимать новые запросы, дообработать текущие, закрыть ресурсы (пулы БД, брокеры), и только потом выйти.
 - В Go — `signal.NotifyContext(ctx, SIGTERM, SIGINT)`, по сигналу `httpServer.Shutdown(ctxTimeout)` (перестаёт принимать, ждёт активные до таймаута), затем закрыть зависимости и дождаться воркеров (`errgroup` или WaitGroup).
 - В Kubernetes — сначала снять readiness, учесть `terminationGracePeriodSeconds`.
-- См. [patterns/08-graceful-shutdown.md](../04-architecture-and-patterns/patterns/08-graceful-shutdown.md).
+- См. [patterns/08-graceful-shutdown.md](../../04-architecture-and-patterns/patterns/08-graceful-shutdown.md).
 
 **Что такое кэширование? Какие стратегии существуют? (~30×)**
 
@@ -506,7 +506,7 @@
 - write-around — запись мимо кэша, сразу в БД.
 - Инвалидация — по TTL или по событиям.
 - Проблемы — устаревание данных, stampede (лечится singleflight), консистентность.
-- См. [caching/01-redis-as-cache.md](../06-databases/caching/01-redis-as-cache.md).
+- См. [caching/01-redis-as-cache.md](../../06-databases/caching/01-redis-as-cache.md).
 
 **Гарантирует ли Kafka порядок сообщений? Как обеспечить порядок для одной сущности? (~25×)**
 
@@ -515,13 +515,13 @@
 - Что ещё нужно включить — идемпотентного продюсера: без него ретрай при `max.in.flight.requests.per.connection > 1` может переставить сообщения местами.
 - Чем платим — пропускной способностью: все события горячей сущности идут через одну партицию, и её обслуживает один консьюмер в группе.
 - Что ломает порядок на стороне потребителя — параллельная обработка сообщений из одной партиции в нескольких горутинах; если нужен порядок, распараллеливать можно только по ключу.
-- См. [07-message-brokers-and-streaming/01-kafka.md](../07-message-brokers-and-streaming/01-kafka.md).
+- См. [07-message-brokers-and-streaming/01-kafka.md](../../07-message-brokers-and-streaming/01-kafka.md).
 
 ---
 
 ## Топ-10 задач на лайвкодинг
 
-Реальные задачи из тех же собеседований — с ответами. Полные разборы с production-версиями и тестами — в [coding-tasks](coding-tasks/README.md).
+Реальные задачи из тех же собеседований — с ответами. Полные разборы с production-версиями и тестами — в [coding-tasks](../coding-tasks/README.md).
 
 ### 1. Что выведет: слайс и map в функцию
 
@@ -553,7 +553,7 @@ func main() {
   - Отдельная горутина делает `wg.Wait()` и затем `close(out)` — это единственное место закрытия.
 - Ключевая ошибка — закрыть `out` до завершения воркеров или из нескольких мест: получится паника «send on closed channel».
 - Вторая типичная ошибка — забыть про отмену и получить утечку горутин, когда потребитель перестал читать `out`.
-- Полный разбор — [concurrency/01-worker-pool.md](coding-tasks/concurrency/01-worker-pool.md).
+- Полный разбор — [concurrency/01-worker-pool.md](../coding-tasks/concurrency/01-worker-pool.md).
 
 ### 3. Merge N каналов в один (fan-in)
 
@@ -563,7 +563,7 @@ func main() {
   - Отдельная горутина делает `wg.Wait()` и закрывает `out`.
 - Почему это корректно — каждая горутина завершается сама по закрытию своего входа, поэтому `out` закроется ровно тогда, когда закрыты все входные каналы.
 - Про утечки — при отмене нужен `select` с `ctx.Done()` на записи в `out`: иначе, если потребитель ушёл, горутины останутся висеть на отправке.
-- Полный разбор — [concurrency/03-fan-in-fan-out.md](coding-tasks/concurrency/03-fan-in-fan-out.md).
+- Полный разбор — [concurrency/03-fan-in-fan-out.md](../coding-tasks/concurrency/03-fan-in-fan-out.md).
 
 ### 4. Code Review: кэширующий прокси над KV-БД
 
@@ -573,7 +573,7 @@ func main() {
 - Cache stampede: N горутин одновременно промахиваются по одному ключу и все идут в медленную БД (~100 мс) — нужен `singleflight`.
 - `cache` не инициализирована — нужен конструктор (`make`), иначе паника при записи.
 - Нет TTL/лимита размера — вечный рост памяти; нет `context`/таймаута на `store.Get`; `Keys()` не реализован.
-- Прокси должен сам реализовывать интерфейс `KVStore` (прозрачность для пользователей). Родственный разбор: [code-review/01-fetcher-with-cache.md](coding-tasks/code-review/01-fetcher-with-cache.md).
+- Прокси должен сам реализовывать интерфейс `KVStore` (прозрачность для пользователей). Родственный разбор: [code-review/01-fetcher-with-cache.md](../coding-tasks/code-review/01-fetcher-with-cache.md).
 
 ### 5. Code Review: корзина интернет-магазина
 
@@ -582,7 +582,7 @@ func main() {
 - `make([]Product, 100)` — это 100 нулевых товаров, append добавляет 101-м; нужно `make(..., 0, 100)`.
 - Data race: `RemoveItem` мутирует `items` в горутине, `AddItem` — без синхронизации; нет мьютекса.
 - Deadlock: `removalChannel <- false` в конце + `<- true` из горутины в буфер размера 1 — второй вызов заблокируется; и семантика «кто читает?» не определена.
-- Глобальное изменяемое состояние (нетестируемо, нарушение SRP/DIP), деньги во `float` (нужны int-копейки/decimal), поиск/идентификация по имени товара, нет возврата ошибок. Родственный разбор: [code-review/02-background-task-processor.md](coding-tasks/code-review/02-background-task-processor.md).
+- Глобальное изменяемое состояние (нетестируемо, нарушение SRP/DIP), деньги во `float` (нужны int-копейки/decimal), поиск/идентификация по имени товара, нет возврата ошибок. Родственный разбор: [code-review/02-background-task-processor.md](../coding-tasks/code-review/02-background-task-processor.md).
 
 ### 6. Слайсы и общий backing-массив
 
@@ -655,7 +655,7 @@ ORDER BY total DESC;
 - `Get` — под `RLock` достать; если `time.Now().After(expiresAt)`, вернуть miss (ленивая очистка).
 - Фоновый janitor — горутина с `time.Ticker`, удаляющая просроченное; обязательно `Stop`/`ctx` для остановки, иначе утечка горутины.
 - Шардирование — массив из N шардов `{mu, map}`, выбор по `hash(key) % N`; режет contention.
-- Родственные разборы: [data-structures/01-lru-cache.md](coding-tasks/data-structures/01-lru-cache.md) и чек-лист ревью кэша в [oz_interview_questions.md](oz_interview_questions.md).
+- Родственные разборы: [data-structures/01-lru-cache.md](../coding-tasks/data-structures/01-lru-cache.md) и чек-лист ревью кэша в [oz_interview_questions.md](oz_interview_questions.md).
 
 ---
 
@@ -664,7 +664,7 @@ ORDER BY total DESC;
 Приоритеты из того же анализа (что тренировать в первую очередь):
 
 1. Знать наизусть: слайсы (append, cap, общий backing-массив), map (устройство, потокобезопасность, ключи), каналы (закрытый/nil, буферы), defer (порядок, момент вычисления аргументов).
-2. Написать за 15 минут: merge каналов (fan-in), worker pool, семафор на каналах, in-memory cache с TTL, параллельный HTTP-краулер — всё есть в [coding-tasks](coding-tasks/README.md).
+2. Написать за 15 минут: merge каналов (fan-in), worker pool, семафор на каналах, in-memory cache с TTL, параллельный HTTP-краулер — всё есть в [coding-tasks](../coding-tasks/README.md).
 3. SQL уверенно: JOIN + GROUP BY + HAVING, составные индексы (порядок колонок, селективность), EXPLAIN ANALYZE, уровни изоляции.
 4. Теория: GMP, GC (трёхцветная маркировка, фазы STW), ACID, Outbox и Saga, SOLID в Go. CAP и BASE в топ-50 не попали, но их спрашивают следом за ACID — разбор в [interview-questions.md](interview-questions.md).
-5. Senior-уровень: чистая/гексагональная архитектура, Circuit Breaker/Retry/Bulkhead, DDD (агрегаты, bounded context), system design с нуля — см. [05-system-design](../05-system-design/README.md).
+5. Senior-уровень: чистая/гексагональная архитектура, Circuit Breaker/Retry/Bulkhead, DDD (агрегаты, bounded context), system design с нуля — см. [05-system-design](../../05-system-design/README.md).

@@ -28,7 +28,7 @@
   - OData — соглашение о синтаксисе запросов и метаданных поверх REST (`$filter`, `$expand`).
 - Пограничный случай — SSE: не отдельный протокол, а формат тела ответа `text/event-stream`. Соединение остаётся обычным HTTP-ответом, который сервер просто не закрывает и дописывает события.
 - Сам HTTP идёт поверх — TCP для HTTP/1.1 и HTTP/2, плюс TLS для https; HTTP/3 — поверх QUIC, то есть уже UDP.
-- См. [protocols/00-protocol-comparison.md](../08-networking-and-api/protocols/00-protocol-comparison.md).
+- См. [protocols/00-protocol-comparison.md](../../08-networking-and-api/protocols/00-protocol-comparison.md).
 
 **Какие виды хранилищ знаешь?**
 
@@ -40,7 +40,7 @@
 - Поисковые (Elasticsearch) — полнотекст.
 - Блоб-хранилища и объектные (S3) — файлы.
 - Как выбирать — по модели данных, паттерну доступа и требованиям к консистентности.
-- См. [database-systems-catalog/01-comparison-table.md](../06-databases/database-systems-catalog/01-comparison-table.md).
+- См. [database-systems-catalog/01-comparison-table.md](../../06-databases/database-systems-catalog/01-comparison-table.md).
 
 **Для чего нужны линтеры?**
 
@@ -59,7 +59,7 @@
   - Возможность проверить взаимодействие — с какими аргументами и сколько раз вызвали зависимость.
   - Моделирование сбоев — ошибки, таймауты, пустые ответы, которые в реальности не воспроизвести по требованию.
 - Чего не заменяют — интеграционных тестов: мок проверяет ваши предположения о зависимости, а не саму зависимость.
-- См. [09-testing-and-quality/03-test-doubles-and-test-design.md](../09-testing-and-quality/03-test-doubles-and-test-design.md).
+- См. [09-testing-and-quality/03-test-doubles-and-test-design.md](../../09-testing-and-quality/03-test-doubles-and-test-design.md).
 
 **Чем образ отличается от контейнера?**
 
@@ -67,7 +67,7 @@
 - Контейнер — запущенный экземпляр образа: к слоям образа добавляется writable-слой поверх, и стартует процесс в своих namespace и cgroups.
 - Аналогия — образ это класс, контейнер это объект; из одного образа поднимают сколько угодно контейнеров.
 - Практическое следствие — данные, записанные в writable-слой, умирают вместе с контейнером, поэтому состояние выносят в тома.
-- См. [docker/02-containers.md](../10-devops-and-observability/docker/02-containers.md).
+- См. [docker/02-containers.md](../../10-devops-and-observability/docker/02-containers.md).
 
 **Какие есть способы прокинуть исходный код в контейнер?**
 
@@ -76,7 +76,7 @@
 - Bind-mount (`-v $PWD:/app`) — примонтировать каталог с хоста, чтобы работал hot-reload при разработке.
 - Именованный том — когда нужна не выдача исходников, а сохранение данных между перезапусками.
 - Как выбирать — для прода `COPY` вместе с multi-stage build, чтобы в финальный образ попал только бинарь; для локальной разработки bind-mount.
-- См. [dockerfiles-for-go/02-dockerfile-anatomy.md](../10-devops-and-observability/dockerfiles-for-go/02-dockerfile-anatomy.md).
+- См. [dockerfiles-for-go/02-dockerfile-anatomy.md](../../10-devops-and-observability/dockerfiles-for-go/02-dockerfile-anatomy.md).
 
 **Чем отличается merge от rebase?**
 
@@ -95,7 +95,7 @@
 - Надёжность — сообщение переживает падение консьюмера, ретраи и dead letter queue встроены в модель.
 - Фан-аут — одно событие получают несколько независимых потребителей.
 - Масштабирование — консьюмеров добавляют горизонтально, не трогая продюсера.
-- См. [07-message-brokers-and-streaming/README.md](../07-message-brokers-and-streaming/README.md).
+- См. [07-message-brokers-and-streaming/README.md](../../07-message-brokers-and-streaming/README.md).
 
 **Гарантирована ли доставка сообщений в Kafka?**
 
@@ -113,7 +113,7 @@
 - Массив `[N]T` — длина фиксирована и входит в тип, значение копируется целиком.
 - Слайс — заголовок `{указатель, len, cap}` поверх backing-массива; копируется только заголовок, сам массив остаётся общим.
 - Что из этого следует — изменение элемента через копию слайса видно снаружи, а через копию массива нет.
-- См. [04-slices.md](../01-go-core/04-slices.md).
+- См. [04-slices.md](../../01-go-core/04-slices.md).
 
 **Как объединить два слайса?**
 
@@ -127,7 +127,7 @@
 
 **Что такое map?**
 
-- Встроенная хеш-таблица «ключ → значение», доступ в среднем O(1) (худший случай O(n) при вырожденном распределении хешей). С Go 1.24 — на Swiss Tables. См. [map-internals](../01-go-core/map-internals/README.md).
+- Встроенная хеш-таблица «ключ → значение», доступ в среднем O(1) (худший случай O(n) при вырожденном распределении хешей). С Go 1.24 — на Swiss Tables. См. [map-internals](../../01-go-core/map-internals/README.md).
 
 **Какой порядок обхода map?**
 
@@ -147,7 +147,7 @@
 - Кто управляет — планировщик рантайма Go, а не ядро ОС.
 - Модель — G-M-P: G это горутина, M это поток ОС, P это логический процессор с локальной очередью.
 - Почему дёшево — горутины мультиплексируются на небольшое число потоков, а переключение между ними идёт в пространстве пользователя, без системного вызова.
-- См. [runtime-scheduler/01-scheduler-and-preemption.md](../01-go-core/runtime-scheduler/01-scheduler-and-preemption.md).
+- См. [runtime-scheduler/01-scheduler-and-preemption.md](../../01-go-core/runtime-scheduler/01-scheduler-and-preemption.md).
 
 **Что такое каналы? Зачем нужны? Какие бывают?**
 
@@ -155,7 +155,7 @@
 - Зачем — реализует принцип «share memory by communicating»: владение значением передаётся, а не разделяется под блокировкой.
 - По буферизации — небуферизированные (рандеву: отправитель ждёт получателя) и буферизированные (`make(chan T, n)`).
 - По направлению — двунаправленный `chan T`, только на приём `<-chan T`, только на отправку `chan<- T`; направление в сигнатуре функции документирует роль и проверяется компилятором.
-- См. [concurrency-and-performance/02-goroutines-and-channels.md](../01-go-core/concurrency-and-performance/02-goroutines-and-channels.md).
+- См. [concurrency-and-performance/02-goroutines-and-channels.md](../../01-go-core/concurrency-and-performance/02-goroutines-and-channels.md).
 
 **Аксиомы каналов?**
 
@@ -176,7 +176,7 @@
 - Одно без другого бывает — race condition без data race: `Lock` → прочитали баланс → `Unlock` → `if b >= amount` → `Lock` → списали → `Unlock`. Каждый доступ синхронизирован, `-race` молчит, но «проверить и списать» не атомарно как целое, и две горутины уводят баланс в минус.
 - Обратное тоже бывает — две горутины пишут в переменную одно и то же значение: результат «правильный», а data race по спеке есть.
 - Лечится по-разному — data race закрывается мьютексом/атомиком/каналом, race condition — расширением критической секции и дизайном инварианта.
-- См. [concurrency-and-performance/01-memory-model.md](../01-go-core/concurrency-and-performance/01-memory-model.md).
+- См. [concurrency-and-performance/01-memory-model.md](../../01-go-core/concurrency-and-performance/01-memory-model.md).
 
 **Примитивы синхронизации?**
 
@@ -185,7 +185,7 @@
 - Языковые средства — каналы и `context` для отмены.
 - Из `golang.org/x/sync` — `errgroup`, `semaphore`, `singleflight`.
 - Как усилить ответ — назвать к каждому сценарий, а не только имя.
-- См. [concurrency-and-performance/03-sync-primitives.md](../01-go-core/concurrency-and-performance/03-sync-primitives.md).
+- См. [concurrency-and-performance/03-sync-primitives.md](../../01-go-core/concurrency-and-performance/03-sync-primitives.md).
 
 ### Go — язык и инструменты
 
@@ -199,7 +199,7 @@
 
 **Для чего нужен пакет errors?**
 
-- Работа с ошибками-значениями: оборачивание (`fmt.Errorf("...: %w", err)`), `errors.Is` (сравнение с sentinel), `errors.As` (извлечение типа), `errors.Unwrap`, `errors.Join` (1.20). Даёт цепочку контекста без потери исходной ошибки. См. [05-error-handling.md](../01-go-core/05-error-handling.md).
+- Работа с ошибками-значениями: оборачивание (`fmt.Errorf("...: %w", err)`), `errors.Is` (сравнение с sentinel), `errors.As` (извлечение типа), `errors.Unwrap`, `errors.Join` (1.20). Даёт цепочку контекста без потери исходной ошибки. См. [05-error-handling.md](../../01-go-core/05-error-handling.md).
 
 **Использовал pprof? Инструменты для отладки?**
 
@@ -209,7 +209,7 @@
 - `runtime/trace` — поведение планировщика, задержки, блокировки во времени.
 - `GODEBUG` — быстрые переключатели без перекомпиляции: `gctrace=1` по сборщику, `schedtrace` по планировщику.
 - Статический анализ и отладчик — `go vet` и `delve`.
-- См. [profiling/01-pprof-tools-and-workflow.md](../01-go-core/profiling/01-pprof-tools-and-workflow.md).
+- См. [profiling/01-pprof-tools-and-workflow.md](../../01-go-core/profiling/01-pprof-tools-and-workflow.md).
 
 ### Базы данных
 
@@ -233,7 +233,7 @@
   - неиспользуемые и дублирующие индексы дают только накладные расходы;
   - планировщик тратит время на их перебор, а неактуальная статистика приводит к выбору не того индекса.
 - Когда не поможет — низкая селективность (условие выбирает большую долю таблицы), функция над столбцом без функционального индекса, `LIKE '%…'` с ведущим шаблоном.
-- См. [postgresql/02-indexes.md](../06-databases/database-systems-catalog/postgresql/02-indexes.md).
+- См. [postgresql/02-indexes.md](../../06-databases/database-systems-catalog/postgresql/02-indexes.md).
 
 **Зачем транзакции? Уровни изоляции?**
 
@@ -244,7 +244,7 @@
   - `REPEATABLE READ` — снимок фиксируется на всю транзакцию, отсекает non-repeatable read и в PostgreSQL ещё и phantom read (в стандарте ANSI на этом уровне фантомы допустимы); write skew остаётся;
   - `SERIALIZABLE` — SSI поверх снимка, отсекает и write skew: результат эквивалентен какому-то последовательному выполнению транзакций.
 - Цена — на RR и Serializable конкурентная транзакция может отвалиться с `40001 serialization_failure`, поэтому обязателен retry всей транзакции.
-- См. [postgresql/04-transactions-and-locking.md](../06-databases/database-systems-catalog/postgresql/04-transactions-and-locking.md).
+- См. [postgresql/04-transactions-and-locking.md](../../06-databases/database-systems-catalog/postgresql/04-transactions-and-locking.md).
 
 **Расскажи про JOIN.**
 
@@ -255,7 +255,7 @@
   - `FULL` — все строки из обеих таблиц.
   - `CROSS` — декартово произведение, без условия.
 - Не путать с алгоритмами — какой из nested loop, hash join или merge join применить, решает планировщик; это уровень исполнения, а не язык запроса.
-- См. [postgresql/00-sql-basics-and-syntax.md](../06-databases/database-systems-catalog/postgresql/00-sql-basics-and-syntax.md).
+- См. [postgresql/00-sql-basics-and-syntax.md](../../06-databases/database-systems-catalog/postgresql/00-sql-basics-and-syntax.md).
 
 **Deadlock в базе данных?**
 
@@ -266,7 +266,7 @@
   - Держать транзакции короткими, без внешних вызовов внутри.
   - Не расширять область блокировок без необходимости.
   - Предусмотреть ретрай: жертву откатили, повтор обычно проходит.
-- См. [postgresql/04-transactions-and-locking.md](../06-databases/database-systems-catalog/postgresql/04-transactions-and-locking.md).
+- См. [postgresql/04-transactions-and-locking.md](../../06-databases/database-systems-catalog/postgresql/04-transactions-and-locking.md).
 
 **Денормализация — плюсы и минусы?**
 
@@ -296,7 +296,7 @@
 - Отказоустойчивость — при падении брокера-лидера новым лидером становится одна из реплик ISR.
 - Что даёт гарантию — связка `acks=all` и `min.insync.replicas`: подтверждённое сообщение заведомо лежит более чем на одном узле.
 - Хранение — данные лежат на диске в виде лога и живут по политике retention, а не удаляются после чтения.
-- См. [07-message-brokers-and-streaming/01-kafka.md](../07-message-brokers-and-streaming/01-kafka.md).
+- См. [07-message-brokers-and-streaming/01-kafka.md](../../07-message-brokers-and-streaming/01-kafka.md).
 
 **Какие гарантии доставки предоставляет Kafka?**
 
@@ -317,7 +317,7 @@
 - Upsert вместо insert — операция становится безопасной при повторе сама по себе.
 - Проверка состояния перед эффектом — если заказ уже оплачен, второй платёж не проводится.
 - Транзакции Kafka — дают exactly-once внутри конвейера consume-process-produce, но не покрывают внешние побочные эффекты.
-- См. [reliability-patterns/06-idempotency.md](../05-system-design/reliability-patterns/06-idempotency.md).
+- См. [reliability-patterns/06-idempotency.md](../../05-system-design/reliability-patterns/06-idempotency.md).
 
 ### Микросервисы и распределённость
 
@@ -336,7 +336,7 @@
   - дороже эксплуатация — CI/CD, оркестрация, service discovery, observability на каждый сервис;
   - цена ошибки в границах — неверно нарезанные сервисы дают распределённый монолит, который хуже обычного.
 - Когда оправдано — когда нагрузка и число команд окупают эту цену; иначе начинают с модульного монолита и выносят сервисы по мере надобности.
-- См. [service-topologies/01-monolith-vs-modular-monolith-vs-microservices.md](../04-architecture-and-patterns/service-topologies/01-monolith-vs-modular-monolith-vs-microservices.md).
+- См. [service-topologies/01-monolith-vs-modular-monolith-vs-microservices.md](../../04-architecture-and-patterns/service-topologies/01-monolith-vs-modular-monolith-vs-microservices.md).
 
 **Что знаете про распределённые транзакции?**
 
@@ -344,7 +344,7 @@
 - 2PC (two-phase commit) — надёжно, но блокирующе и медленно, плохо масштабируется.
 - Saga — цепочка локальных транзакций с компенсирующими действиями при ошибке; бывает оркестрация и хореография.
 - Что берут на практике — Saga плюс Outbox для надёжной публикации событий, с eventual consistency.
-- См. [patterns/09-saga-and-outbox.md](../04-architecture-and-patterns/patterns/09-saga-and-outbox.md).
+- См. [patterns/09-saga-and-outbox.md](../../04-architecture-and-patterns/patterns/09-saga-and-outbox.md).
 
 **Как решается проблема дубликатов входящих запросов?**
 
@@ -353,17 +353,17 @@
 - При повторе с тем же ключом — возвращает сохранённый ответ, не выполняя эффект второй раз.
 - Подстраховка на уровне БД — уникальный индекс по ключу: даже при гонке двух параллельных повторов пройдёт только один.
 - Что учесть — у ключей нужен срок жизни, иначе таблица растёт бесконечно.
-- См. [05-integration-patterns/02-idempotency.md](../08-networking-and-api/protocols/05-integration-patterns/02-idempotency.md).
+- См. [05-integration-patterns/02-idempotency.md](../../08-networking-and-api/protocols/05-integration-patterns/02-idempotency.md).
 
 ### Планировщик, горутины, netpoller
 
 **Расскажите про планировщик.**
 
-- Модель G-M-P — G это горутины, M это OS-потоки, P это логические процессоры. `GOMAXPROCS` по умолчанию равен числу логических CPU, а с Go 1.25 в контейнере дополнительно ограничен CPU-квотой cgroup (см. [go1.25.md](../15-go-version-differences/go1.25.md)).
+- Модель G-M-P — G это горутины, M это OS-потоки, P это логические процессоры. `GOMAXPROCS` по умолчанию равен числу логических CPU, а с Go 1.25 в контейнере дополнительно ограничен CPU-квотой cgroup (см. [go1.25.md](../../15-go-version-differences/go1.25.md)).
 - Очереди — у каждого P своя локальная (LRQ), плюс есть общая глобальная (GRQ).
 - Work-stealing — при опустошении локальной очереди P крадёт работу у других.
 - Тип планировщика — кооперативно-вытесняющий: переключение в точках безопасности плюс асинхронная вытесняющая преемпция по сигналу (с Go 1.14, ~10 мс).
-- См. [runtime-scheduler/01-scheduler-and-preemption.md](../01-go-core/runtime-scheduler/01-scheduler-and-preemption.md).
+- См. [runtime-scheduler/01-scheduler-and-preemption.md](../../01-go-core/runtime-scheduler/01-scheduler-and-preemption.md).
 
 **В какой момент происходит переключение горутин?**
 
@@ -376,7 +376,7 @@
 - Пробуждение — когда сокет готов, поллер возвращает горутину в очередь планировщика.
 - Зачем это нужно — благодаря нему тысячи соединений обслуживаются несколькими потоками, и блокирующий по виду код остаётся неблокирующим по сути.
 - Важное исключение — обычные файлы так не поллятся, их чтение блокирует поток.
-- См. [runtime-scheduler/03-netpoller.md](../01-go-core/runtime-scheduler/03-netpoller.md).
+- См. [runtime-scheduler/03-netpoller.md](../../01-go-core/runtime-scheduler/03-netpoller.md).
 
 **Что происходит с горутиной при блокировке на чтении файла? Отличие от сетевого запроса?**
 
@@ -385,7 +385,7 @@
 - Судьба горутины — она «висит» вместе со своим M до возврата syscall.
 - Сетевой запрос — паркует горутину без блокировки M, через netpoller.
 - Итог — file read блокирует поток, network read нет.
-- См. [runtime-scheduler/02-syscall.md](../01-go-core/runtime-scheduler/02-syscall.md) и [03-netpoller.md](../01-go-core/runtime-scheduler/03-netpoller.md).
+- См. [runtime-scheduler/02-syscall.md](../../01-go-core/runtime-scheduler/02-syscall.md) и [03-netpoller.md](../../01-go-core/runtime-scheduler/03-netpoller.md).
 
 ### Context
 
@@ -396,7 +396,7 @@
 - Производные — `WithCancel`, `WithTimeout`, `WithDeadline`, `WithValue`, а с Go 1.20 ещё и `WithCancelCause`, позволяющий узнать причину отмены.
 - Методы интерфейса — `Done()`, `Err()`, `Deadline()`, `Value()`.
 - Обязательная гигиена — вызывать `cancel()` через `defer` даже при успешном завершении, иначе течёт таймер и связанные ресурсы.
-- См. [concurrency-and-performance/04-context-patterns.md](../01-go-core/concurrency-and-performance/04-context-patterns.md).
+- См. [concurrency-and-performance/04-context-patterns.md](../../01-go-core/concurrency-and-performance/04-context-patterns.md).
 
 **Для чего используется context.WithValue?**
 
@@ -419,7 +419,7 @@
 - Как проявляется — рантайм валит процесс фатальной ошибкой `concurrent map read and map write`, либо гонку ловит `-race`.
 - Важная деталь — это не паника, а фатальная ошибка: `recover` её не перехватит.
 - Что делать — синхронизировать доступ через `RWMutex`, шардировать по ключу или взять `sync.Map` в подходящем сценарии.
-- См. [map-internals/03-puzzles-and-gotchas.md](../01-go-core/map-internals/03-puzzles-and-gotchas.md).
+- См. [map-internals/03-puzzles-and-gotchas.md](../../01-go-core/map-internals/03-puzzles-and-gotchas.md).
 
 **Чем отличаются Mutex и RWMutex?**
 
@@ -428,7 +428,7 @@
 - Когда RWMutex выгоден — при сильном перекосе в сторону чтения и нетривиальной критической секции.
 - Когда он хуже — при частой записи или очень коротких секциях медленнее обычного `Mutex` из-за большего оверхеда, прежде всего contention на счётчике читателей между ядрами.
 - Starvation писателя не грозит — `RWMutex` в Go writer-preferring: пока писатель ждёт `Lock`, новые `RLock` блокируются.
-- См. [concurrency-and-performance/03-sync-primitives.md](../01-go-core/concurrency-and-performance/03-sync-primitives.md).
+- См. [concurrency-and-performance/03-sync-primitives.md](../../01-go-core/concurrency-and-performance/03-sync-primitives.md).
 
 **Почему предпочесть map+RWMutex, а не sync.Map?**
 
@@ -436,7 +436,7 @@
 - Для общего случая с частыми апдейтами — `map` + `RWMutex` быстрее, типобезопасна (без боксинга в `any`), даёт `len` и просто понятнее.
 - Минусы `sync.Map` — нет дженериков, аллокации на интерфейсах.
 - Оговорка про версии — в Go 1.24 `sync.Map` переписали на HashTrieMap, она стала заметно быстрее; вывод «для общего случая берут map + RWMutex» это не отменяет, но старые бенчмарки уже не показательны.
-- См. [map-internals/sync-map](../01-go-core/map-internals/sync-map/README.md).
+- См. [map-internals/sync-map](../../01-go-core/map-internals/sync-map/README.md).
 
 ### Архитектура
 
@@ -447,7 +447,7 @@
 - Что такое DI — передача зависимостей снаружи, через конструктор или параметры, вместо создания их внутри.
 - Как делают в Go — чаще всего вручную конструкторами; для больших графов есть `wire` (кодогенерация) и `fx` (рантайм-контейнер).
 - Что это даёт — тестируемость через подмену моками и слабую связанность модулей.
-- См. [patterns/06-solid-in-go.md](../04-architecture-and-patterns/patterns/06-solid-in-go.md).
+- См. [patterns/06-solid-in-go.md](../../04-architecture-and-patterns/patterns/06-solid-in-go.md).
 
 **Чистая/гексагональная и многослойная архитектура?**
 
@@ -455,7 +455,7 @@
 - Гексагональная (ports and adapters) и чистая — домен в центре, зависимости направлены внутрь через интерфейсы-порты, а инфраструктура (БД, HTTP, брокер) подключается внешними адаптерами.
 - Общая цель — изолировать бизнес-логику от деталей инфраструктуры, чтобы смена БД или транспорта не переписывала домен.
 - Практический признак, что всё сделано верно — доменный пакет не импортирует ни драйвер БД, ни веб-фреймворк.
-- См. [patterns/02-architecture-patterns.md](../04-architecture-and-patterns/patterns/02-architecture-patterns.md).
+- См. [patterns/02-architecture-patterns.md](../../04-architecture-and-patterns/patterns/02-architecture-patterns.md).
 
 **Что такое интерфейс any? Как с ним работать?**
 
@@ -481,7 +481,7 @@ SET enable_seqscan TO off;
 - Зачем применяют — для отладки: проверить, есть ли подходящий индекс, какой план выйдет с ним, и сравнить cost.
 - Чем это не является — не оптимизация прода: на маленьких таблицах seqscan часто быстрее.
 - Область действия — только текущая сессия, до `RESET` или реконнекта.
-- См. [postgresql/03-query-planning.md](../06-databases/database-systems-catalog/postgresql/03-query-planning.md).
+- См. [postgresql/03-query-planning.md](../../06-databases/database-systems-catalog/postgresql/03-query-planning.md).
 
 ### Задача 1 — что выведет Go-программа?
 
@@ -592,7 +592,7 @@ SELECT * FROM carts WHERE country = 'ru' AND customer_id = 10;
 - Что сделает планировщик — уйдёт в seqscan; возможен и full index scan, если индекс заметно уже таблицы, но это не то ускорение, ради которого строят индекс.
 - Оговорка про версии — с PostgreSQL 18 у B-tree появился skip scan: планировщик перебирает различные значения пропущенного `sku` и внутри каждого ищет по `country`. Выигрывает только при низкой кардинальности `sku`, иначе вырождается в тот же полный проход.
 - Как починить надёжно — индекс с `country` впереди, например `(country, customer_id)`.
-- Разбор leftmost-prefix — раздел «Составные индексы» выше и [postgresql/02-indexes.md](../06-databases/database-systems-catalog/postgresql/02-indexes.md).
+- Разбор leftmost-prefix — раздел «Составные индексы» выше и [postgresql/02-indexes.md](../../06-databases/database-systems-catalog/postgresql/02-indexes.md).
 
 ### Лайвкодинг-вопросы по слайсам
 
@@ -602,7 +602,7 @@ SELECT * FROM carts WHERE country = 'ru' AND customer_id = 10;
 - Если `len < cap` — `append` пишет прямо в существующий массив, и запись видна всем слайсам поверх него.
 - Если места нет — аллоцируется новый массив, данные копируются, возвращается новый заголовок; рост примерно вдвое на малых слайсах и плавнее на больших.
 - Отсюда правило — результат `append` всегда присваивают обратно: `s = append(s, …)`.
-- См. [04-slices.md](../01-go-core/04-slices.md).
+- См. [04-slices.md](../../01-go-core/04-slices.md).
 
 **Сложность доступа к элементу слайса?** — O(1) (адрес = база + индекс × размер элемента).
 
@@ -631,7 +631,7 @@ SELECT * FROM carts WHERE country = 'ru' AND customer_id = 10;
 - Худший вариант — если `Add` попадёт уже внутрь работающего `Wait`, рантайм выдаст панику `sync: WaitGroup misuse: Add called concurrently with Wait`.
 - Как правильно — вызывать `Add` в той же горутине, что запускает воркеров, до `go`, а внутри горутины оставлять только `defer wg.Done()`.
 - Правило — `Add` всегда вызывают до `go func()`, в родительской горутине.
-- С Go 1.25 проще — `wg.Go(func(){ … })` сам делает `Add(1)` и `defer Done()`, ошибиться негде. См. [concurrency-and-performance/02-goroutines-and-channels.md](../01-go-core/concurrency-and-performance/02-goroutines-and-channels.md).
+- С Go 1.25 проще — `wg.Go(func(){ … })` сам делает `Add(1)` и `defer Done()`, ошибиться негде. См. [concurrency-and-performance/02-goroutines-and-channels.md](../../01-go-core/concurrency-and-performance/02-goroutines-and-channels.md).
 
 **В какой последовательности отработают запущенные горутины?**
 
@@ -657,4 +657,4 @@ if err := g.Wait(); err != nil { /* первая ошибка */ }
 ```
 
 - Про `u := u` — до Go 1.22 внутри цикла была обязательна эта строка (все замыкания делили одну переменную); с 1.22 переменная цикла своя на каждой итерации, и копия больше не нужна.
-- Вручную то же делается через `context.WithCancel` + `cancel()` при первой ошибке и `sync.Once` или канал для её фиксации. См. [concurrency-and-performance/04-context-patterns.md](../01-go-core/concurrency-and-performance/04-context-patterns.md).
+- Вручную то же делается через `context.WithCancel` + `cancel()` при первой ошибке и `sync.Once` или канал для её фиксации. См. [concurrency-and-performance/04-context-patterns.md](../../01-go-core/concurrency-and-performance/04-context-patterns.md).
