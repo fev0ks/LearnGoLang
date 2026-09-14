@@ -20,6 +20,9 @@
 **Продвинутые темы:**
 - [10. Integration, Contract и E2E](./10-integration-and-e2e.md) — HTTP client testing, contract tests, E2E flows, CI структура
 - [11. Race detector, Fuzzing, Benchmarks](./11-race-fuzz-and-benchmarks.md) — -race, fuzz corpus, benchmem, benchstat
+- [Нагрузочное тестирование](./load-testing/README.md) — виды тестов, профиль нагрузки, k6, поиск bottleneck и эксперименты в production
+
+---
 
 ## Подборка
 
@@ -32,6 +35,8 @@
 - [uber-go/mock](https://github.com/uber-go/mock)
 - [google/go-cmp](https://github.com/google/go-cmp)
 
+---
+
 ## Вопросы для подготовки
 
 - какие тесты написать первыми для критичного Go-сервиса;
@@ -39,4 +44,5 @@
 - чем integration test полезнее десятка unit test в конкретном кейсе;
 - как не превратить CI в медленный и хрупкий bottleneck;
 - зачем нужны race test, fuzz test и benchmark, и где они реально окупаются;
+- как построить реалистичный нагрузочный тест, найти узкое место и ограничить влияние теста в production;
 - в чём разница между fake и mock и когда выбирать каждый.
