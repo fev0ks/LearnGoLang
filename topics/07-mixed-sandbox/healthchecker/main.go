@@ -6,7 +6,6 @@ import (
 	"log"
 	"math/rand/v2"
 	"net/http"
-	"slices"
 	"sync"
 	"time"
 )
@@ -46,8 +45,6 @@ func checkSync() {
 }
 
 func checkAsync() {
-
-	slices.Clone()
 
 	wg := sync.WaitGroup{}
 	wg.Add(len(urls))
