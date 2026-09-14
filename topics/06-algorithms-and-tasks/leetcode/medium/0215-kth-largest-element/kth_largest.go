@@ -2,7 +2,7 @@ package kth_largest
 
 import "container/heap"
 
-// LeetCode 215. Kth Largest Element in an Array (Medium)
+// FindKthLargest LeetCode 215. Kth Largest Element in an Array (Medium)
 // https://leetcode.com/problems/kth-largest-element-in-an-array/
 //
 // Задача: найти k-й по величине элемент массива (k-й в порядке убывания, не

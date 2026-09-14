@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-// LeetCode 297. Serialize and Deserialize Binary Tree (Hard)
+// Serialize LeetCode 297. Serialize and Deserialize Binary Tree (Hard)
 // https://leetcode.com/problems/serialize-and-deserialize-binary-tree/
 //
 // Задача: реализовать сериализацию бинарного дерева в строку и обратную

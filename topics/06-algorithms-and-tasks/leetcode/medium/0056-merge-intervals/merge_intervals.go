@@ -2,7 +2,7 @@ package merge_intervals
 
 import "sort"
 
-// LeetCode 56. Merge Intervals (Medium)
+// Merge LeetCode 56. Merge Intervals (Medium)
 // https://leetcode.com/problems/merge-intervals/
 //
 // Задача: дан набор интервалов [start, end]. Слить все пересекающиеся и вернуть

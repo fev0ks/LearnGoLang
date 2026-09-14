@@ -1,6 +1,6 @@
 package best_time
 
-// LeetCode 121. Best Time to Buy and Sell Stock (Easy)
+// MaxProfit LeetCode 121. Best Time to Buy and Sell Stock (Easy)
 // https://leetcode.com/problems/best-time-to-buy-and-sell-stock/
 //
 // Задача: prices[i] — цена акции в день i. Купить можно один раз и продать

@@ -1,6 +1,6 @@
 package maximum_depth
 
-// LeetCode 104. Maximum Depth of Binary Tree (Easy)
+// MaxDepth LeetCode 104. Maximum Depth of Binary Tree (Easy)
 // https://leetcode.com/problems/maximum-depth-of-binary-tree/
 //
 // Задача: вернуть максимальную глубину бинарного дерева — число узлов на самом

@@ -2,7 +2,7 @@ package simplify_path
 
 import "strings"
 
-// LeetCode 71. Simplify Path (Medium)
+// SimplifyPath LeetCode 71. Simplify Path (Medium)
 // https://leetcode.com/problems/simplify-path/
 //
 // Задача: дан абсолютный Unix-путь. Вернуть его каноническую форму:

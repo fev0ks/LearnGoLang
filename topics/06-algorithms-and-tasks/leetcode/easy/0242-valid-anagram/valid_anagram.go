@@ -1,6 +1,6 @@
 package valid_anagram
 
-// LeetCode 242. Valid Anagram (Easy)
+// IsAnagram LeetCode 242. Valid Anagram (Easy)
 // https://leetcode.com/problems/valid-anagram/
 //
 // Задача: даны строки s и t из строчных латинских букв. Вернуть true, если t —

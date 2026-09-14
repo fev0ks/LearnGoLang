@@ -1,6 +1,6 @@
 package climbing_stairs
 
-// LeetCode 70. Climbing Stairs (Easy)
+// ClimbStairs LeetCode 70. Climbing Stairs (Easy)
 // https://leetcode.com/problems/climbing-stairs/
 //
 // Задача: лестница из n ступеней, за раз можно подняться на 1 или 2 ступени.

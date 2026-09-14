@@ -1,6 +1,6 @@
 package symmetric_tree
 
-// LeetCode 101. Symmetric Tree (Easy)
+// IsSymmetric LeetCode 101. Symmetric Tree (Easy)
 // https://leetcode.com/problems/symmetric-tree/
 //
 // Задача: дано бинарное дерево. Проверить, является ли оно зеркально

@@ -1,6 +1,6 @@
 package longest_substring
 
-// LeetCode 3. Longest Substring Without Repeating Characters (Medium)
+// LengthOfLongestSubstring LeetCode 3. Longest Substring Without Repeating Characters (Medium)
 // https://leetcode.com/problems/longest-substring-without-repeating-characters/
 //
 // Задача: найти длину самой длинной подстроки без повторяющихся символов.

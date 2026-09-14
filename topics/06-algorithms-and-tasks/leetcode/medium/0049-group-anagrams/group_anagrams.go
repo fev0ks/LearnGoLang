@@ -2,7 +2,7 @@ package group_anagrams
 
 import "sort"
 
-// LeetCode 49. Group Anagrams (Medium)
+// GroupAnagrams LeetCode 49. Group Anagrams (Medium)
 // https://leetcode.com/problems/group-anagrams/
 //
 // Задача: сгруппировать слова, являющиеся анаграммами друг друга.

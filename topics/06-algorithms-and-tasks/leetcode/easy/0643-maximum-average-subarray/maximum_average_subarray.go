@@ -1,6 +1,6 @@
 package main
 
-// LeetCode 643. Maximum Average Subarray I (Easy)
+// findMaxAverage LeetCode 643. Maximum Average Subarray I (Easy)
 // https://leetcode.com/problems/maximum-average-subarray-i/
 //
 // Задача: дан массив nums и число k. Найти непрерывный подмассив длины k

@@ -1,6 +1,6 @@
 package minimum_window
 
-// LeetCode 76. Minimum Window Substring (Hard)
+// MinWindow LeetCode 76. Minimum Window Substring (Hard)
 // https://leetcode.com/problems/minimum-window-substring/
 //
 // Задача: даны строки s и t. Найти наименьшую подстроку s, содержащую все

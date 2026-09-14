@@ -2,7 +2,7 @@ package smaller_numbers
 
 import "sort"
 
-// LeetCode 1365. How Many Numbers Are Smaller Than the Current Number (Easy)
+// SmallerNumbersThanCurrent LeetCode 1365. How Many Numbers Are Smaller Than the Current Number (Easy)
 // https://leetcode.com/problems/how-many-numbers-are-smaller-than-the-current-number/
 //
 // Задача: для каждого nums[i] посчитать, сколько других элементов массива строго

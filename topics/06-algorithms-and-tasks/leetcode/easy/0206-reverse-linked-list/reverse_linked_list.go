@@ -1,6 +1,6 @@
 package reverse_linked_list
 
-// LeetCode 206. Reverse Linked List (Easy)
+// ReverseList LeetCode 206. Reverse Linked List (Easy)
 // https://leetcode.com/problems/reverse-linked-list/
 //
 // Задача: развернуть односвязный список и вернуть новую голову.

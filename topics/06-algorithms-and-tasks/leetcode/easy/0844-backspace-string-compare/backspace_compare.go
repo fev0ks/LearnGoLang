@@ -1,6 +1,6 @@
 package backspace_compare
 
-// LeetCode 844. Backspace String Compare (Easy)
+// BackspaceCompare LeetCode 844. Backspace String Compare (Easy)
 // https://leetcode.com/problems/backspace-string-compare/
 //
 // Задача: даны две строки s и t. Символ '#' означает backspace (удаление

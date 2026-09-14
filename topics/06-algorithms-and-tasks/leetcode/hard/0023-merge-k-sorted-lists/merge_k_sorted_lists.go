@@ -2,7 +2,7 @@ package merge_k_sorted_lists
 
 import "container/heap"
 
-// LeetCode 23. Merge k Sorted Lists (Hard)
+// MergeKLists LeetCode 23. Merge k Sorted Lists (Hard)
 // https://leetcode.com/problems/merge-k-sorted-lists/
 //
 // Задача: даны k отсортированных по возрастанию связных списков. Слить их в один

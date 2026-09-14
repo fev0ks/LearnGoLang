@@ -1,6 +1,6 @@
 package valid_parentheses
 
-// LeetCode 20. Valid Parentheses (Easy)
+// IsValid LeetCode 20. Valid Parentheses (Easy)
 // https://leetcode.com/problems/valid-parentheses/
 //
 // Задача: дана строка из символов '(', ')', '{', '}', '[', ']'. Определить,

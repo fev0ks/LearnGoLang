@@ -1,6 +1,6 @@
 package main
 
-// LeetCode 146. LRU Cache (Medium)
+// Constructor LeetCode 146. LRU Cache (Medium)
 // https://leetcode.com/problems/lru-cache/
 //
 // Задача: реализовать кэш с вытеснением по принципу Least Recently Used и

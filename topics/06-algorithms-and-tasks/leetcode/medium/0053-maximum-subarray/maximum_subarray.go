@@ -1,6 +1,6 @@
 package maximum_subarray
 
-// LeetCode 53. Maximum Subarray (Medium)
+// MaxSubArray LeetCode 53. Maximum Subarray (Medium)
 // https://leetcode.com/problems/maximum-subarray/
 //
 // Задача: найти непрерывный подмассив с максимальной суммой и вернуть эту сумму.

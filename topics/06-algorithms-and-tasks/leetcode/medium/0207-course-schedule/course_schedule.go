@@ -1,6 +1,6 @@
 package course_schedule
 
-// LeetCode 207. Course Schedule (Medium)
+// CanFinish LeetCode 207. Course Schedule (Medium)
 // https://leetcode.com/problems/course-schedule/
 //
 // Задача: дано numCourses курсов и список зависимостей prerequisites, где

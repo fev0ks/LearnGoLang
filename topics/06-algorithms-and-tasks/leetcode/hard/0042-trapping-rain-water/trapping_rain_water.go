@@ -1,6 +1,6 @@
 package trapping_rain_water
 
-// LeetCode 42. Trapping Rain Water (Hard)
+// Trap LeetCode 42. Trapping Rain Water (Hard)
 // https://leetcode.com/problems/trapping-rain-water/
 //
 // Задача: дан массив высот столбиков (ширина каждого 1). Посчитать, сколько

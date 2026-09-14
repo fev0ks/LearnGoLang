@@ -1,6 +1,6 @@
 package fruit_into_baskets
 
-// LeetCode 904. Fruit Into Baskets (Medium)
+// TotalFruits LeetCode 904. Fruit Into Baskets (Medium)
 // https://leetcode.com/problems/fruit-into-baskets/
 //
 // Задача: дан ряд деревьев, fruits[i] — тип фрукта на дереве i. Есть две

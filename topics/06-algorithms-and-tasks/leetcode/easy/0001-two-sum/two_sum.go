@@ -1,6 +1,6 @@
 package two_sum
 
-// LeetCode 1. Two Sum (Easy)
+// TwoSum LeetCode 1. Two Sum (Easy)
 // https://leetcode.com/problems/two-sum/
 //
 // Задача: дан массив nums и число target. Вернуть индексы двух элементов, сумма

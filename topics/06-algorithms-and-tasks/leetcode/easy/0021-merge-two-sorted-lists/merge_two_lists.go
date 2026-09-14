@@ -1,6 +1,6 @@
 package merge_two_lists
 
-// LeetCode 21. Merge Two Sorted Lists (Easy)
+// MergeTwoLists LeetCode 21. Merge Two Sorted Lists (Easy)
 // https://leetcode.com/problems/merge-two-sorted-lists/
 //
 // Задача: даны два отсортированных по возрастанию связных списка. Слить их в

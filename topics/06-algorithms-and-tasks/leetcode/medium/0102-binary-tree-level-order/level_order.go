@@ -1,6 +1,6 @@
 package level_order
 
-// LeetCode 102. Binary Tree Level Order Traversal (Medium)
+// LevelOrder LeetCode 102. Binary Tree Level Order Traversal (Medium)
 // https://leetcode.com/problems/binary-tree-level-order-traversal/
 //
 // Задача: обойти бинарное дерево по уровням (сверху вниз, слева направо) и

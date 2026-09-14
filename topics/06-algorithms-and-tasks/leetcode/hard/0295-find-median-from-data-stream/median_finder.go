@@ -2,7 +2,7 @@ package median_finder
 
 import "container/heap"
 
-// LeetCode 295. Find Median from Data Stream (Hard)
+// Constructor LeetCode 295. Find Median from Data Stream (Hard)
 // https://leetcode.com/problems/find-median-from-data-stream/
 //
 // Задача: поддерживать поток чисел и уметь в любой момент за O(log n) добавлять

@@ -1,6 +1,6 @@
 package number_of_islands
 
-// LeetCode 200. Number of Islands (Medium)
+// NumIslands LeetCode 200. Number of Islands (Medium)
 // https://leetcode.com/problems/number-of-islands/
 //
 // Задача: дана матрица из '1' (суша) и '0' (вода). Посчитать число островов.

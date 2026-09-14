@@ -1,6 +1,6 @@
 package search_rotated
 
-// LeetCode 33. Search in Rotated Sorted Array (Medium)
+// Search LeetCode 33. Search in Rotated Sorted Array (Medium)
 // https://leetcode.com/problems/search-in-rotated-sorted-array/
 //
 // Задача: отсортированный по возрастанию массив без повторов повёрнут в

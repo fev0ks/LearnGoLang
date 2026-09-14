@@ -2,7 +2,7 @@ package three_sum
 
 import "sort"
 
-// LeetCode 15. 3Sum (Medium)
+// ThreeSum LeetCode 15. 3Sum (Medium)
 // https://leetcode.com/problems/3sum/
 //
 // Задача: найти все уникальные тройки чисел, дающих в сумме 0.
