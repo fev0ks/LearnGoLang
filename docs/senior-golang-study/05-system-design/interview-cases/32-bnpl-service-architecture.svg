@@ -1,0 +1,195 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1280" viewBox="0 0 1800 1280" role="img" aria-labelledby="title description">
+  <title id="title">BNPL: покупка, подтверждение платежа и обслуживание рассрочки</title>
+  <desc id="description">Учебная схема провайдера BNPL: магазин резервирует товар, BNPL проверяет риск и лимит, PSP обрабатывает первый взнос, BNPL уведомляет магазин вебхуком, магазин подтверждает заказ, после чего сервис ведёт график, выплаты и сверку.</desc>
+  <defs>
+    <linearGradient id="page" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f4f8ff"/>
+      <stop offset="1" stop-color="#f8fafc"/>
+    </linearGradient>
+    <linearGradient id="banner" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#172a49"/>
+      <stop offset="1" stop-color="#284b78"/>
+    </linearGradient>
+    <filter id="soft-shadow" x="-10%" y="-20%" width="120%" height="150%">
+      <feDropShadow dx="0" dy="5" stdDeviation="9" flood-color="#172a49" flood-opacity="0.08"/>
+    </filter>
+    <marker id="arrow-forward" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M1 1 L10 6 L1 11 Z" fill="#63809e"/>
+    </marker>
+    <marker id="arrow-back" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M1 1 L10 6 L1 11 Z" fill="#18958b"/>
+    </marker>
+    <marker id="arrow-purple" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M1 1 L10 6 L1 11 Z" fill="#7754c6"/>
+    </marker>
+  </defs>
+  <style>
+    .title { font: 800 43px Inter, Arial, sans-serif; fill: #ffffff; letter-spacing: -1px; }
+    .subtitle { font: 400 19px Inter, Arial, sans-serif; fill: #dce8fb; }
+    .section { font: 750 25px Inter, Arial, sans-serif; fill: #172a49; }
+    .section-no { font: 800 20px Inter, Arial, sans-serif; fill: #ffffff; text-anchor: middle; }
+    .card-title { font: 750 21px Inter, Arial, sans-serif; fill: #172a49; }
+    .card-text { font: 400 17px Inter, Arial, sans-serif; fill: #40536c; }
+    .card-strong { font: 700 17px Inter, Arial, sans-serif; fill: #263b58; }
+    .step-text { font: 650 18px Inter, Arial, sans-serif; fill: #26466d; }
+    .note { font: 500 16px Inter, Arial, sans-serif; fill: #50657d; }
+    .footer { font: 550 17px Inter, Arial, sans-serif; fill: #4b617a; }
+    .band { fill: #ffffff; stroke: #dce5f0; stroke-width: 1.5; filter: url(#soft-shadow); }
+    .card { stroke-width: 1.7; }
+    .flow { fill: none; stroke: #63809e; stroke-width: 3; stroke-linecap: round; marker-end: url(#arrow-forward); }
+    .return-flow { fill: none; stroke: #18958b; stroke-width: 3; stroke-linecap: round; marker-end: url(#arrow-back); }
+    .purple-flow { fill: none; stroke: #7754c6; stroke-width: 3; stroke-linecap: round; marker-end: url(#arrow-purple); }
+  </style>
+
+  <rect width="1800" height="1280" fill="url(#page)"/>
+  <rect x="56" y="48" width="1688" height="118" rx="27" fill="url(#banner)"/>
+  <text class="title" x="84" y="103">BNPL · от корзины до выплаты продавцу</text>
+  <text class="subtitle" x="86" y="139">Учебная архитектура провайдера рассрочки · роли Tabby / Klarna — ориентир продукта, не описание их внутренних систем</text>
+
+  <!-- 1. Checkout and the first payment. -->
+  <rect class="band" x="56" y="186" width="1688" height="290" rx="26"/>
+  <circle cx="101" cy="224" r="22" fill="#4466ae"/>
+  <text class="section-no" x="101" y="231">1</text>
+  <text class="section" x="139" y="232">Оформление · пока товар зарезервирован у магазина</text>
+
+  <path class="flow" d="M360 327 H405"/>
+  <path class="flow" d="M696 327 H741"/>
+  <path class="flow" d="M1032 327 H1077"/>
+  <path class="flow" d="M1368 327 H1413"/>
+
+  <rect class="card" x="80" y="254" width="280" height="148" rx="20" fill="#eff3ff" stroke="#b7c6f3"/>
+  <rect x="80" y="254" width="280" height="7" rx="3.5" fill="#566ec0"/>
+  <text class="card-title" x="102" y="298">Магазин</text>
+  <text class="card-text" x="102" y="329">Заказ и резерв товара</text>
+  <text class="card-text" x="102" y="354">TTL — минуты</text>
+  <text class="note" x="102" y="383">merchant order reference</text>
+
+  <rect class="card" x="416" y="254" width="280" height="148" rx="20" fill="#eafbf9" stroke="#a7e7df"/>
+  <rect x="416" y="254" width="280" height="7" rx="3.5" fill="#159b91"/>
+  <text class="card-title" x="438" y="298">BNPL API / Saga</text>
+  <text class="card-text" x="438" y="329">Создаёт checkout</text>
+  <text class="card-text" x="438" y="354">Покупатель принимает</text>
+  <text class="card-text" x="438" y="379">условия рассрочки</text>
+
+  <rect class="card" x="752" y="254" width="280" height="148" rx="20" fill="#fff7ec" stroke="#f3d4a7"/>
+  <rect x="752" y="254" width="280" height="7" rx="3.5" fill="#d99a39"/>
+  <text class="card-title" x="774" y="298">Risk</text>
+  <text class="card-text" x="774" y="329">Кредитное решение</text>
+  <text class="card-text" x="774" y="354">и условия покупки</text>
+  <text class="note" x="774" y="383">ещё без списания денег</text>
+
+  <rect class="card" x="1088" y="254" width="280" height="148" rx="20" fill="#f5f0ff" stroke="#d6c4f1"/>
+  <rect x="1088" y="254" width="280" height="7" rx="3.5" fill="#855ac8"/>
+  <text class="card-title" x="1110" y="298">Financial Core</text>
+  <text class="card-text" x="1110" y="329">Резервирует лимит</text>
+  <text class="card-text" x="1110" y="354">в PostgreSQL</text>
+  <text class="note" x="1110" y="383">пока не создаёт долг</text>
+
+  <rect class="card" x="1424" y="254" width="280" height="148" rx="20" fill="#fff7ec" stroke="#f3d4a7"/>
+  <rect x="1424" y="254" width="280" height="7" rx="3.5" fill="#d99a39"/>
+  <text class="card-title" x="1446" y="298">Внешний PSP</text>
+  <text class="card-text" x="1446" y="329">Первый взнос по карте</text>
+  <text class="card-text" x="1446" y="354">через Payment Adapter</text>
+  <text class="note" x="1446" y="383">успех / отказ / UNKNOWN</text>
+
+  <rect x="80" y="419" width="1640" height="42" rx="13" fill="#f4f7fb"/>
+  <text class="note" x="100" y="446">Стрелки показывают порядок: Saga вызывает Risk, Core и PSP. Redirect покупателя не подтверждает оплату.</text>
+
+  <!-- 2. Payment result, merchant notification, capture. -->
+  <rect class="band" x="56" y="496" width="1688" height="330" rx="26"/>
+  <circle cx="101" cy="534" r="22" fill="#18958b"/>
+  <text class="section-no" x="101" y="541">2</text>
+  <text class="section" x="139" y="542">Подтверждение · от PSP через BNPL к магазину</text>
+
+  <path class="return-flow" d="M1424 640 H1379"/>
+  <path class="return-flow" d="M1088 640 H1043"/>
+  <path class="return-flow" d="M752 640 H707"/>
+  <path class="return-flow" d="M416 640 H371"/>
+
+  <rect class="card" x="80" y="567" width="280" height="145" rx="20" fill="#eff3ff" stroke="#b7c6f3"/>
+  <rect x="80" y="567" width="280" height="7" rx="3.5" fill="#566ec0"/>
+  <text class="card-title" x="102" y="611">Backend магазина</text>
+  <text class="card-text" x="102" y="640">GET checkout status</text>
+  <text class="card-text" x="102" y="666">+ проверка резерва</text>
+  <text class="note" x="102" y="695">webhook — сигнал, не истина</text>
+
+  <rect class="card" x="416" y="567" width="280" height="145" rx="20" fill="#eafbf9" stroke="#a7e7df"/>
+  <rect x="416" y="567" width="280" height="7" rx="3.5" fill="#159b91"/>
+  <text class="card-title" x="438" y="611">Merchant Webhook</text>
+  <text class="card-title" x="438" y="636">Dispatcher</text>
+  <text class="card-text" x="438" y="666">Подпись + повторы</text>
+  <text class="note" x="438" y="695">checkout.authorized</text>
+
+  <rect class="card" x="752" y="567" width="280" height="145" rx="20" fill="#f5f0ff" stroke="#d6c4f1"/>
+  <rect x="752" y="567" width="280" height="7" rx="3.5" fill="#855ac8"/>
+  <text class="card-title" x="774" y="611">Checkout AUTHORIZED</text>
+  <text class="card-text" x="774" y="640">Первый взнос учтён</text>
+  <text class="card-text" x="774" y="666">Событие в outbox</text>
+  <text class="note" x="774" y="695">ещё не merchant capture</text>
+
+  <rect class="card" x="1088" y="567" width="280" height="145" rx="20" fill="#eafbf9" stroke="#a7e7df"/>
+  <rect x="1088" y="567" width="280" height="7" rx="3.5" fill="#159b91"/>
+  <text class="card-title" x="1110" y="611">Adapter / Inbox</text>
+  <text class="card-text" x="1110" y="640">Финальный ответ API</text>
+  <text class="card-text" x="1110" y="666">или проверенный webhook</text>
+  <text class="note" x="1110" y="695">позже — сверка UNKNOWN</text>
+
+  <rect class="card" x="1424" y="567" width="280" height="145" rx="20" fill="#fff7ec" stroke="#f3d4a7"/>
+  <rect x="1424" y="567" width="280" height="7" rx="3.5" fill="#d99a39"/>
+  <text class="card-title" x="1446" y="611">PSP</text>
+  <text class="card-text" x="1446" y="640">Ответ на вызов</text>
+  <text class="card-text" x="1446" y="666">или webhook в BNPL</text>
+  <text class="note" x="1446" y="695">не вебхук магазину</text>
+
+  <rect x="80" y="733" width="1640" height="70" rx="16" fill="#edf8f7" stroke="#c7e9e4"/>
+  <text class="step-text" x="104" y="763">Магазин видит AUTHORIZED</text>
+  <text class="note" x="104" y="787">и действующий резерв товара</text>
+  <path class="return-flow" d="M480 768 H562"/>
+  <text class="step-text" x="590" y="774">POST capture</text>
+  <path class="return-flow" d="M765 768 H847"/>
+  <text class="step-text" x="878" y="763">Договор + график + ledger</text>
+  <text class="note" x="878" y="787">одна транзакция Financial Core</text>
+  <text class="note" x="1354" y="775">Нет товара → cancel + возврат взноса</text>
+
+  <!-- 3. Loan servicing, merchant settlement, reconciliation. -->
+  <rect class="band" x="56" y="846" width="1688" height="352" rx="26"/>
+  <circle cx="101" cy="884" r="22" fill="#7957c4"/>
+  <text class="section-no" x="101" y="891">3</text>
+  <text class="section" x="139" y="892">После capture · рассрочка, деньги продавцу и контроль</text>
+
+  <path class="purple-flow" d="M650 997 H562"/>
+  <path class="purple-flow" d="M1150 997 H1238"/>
+  <path class="purple-flow" d="M900 1082 V1061"/>
+
+  <rect class="card" x="80" y="924" width="470" height="136" rx="20" fill="#eafbf9" stroke="#a7e7df"/>
+  <rect x="80" y="924" width="470" height="7" rx="3.5" fill="#159b91"/>
+  <text class="card-title" x="104" y="970">Планировщик и Servicing Workers</text>
+  <text class="card-text" x="104" y="1002">due_at → попытка списания → PSP</text>
+  <text class="note" x="104" y="1033">Результат снова фиксирует Financial Core</text>
+
+  <rect class="card" x="650" y="924" width="500" height="136" rx="20" fill="#f5f0ff" stroke="#d6c4f1"/>
+  <rect x="650" y="924" width="500" height="7" rx="3.5" fill="#855ac8"/>
+  <text class="card-title" x="674" y="970">Financial Core + PostgreSQL</text>
+  <text class="card-text" x="674" y="1002">Лимит, договоры, взносы, ledger</text>
+  <text class="note" x="674" y="1033">Inbox / outbox · шард клиента при росте</text>
+
+  <rect class="card" x="1250" y="924" width="470" height="136" rx="20" fill="#fff7ec" stroke="#f3d4a7"/>
+  <rect x="1250" y="924" width="470" height="7" rx="3.5" fill="#d99a39"/>
+  <text class="card-title" x="1274" y="970">Выплата продавцу</text>
+  <text class="card-text" x="1274" y="1002">settlement_items → банк → магазин</text>
+  <text class="note" x="1274" y="1033">Отдельно от будущих взносов клиента</text>
+
+  <rect x="80" y="1082" width="470" height="84" rx="17" fill="#f4f7fb" stroke="#dce5f0"/>
+  <text class="card-strong" x="104" y="1115">Наблюдаемость</text>
+  <text class="note" x="104" y="1144">UNKNOWN, долг, просрочки, очередь due_at</text>
+
+  <rect x="650" y="1082" width="500" height="84" rx="17" fill="#f4f0ff" stroke="#d6c4f1"/>
+  <text class="card-strong" x="674" y="1115">Reconciliation</text>
+  <text class="note" x="674" y="1144">Ledger ↔ PSP ↔ банк; поиск расхождений</text>
+
+  <rect x="1250" y="1082" width="470" height="84" rx="17" fill="#f4f7fb" stroke="#dce5f0"/>
+  <text class="card-strong" x="1274" y="1115">Побочные события</text>
+  <text class="note" x="1274" y="1144">Outbox → broker → уведомления / аналитика</text>
+
+  <text class="footer" x="78" y="1238">Главное правило: webhook и redirect не создают деньги сами по себе; каждый подтверждённый исход применяется в финансовом ядре один раз.</text>
+</svg>
