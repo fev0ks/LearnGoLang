@@ -26,10 +26,12 @@
 - [06. Uber / Ride-Sharing](./06-uber-ride-sharing.md) — отдельные Ride Order и Trip, H3 как candidate projection, exact conditional claim водителя, real-time location (120K updates/sec), multi-region
 - [07. YouTube / Video Platform](./07-youtube-video-platform.md) — chunked upload, transcode pipeline, HLS ABR, CDN, view counter at scale
 - [08. Twitter / Social Feed](./08-twitter-social-feed.md) — hybrid fan-out (celebrity problem), Cassandra + Redis, Snowflake IDs, home timeline
+- [08.1 Twitter: pull-first альтернатива](./08.1-twitter-pull-first.md) — тот же кейс с обратным ключевым решением: без материализованных лент, индекс хвостов авторов в памяти, snapshot-пагинация, исключение по читателю вместо celebrity
 - [09. Netflix / Streaming](./09-netflix-streaming.md) — Open Connect CDN, per-title encoding, playback service, Chaos Engineering
 - [10. Google Drive](./10-google-drive.md) — content-addressed chunking, Rabin fingerprint, deduplication, sync protocol, conflict resolution
 - [11. Payment System](./11-payment-system.md) — double-entry bookkeeping, idempotency, Saga + Outbox, reconciliation, strong consistency
 - [11.1 Payment Gateway для мерчантов](./11.1-payment-gateway.md) — Stripe/Robokassa-подобный gateway: PaymentIntent и provider attempts, HMAC + nonce, hosted iframe, CDC → Kafka, `UNKNOWN` после timeout и reconciliation
+- [11.2 Схема данных кошелька (SVG)](./11-wallet-operations-ledger-schema.svg) — типы операций, `PENDING`-история по счёту, статусы PSP, резерв баланса и связь с ledger без примеров данных
 - [12. Marketplace Vendor Notifications](./12-marketplace-vendor-notifications.md) — webhook delivery (Stripe-style), outbox + Kafka, per-vendor circuit breaker, HMAC signing, dead letter
 - [13. Avito / Classifieds](./13-avito-classifieds.md) — фасетный поиск (Elasticsearch), category-specific атрибуты (JSONB + денорм), Outbox→ES, медиа-пайплайн, горячее чтение карточек, view counter, модерация/антифрод
 - [14. Stock / Inventory Service](./14-stock-inventory-service.md) — interview-case на 45–60 минут: условный резерв без overselling, multi-warehouse allocations, exact read vs preview, saga и batch writer для hot SKU
@@ -53,6 +55,7 @@
 - [30. Black Friday Marketplace](./30-black-friday-marketplace.md) — composite drill ×20: каталог, promo, stock, Order/Payment Saga, backpressure и порядок graceful degradation
 - [31. Airbnb Booking](./31-airbnb-booking.md) — geo search projection, exact nightly calendar, price quote, hold TTL, payment saga и последнее доступное жильё
 - [32. BNPL Service — Tabby / Klarna](./32-bnpl-service.md) — общий кредитный лимит, первый взнос и capture, график платежей, ledger, выплаты продавцам, просрочки и частичные возвраты
+- [32b. BNPL Order Management](./32b-bnpl-order-management.md) — дополнение про границу заказа магазина и BNPL, частичные отгрузки, несколько capture, отмену остатка и возвраты
 - [33. Оповещения о низких ценах](./33-low-price-alerts.md) — общая постановка и ведение интервью, индекс подписок по предложению и порогу, миллион получателей, свежесть цены, outbox и границы гарантий push-доставки
 - [34. Dating Service](./34-dating-geo-matching-service.md) — геопоиск людей в радиусе N, точная проверка поверх eventual geo-index, свайпы, конкурентные взаимные лайки, canonical match, discovery-сессии и приватность координат
 
