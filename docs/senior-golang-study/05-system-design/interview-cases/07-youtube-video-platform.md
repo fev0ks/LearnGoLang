@@ -52,127 +52,162 @@
 
 ## Фаза 2: Оценка нагрузки
 
-Загрузка — переводим «часы видео» в секунды аккуратно:
+Считаем только те числа, которые меняют архитектуру.
 
 ```
-500 часов видео в минуту
-  500 ч × 3 600 = 1 800 000 секунд видео в минуту
-  1 800 000 / 60 = 30 000 секунд видео в СЕКУНДУ
+Upload:
+  500 ч/мин × 3 600 / 60 = 30 000 секунд видео в секунду
+  500 ч/мин × 1 440 мин = 720 000 ч/сутки ≈ 4,3 млн роликов по 10 минут
+  на ролик: оригинал 500 MB + пять вариантов (360p…1440p) ≈ 1,5 GB
+  → 4,3 млн × 1,5 GB ≈ 6,5 PB/сутки ≈ 2,4 EB/год
 
-Битрейт оригинала: 500 MB на 10-минутное видео
-  500 MB / 600 с ≈ 0,83 MB/с
+Playback:
+  1 млрд просмотров/сутки / 86 400 ≈ 11 600 стартов/с
+  × 180 с просмотра (удержание 30% от 10 минут) ≈ 2,1 млн ОДНОВРЕМЕННЫХ зрителей
+  × 2 Mbit/с (720p) ≈ 4,2 Tbit/с исходящего трафика
 
-Входящий поток:
-  30 000 с видео/с × 0,83 MB/с ≈ 25 GB/с ≈ 200 Gbit/с
+Transcode:
+  30 000 с/с × 5 вариантов = 150 000 с/с работы кодека
+  при ~4× быстрее реального времени на ядро ≈ десятки тысяч ядер
 ```
 
-Просмотры — считаем через одновременных зрителей, а не через старты:
-
-```
-1 млрд просмотров/сутки / 86 400 ≈ 11 600 стартов/с
-
-Ошибка — умножать старты на битрейт: старт длится не мгновение.
-Нужен закон Литтла (одновременные = поток × длительность):
-
-  удержание 30% от 10 минут ≈ 180 секунд просмотра
-  11 600 × 180 ≈ 2,1 млн ОДНОВРЕМЕННЫХ зрителей
-
-Исходящий поток при 2 Mbit/с (720p):
-  2,1 млн × 2 Mbit/с ≈ 4,2 Tbit/с
-```
-
-Хранилище:
-
-```
-Видео в сутки:
-  500 ч/мин × 1 440 мин = 720 000 часов видео/сутки
-  при длине 10 минут это 4,32 млн роликов/сутки
-
-На один ролик:
-  оригинал 500 MB + пять вариантов (360p…1440p) ≈ 1 GB
-  итого ~1,5 GB
-
-  4,32 млн × 1,5 GB ≈ 6,5 PB/сутки
-  за год ≈ 2,4 EB
-```
-
-**Транскодирование — главная статья расходов, и её нужно оценить:**
-
-```
-30 000 секунд видео в секунду × 5 вариантов = 150 000 с/с работы кодека
-
-Если одно ядро кодирует примерно вчетверо быстрее реального времени
-(усреднённо по разрешениям, с быстрым пресетом):
-
-  150 000 / 4 ≈ 37 500 ядер, занятых непрерывно
-
-Это порядок в тысячи серверов только под транскодирование —
-дороже и хранилища, и раздачи. Отсюда и появляются оптимизации
-вроде кодирования дорогих вариантов лениво, по факту спроса.
-```
+Типичная ошибка — умножать старты в секунду на битрейт. Старт длится не мгновение, поэтому нагрузку дают **одновременные** зрители: по закону Литтла это поток × длительность просмотра.
 
 **Выводы:**
-- 200 Gbit/с входящего трафика — приём нельзя терминировать в одной точке; загрузка идёт напрямую в объектное хранилище, минуя приложение.
-- 4,2 Tbit/с исходящего — раздача возможна только через CDN.
-- ~2,4 EB/год — обязателен tiering и лениво создаваемые варианты.
-- ~37 тысяч ядер под кодек — это доминирующая стоимость, планировать её нужно первой.
+- ~4,2 Tbit/с исходящего — раздача возможна только через CDN.
+- ~2,4 EB/год — обязателен tiering, редкие варианты качества создаются лениво; вместе с раздачей это основная статья расходов.
+- Десятки тысяч ядер под кодек — отдельный пул воркеров с очередью и автоскейлом, не связанный с API.
 
 ---
 
 ## Фаза 3: Высокоуровневый дизайн
 
+Система распадается на три контура с разным профилем нагрузки. Их удобно
+показывать по очереди: сначала API, в который ходят пользователи, затем
+асинхронная обработка загруженного видео, затем раздача видеобайтов и в конце
+фоновые проекции (поиск, счётчики, рекомендации).
+
+**Запросы пользователя (metadata plane):**
+
+```mermaid
+flowchart TB
+    Client[Web / Mobile] --> Gateway[API Gateway]
+    Gateway -->|страница видео, лайк, просмотр| Video[Video Service]
+    Gateway -->|поиск| Search[Search Service]
+    Gateway -->|главная, «смотреть далее»| Rec[Recommendation Service]
+    Video -->|метаданные, лайки| PG[(PostgreSQL)]
+    Video -->|INCR view_count| Redis[(Redis)]
+    Search --> ES[(Elasticsearch)]
+    Rec -->|готовый список video_id| Redis
+```
+
+Через API идут только небольшие JSON-ответы: метаданные, URL манифеста,
+результаты поиска. Видеобайты через сервисы не проходят — это главный
+приём, благодаря которому API масштабируется независимо от 4,2 Tbit/с раздачи.
+
+**Загрузка и транскодирование:**
+
 ```mermaid
 flowchart LR
-    Creator[Creator<br/>raw video]
-
-    subgraph Upload[Upload Pipeline]
-        UploadSvc[Upload Service<br/>chunked, resumable]
-        RawS3[(S3<br/>raw storage)]
-        Transcode[Transcode Workers<br/>FFmpeg]
-        ProcS3[(S3<br/>processed, 5 quality variants)]
-
-        UploadSvc --> RawS3
-        RawS3 --> Transcode
-        Transcode --> ProcS3
-    end
-
-    CDN[CDN Edge Nodes<br/>CloudFront / Akamai]
-    Viewer[Viewer]
-
-    Creator --> UploadSvc
-    ProcS3 --> CDN
-    CDN --> Viewer
-
-    style Upload fill:#dbeafe,stroke:#1e40af,color:#0f172a
+    Creator[Creator] -->|части по 5-10 MB, напрямую| Raw[(S3 raw<br/>оригинал)]
+    Creator -->|initiate / complete| Upload[Upload Service<br/>presigned URL, состояние загрузки]
+    Upload -.->|CreateMultipartUpload<br/>CompleteMultipartUpload| Raw
+    Upload -->|video.uploaded| Kafka[Kafka]
+    Kafka --> Orch[Transcode Orchestrator]
+    Orch -->|5 задач на видео| Queue[Task Queue]
+    Queue --> Workers[Transcode Workers<br/>FFmpeg, автоскейл]
+    Raw --> Workers
+    Workers --> Proc[(S3 processed<br/>5 вариантов + HLS)]
+    Orch -->|status READY| Video[Video Service]
 ```
+
+Контур асинхронный: creator получает ответ сразу после загрузки оригинала,
+видео появляется в статусе `PROCESSING`. CPU-bound транскодирование живёт в
+отдельном пуле воркеров и не отнимает ресурсы у API.
+
+**Воспроизведение:**
+
+```mermaid
+flowchart LR
+    Player[Player] -->|1. GET /videos/id| Video[Video Service]
+    Video -->|метаданные + URL манифеста| Player
+    Player -->|2. master.m3u8, .ts-сегменты| CDN[CDN Edge]
+    CDN -->|cache miss| Proc[(S3 processed)]
+```
+
+Плеер обращается к API один раз, дальше качает манифест и сегменты только с
+CDN и сам переключает качество (ABR). Сегменты immutable, поэтому кешируются
+надолго, а origin видит в основном длинный хвост непопулярных видео.
+
+**Фоновые проекции: поиск, счётчики, рекомендации:**
+
+```mermaid
+flowchart LR
+    Video[Video Service] -->|video.ready, video.viewed| Kafka[Kafka]
+    Kafka --> Indexer[Search Indexer] --> ES[(Elasticsearch)]
+    Kafka --> Batch[Offline batch<br/>раз в сутки] -->|top-100 на user| Redis[(Redis)]
+    Redis -->|flush view_count раз в 5 мин| PG[(PostgreSQL)]
+```
+
+Все три проекции eventual-consistent: новое видео попадает в поиск с задержкой
+индексации, счётчик в PostgreSQL отстаёт на минуты, рекомендации — на сутки.
+Для этих данных такая свежесть допустима, а API не ждёт ни одного из шагов.
 
 ### Роль каждого компонента
 
-Сквозная идея — **два независимых пайплайна**: write-heavy upload/transcode (асинхронный, batch, CPU-bound) и read-heavy playback (CDN-first, 4,2 Tbit/с). Они масштабируются и оптимизируются раздельно.
+Главная идея — разделить три контура: write-heavy обработку видео, read-heavy
+раздачу байтов и API метаданных. У каждого своё узкое место (CPU, трафик, RPS),
+поэтому они масштабируются и оптимизируются раздельно.
 
-**Upload Service.**
-*Зачем:* chunked resumable-загрузка оригинала в S3 (Multipart Upload), затем событие `video.uploaded` в Kafka.
-*Почему отдельно:* загрузка 500 MB ненадёжна одним запросом; resumable-протокол и сборка чанков — отдельная ответственность.
+**API Gateway** — единая точка входа.
 
-**S3 (raw + processed).**
-*Зачем:* durable-хранилище оригиналов и 5 quality-вариантов, tiering hot→warm→Glacier.
-*Почему object storage:* ~2,4 EB/год бинарного контента, нужны надёжность и дешёвый cold-tier; метаданные при этом в Postgres.
+- *Зачем:* TLS, аутентификация, rate limiting, маршрутизация в сервисы.
+- *Граница ответственности:* видеобайты через gateway не идут; право менять видео (владелец) проверяет Video Service.
 
-**Transcode Workers (FFmpeg).**
-*Зачем:* параллельно создают 5 битрейтов и HLS-сегменты.
-*Почему отдельный пул + очередь:* транскодирование CPU-bound и пиковое; раздаём задачи через очередь (механика — кейс [05. Task Queue](./05-task-queue.md)), автоскейл по глубине очереди. Транспорт событий — [Kafka](../../07-message-brokers-and-streaming/01-kafka.md).
+**Video Service + PostgreSQL** — владелец сущности «видео».
 
-**CDN (edge nodes).**
-*Зачем:* раздаёт immutable-сегменты близко к зрителю; origin (S3) видит только cache-miss.
-*Почему обязателен:* 4,2 Tbit/с из одного региона невозможны; Zipf (топ-1% = 80% трафика) делает кеш крайне эффективным. Профиль — [CDN / reverse proxy](../../08-networking-and-api/request-lifecycle/04-cdn-load-balancer-reverse-proxy.md), сквозной read-heavy поток — [external flows / read-heavy with CDN](../external-request-flows/02-read-heavy-request-with-cdn-and-cache.md).
+- *Зачем:* метаданные и статусы (`PROCESSING → READY`), URL master-манифеста на CDN, лайки и дизлайки — таблица `reactions` с первичным ключом `(user_id, video_id)`.
+- *Почему так:* метаданных мало (сотни миллионов строк), нужны транзакции и индексы — реляционная БД подходит. Индексы — [postgresql / indexes](../../06-databases/database-systems-catalog/postgresql/02-indexes.md).
 
-**Video metadata (PostgreSQL) + Redis.**
-*Зачем:* структурированные метаданные/статусы (PROCESSING→READY), view_count через Redis INCR с async-flush.
-*Почему так:* счётчик на популярном видео — write hotspot, его буферизуем в Redis (тот же приём, что в [Avito-кейсе](./13-avito-classifieds.md)); индексы метаданных — [postgresql / indexes](../../06-databases/database-systems-catalog/postgresql/02-indexes.md).
+**Redis** — горячие счётчики и готовые списки.
 
-**Elasticsearch.**
-*Зачем:* поиск по title/description/tags с весами.
-*Почему отдельный индекс:* 500M+ видео, полнотекстовый поиск с релевантностью — не для реляционного FTS. Профиль — [Elasticsearch / OpenSearch](../../06-databases/database-systems-catalog/09-elasticsearch-and-opensearch.md).
+- *Зачем:* `INCR view_count:{video_id}` с периодическим flush в PostgreSQL; `recommendations:{user_id}` с TTL 24 часа.
+- *Почему не сразу в БД:* счётчик популярного видео — write hotspot; буферизуем его в Redis, как в [Avito-кейсе](./13-avito-classifieds.md).
+
+**Upload Service** — приём оригинала.
+
+- *Зачем:* выдаёт presigned URL на части S3 Multipart Upload, проверяет права и квоты creator, хранит состояние загрузки для возобновления, по `complete` закрывает multipart и публикует `video.uploaded` в Kafka.
+- *Почему байты мимо него:* файл в 500 MB ненадёжно слать одним запросом, а ~25 GB/с входящего трафика нельзя пропускать через приложение — части идут напрямую в S3, сервис видит только управляющие вызовы.
+
+**Kafka** — шина событий.
+
+- *Зачем:* `video.uploaded`, `video.ready`, `video.viewed`; развязывает загрузку, транскодирование, индексацию и аналитику.
+- *Почему так:* новые консьюмеры (индексатор, batch) добавляются без изменения сервисов, события можно перечитать после сбоя. Профиль — [Kafka](../../07-message-brokers-and-streaming/01-kafka.md).
+
+**Transcode Orchestrator + Workers (FFmpeg)** — обработка видео.
+
+- *Зачем:* orchestrator режет видео на задачи по качествам, воркеры создают 5 вариантов и HLS-сегменты, orchestrator ставит статус `READY`.
+- *Почему отдельный пул + очередь:* транскодирование CPU-bound и пиковое (десятки тысяч ядер); автоскейл по глубине очереди. Механика очереди — кейс [05. Task Queue](./05-task-queue.md).
+
+**S3 (raw + processed)** — хранилище видеобайтов.
+
+- *Зачем:* durable-хранение оригиналов и вариантов, tiering hot → warm → Glacier.
+- *Почему object storage:* ~2,4 EB/год бинарного контента, нужны надёжность и дешёвый холодный tier; метаданные при этом в PostgreSQL.
+
+**CDN (edge nodes)** — раздача.
+
+- *Зачем:* отдаёт immutable-сегменты близко к зрителю; S3 видит только cache miss.
+- *Почему обязателен:* 4,2 Tbit/с из одного региона невозможны, а Zipf (топ-1% видео = 80% трафика) делает кеш очень эффективным. Профиль — [CDN / reverse proxy](../../08-networking-and-api/request-lifecycle/04-cdn-load-balancer-reverse-proxy.md), сквозной поток — [external flows / read-heavy with CDN](../external-request-flows/02-read-heavy-request-with-cdn-and-cache.md).
+
+**Search Service + Elasticsearch** — поиск.
+
+- *Зачем:* поиск по title/description/tags с весами; индекс обновляется индексатором из Kafka.
+- *Почему отдельный индекс:* 500M+ видео и полнотекстовая релевантность — не задача реляционного FTS. Профиль — [Elasticsearch / OpenSearch](../../06-databases/database-systems-catalog/09-elasticsearch-and-opensearch.md).
+
+**Recommendation Service + offline batch** — рекомендации.
+
+- *Зачем:* batch раз в сутки считает по истории просмотров top-100 видео на пользователя и кладёт в Redis; онлайн-сервис читает список и обогащает метаданными.
+- *Почему так:* тяжёлый расчёт вынесен из запроса, ответ укладывается в миллисекунды, а суточная свежесть для базовых рекомендаций допустима.
 
 ---
 
@@ -180,25 +215,50 @@ flowchart LR
 
 ### Upload Pipeline
 
-**Шаг 1: Chunked Upload**
+**Шаг 1: Chunked Upload напрямую в S3**
+
+Видео в 500 MB одним запросом передавать ненадёжно: обрывы сети и таймауты.
+Нужен resumable-протокол. Ключевое решение — **байты идут напрямую в S3 по
+presigned URL, через Upload Service проходят только управляющие вызовы**:
 
 ```
-Проблема: видео 500MB — одним запросом ненадёжно (network drops, timeouts).
+1. POST /videos/initiate-upload
+     Upload Service: проверить права и квоту creator
+                     CreateMultipartUpload в S3 → upload_id
+                     запись видео в БД: status = UPLOADING
+     → клиенту: video_id, upload_id, presigned URL на каждую часть
 
-Решение: Resumable Upload Protocol
-  1. Клиент: POST /videos/initiate-upload → получить upload_id
-  2. Клиент: разбить файл на chunks по 5MB
-  3. Клиент: PUT /videos/{upload_id}/chunks/{n} для каждого chunk
-  4. Upload Service: собрать в S3 (Multipart Upload S3 API)
-  5. Клиент: POST /videos/{upload_id}/complete
+2. PUT <presigned-url-part-N> — клиент шлёт части по 5-10 MB ПРЯМО в S3
+     S3 отвечает ETag на каждую часть; сервис в передаче не участвует
+     URL живут минуты - для долгой загрузки клиент запрашивает новую пачку
 
-  При обрыве сети:
-    GET /videos/{upload_id}/status → список загруженных chunks
-    Продолжить с первого незагруженного
+3. POST /videos/{video_id}/complete  { parts: [{part_number, etag}, ...] }
+     Upload Service: CompleteMultipartUpload — сборку делает S3
+                     status = PROCESSING, событие video.uploaded в Kafka
 
-S3 Multipart Upload нативно поддерживает это:
-  CreateMultipartUpload → UploadPart × N → CompleteMultipartUpload
+При обрыве сети:
+  GET /videos/{video_id}/upload-status
+    → Upload Service: ListParts в S3 → список уже загруженных частей
+    → клиент продолжает с первой недостающей
 ```
+
+Сборка чанков — это `CompleteMultipartUpload`: один небольшой вызов со списком
+частей и их ETag, байты при нём никуда не копируются. Незавершённые загрузки
+удаляет lifecycle-правило бакета, иначе их части копятся и занимают место.
+
+**Почему не проксировать чанки через сервис:**
+
+| | Через сервис (proxy) | Напрямую в S3 (presigned) |
+|---|---|---|
+| Трафик | ~25 GB/с идёт через приложение | приложение видит только JSON-вызовы |
+| Инстансы | сотни машин только на перекладывание байтов | десятки под управляющий API |
+| Сетевой путь | двойной: клиент → сервис → S3 | одинарный |
+| Проверка содержимого | возможна на лету | только после загрузки, асинхронно |
+| Лимит размера | проверка в коде | условия presigned-политики |
+
+Проксирование оправдано при небольших файлах и обязательной проверке содержимого
+в момент приёма. Здесь объём трафика решает вопрос однозначно. Антивирус и
+модерация всё равно работают асинхронно, уже после загрузки оригинала.
 
 **Шаг 2: Transcode Pipeline**
 
@@ -348,12 +408,7 @@ CDN cache policy:
 
 Решение 1: Redis INCR + периодическая запись в БД
   INCR view_count:{video_id}  // Redis атомарно, ~100ns
-  Batch job каждые 5 мин:
-    Читать все view_count из Redis
-    Bulk UPDATE в PostgreSQL
-    Сбросить Redis счётчики
-  
-  Проблема: потеря данных при падении Redis
+  Batch job каждые 5 мин: перенести накопленное в PostgreSQL
 
 Решение 2: HyperLogLog для уникальных просмотров
   PFADD unique_views:{video_id} {user_id}
@@ -370,6 +425,129 @@ CDN cache policy:
 
 **Выбор: Redis INCR + async flush в PostgreSQL** — просто, достаточно точно для view count (не финансовые данные).
 
+**Как сбрасывать счётчик, не теряя просмотры.** Наивный flush читает значение,
+пишет его в БД и удаляет ключ — и теряет всё, что накопилось между чтением и
+удалением:
+
+```
+value = GET view_count:{id}          ← 1000
+UPDATE videos SET view_count = view_count + 1000
+DEL view_count:{id}                  ← между GET и DEL пришло ещё 7 INCR — потеряны
+```
+
+Окно маленькое, но при 11 600 просмотрах/с срабатывает регулярно. Redis
+выполняет команды по одной, поэтому чтение и обнуление делаем одной командой:
+
+```
+delta = GETSET view_count:{id} 0     ← атомарно: вернуть старое, записать 0
+UPDATE videos SET view_count = view_count + $delta WHERE id = $id
+```
+
+Просмотры, пришедшие после `GETSET`, увеличивают уже обнулённый счётчик и
+попадут в следующий цикл. Обязательное условие — запись в БД **прибавляет**
+дельту, а не присваивает значение: присваивание затирало бы параллельные
+обновления.
+
+Гонка закрыта, но остаётся падение процесса: если flush упал между `GETSET` и
+`UPDATE`, дельта уже стёрта из Redis. Усиление — уносить счётчик в сторону
+атомарным `RENAME view_count:{id} view_flush:{id}`: следующий `INCR` создаст
+исходный ключ заново с нуля, а `view_flush` переживёт падение и будет подобран
+следующим запуском. Это тот же принцип, что в outbox из
+[Avito-кейса](./13-avito-classifieds.md) — удалять данные только после
+подтверждённой записи.
+
+Счётчики нельзя держать в базе Redis с вытеснением по памяти: вытесненный ключ
+означает потерю всего, что не успело попасть в PostgreSQL.
+
+---
+
+### Лайки и дизлайки
+
+В отличие от просмотра, реакция — это **состояние пары (пользователь, видео)**, а не
+поток событий. Одно и то же нажатие может прийти дважды (ретрай, двойной клик),
+пользователь может переключить лайк на дизлайк или снять реакцию. Поэтому главная
+задача здесь не пропускная способность, а идемпотентность.
+
+```mermaid
+flowchart LR
+    Player[Player] -->|PUT /videos/id/reaction| Video[Video Service]
+    Video -->|UPSERT состояния| PG[(PostgreSQL<br/>reactions)]
+    PG -->|дельта -1 / 0 / +1| Video
+    Video -->|INCRBY счётчиков| Redis[(Redis)]
+    Redis -->|flush раз в 5 мин| Counts[(PostgreSQL<br/>videos.like_count)]
+```
+
+**Хранение состояния:**
+
+```sql
+CREATE TABLE reactions (
+  user_id   BIGINT       NOT NULL,
+  video_id  VARCHAR(11)  NOT NULL,
+  reaction  SMALLINT     NOT NULL,   -- +1 лайк, -1 дизлайк
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (user_id, video_id)
+);
+```
+
+Первичный ключ `(user_id, video_id)` сам по себе даёт идемпотентность: повторное
+нажатие не создаёт второй строки. Он же обслуживает чтение «как я отреагировал на
+это видео» — точечный lookup при открытии карточки.
+
+**Почему счётчик нельзя обновлять простым `+1`:**
+
+```
+Переключение лайка на дизлайк — это не одно событие, а две правки счётчиков:
+  like_count -1  и  dislike_count +1
+
+Значит нужно знать ПРЕДЫДУЩЕЕ состояние реакции. Простой RETURNING отдаёт уже
+новое значение, поэтому прежнее читаем отдельным CTE — он видит снимок данных
+до вставки:
+
+  WITH prev AS (
+    SELECT reaction FROM reactions
+     WHERE user_id = $1 AND video_id = $2
+  ), upsert AS (
+    INSERT INTO reactions (user_id, video_id, reaction)
+    VALUES ($1, $2, $3)
+    ON CONFLICT (user_id, video_id)
+    DO UPDATE SET reaction = EXCLUDED.reaction, updated_at = NOW()
+    RETURNING reaction
+  )
+  SELECT COALESCE((SELECT reaction FROM prev), 0) AS old_reaction,
+         (SELECT reaction FROM upsert)            AS new_reaction;
+
+Дельта считается из пары (было, стало):
+
+  было +1, стало +1  → дельта 0  (ретрай, счётчики не трогаем)
+  было  0, стало +1  → like +1
+  было +1, стало -1  → like -1, dislike +1
+  было +1, стало  0  → like -1  (снятие реакции — удаление строки)
+```
+
+Одновременные запросы по одной паре `(user_id, video_id)` сериализует сам
+`ON CONFLICT`: второй ждёт блокировку строки. Дельта 0 при повторе — это и есть
+защита от накрутки ретраями. Если бы счётчик
+увеличивался на каждый запрос, дубли и повторные отправки завышали бы его.
+
+**Агрегаты.** `videos.like_count` и `videos.dislike_count` денормализованы: считать
+`COUNT(*)` по `reactions` на каждое открытие видео нельзя — под популярным роликом
+миллионы строк. Сами счётчики обновляются тем же приёмом, что и просмотры:
+`INCRBY` в Redis и периодический flush в PostgreSQL.
+
+**Нужен ли вообще буфер в Redis:** реакции ставят примерно на 1-2% просмотров, то
+есть ~230 запросов/с на всю систему против 11 600 просмотров/с. Для PostgreSQL это
+немного, и на этапе MVP счётчик можно обновлять прямо в БД одной транзакцией с
+`reactions` — так он всегда согласован с состоянием реакций. Redis добавляется,
+когда под вирусным видео реакции идут сотнями в секунду и строка `videos`
+становится точкой блокировок. Это осознанный размен: точность и простота против
+защиты горячей строки.
+
+**Дизлайки как отдельный случай.** YouTube в 2021 году скрыл публичный счётчик
+дизлайков, оставив его видимым автору. С точки зрения дизайна это меняет только
+выдачу: состояние по-прежнему хранится, счётчик считается, но в публичный ответ
+API не попадает. Полезный ответ на собеседовании: сбор данных и их показ —
+независимые решения.
+
 ---
 
 ### База данных для метаданных
@@ -385,7 +563,8 @@ CREATE TABLE videos (
   duration_sec  INT,
   thumbnail_url TEXT,
   view_count    BIGINT        NOT NULL DEFAULT 0,
-  like_count    INT           NOT NULL DEFAULT 0,
+  like_count    INT           NOT NULL DEFAULT 0,    -- агрегат по reactions
+  dislike_count INT           NOT NULL DEFAULT 0,
   created_at    TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
   published_at  TIMESTAMPTZ,
 
@@ -457,8 +636,8 @@ Deep ML (out of scope):
 ## Сквозные потоки
 
 **1. Загрузка видео.**
-Creator → initiate-upload → чанки по 5 MB через S3 Multipart → complete → событие `video.uploaded` в Kafka.
-*Итог:* обрыв сети не теряет прогресс (resume по списку загруженных чанков); оригинал durable в S3 до обработки.
+Creator → `initiate-upload` → presigned URL на части → части по 5-10 MB идут напрямую в S3 → `complete` (сборка на стороне S3) → событие `video.uploaded` в Kafka.
+*Итог:* обрыв сети не теряет прогресс (resume по `ListParts`); оригинал durable в S3 до обработки, а входящие ~25 GB/с не проходят через приложение.
 
 **2. Транскодирование.**
 Kafka → Transcode Orchestrator создаёт 5 задач (по качеству) в очередь → FFmpeg-воркеры (автоскейл по глубине) пишут варианты + HLS-сегменты в S3 → статус READY, pre-warm первых сегментов в CDN.
@@ -468,8 +647,8 @@ Kafka → Transcode Orchestrator создаёт 5 задач (по качест�
 Player → master playlist → стартует с низкого качества → CDN отдаёт `.ts`-сегменты (hit ~5 мс) → клиент повышает/понижает качество по скорости загрузки.
 *Итог:* 4,2 Tbit/с обслуживает CDN, origin видит только длинный хвост; immutable-сегменты кешируются «вечно».
 
-**4. Учёт просмотров и поиск.**
-Каждый просмотр → Redis `INCR view_count` → batch-flush в PostgreSQL раз в 5 мин; публикация видео → индексация в Elasticsearch.
+**4. Учёт просмотров, реакций и поиск.**
+Каждый просмотр → Redis `INCR view_count` → batch-flush в PostgreSQL раз в 5 мин; лайк или дизлайк → UPSERT в `reactions` → дельта в счётчики; публикация видео → индексация в Elasticsearch.
 *Итог:* счётчик не создаёт write-hotspot в БД; поиск и view_count eventual-consistent, что для них допустимо.
 
 ---
@@ -491,7 +670,7 @@ Player → master playlist → стартует с низкого качеств
 
 > "YouTube — это два независимых пайплайна: upload/transcode и playback.
 >
-> Upload: chunked resumable upload в S3 → событие в Kafka → transcode workers параллельно создают 5 quality variants через FFmpeg → готово в S3. Transcode — CPU-intensive, auto-scaling workers по queue depth.
+> Upload: chunked resumable upload напрямую в S3 по presigned URL, сервис обрабатывает только initiate/complete → событие в Kafka → transcode workers параллельно создают 5 quality variants через FFmpeg → готово в S3. Transcode — CPU-intensive, auto-scaling workers по queue depth.
 >
 > Playback: HLS с 6-секундными сегментами. Клиент сам выбирает качество (ABR) по скорости загрузки. Весь трафик через CDN — 4,2 Tbit/с невозможно отдавать из origin. Сегменты immutable, кешируются бесконечно. Первые 3-4 сегмента популярных видео — pre-warm в CDN после transcode.
 >
