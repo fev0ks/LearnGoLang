@@ -4,3 +4,6 @@ trace.out
 
 # Personal, do not commit (NDA: анонимизированный разбор архитектуры рабочего проекта)
 docs/senior-golang-study/05-system-design/nda/
+
+# Personal interview retrospectives: sketches, mistakes and private notes
+docs/senior-golang-study/05-system-design/interview-cases/_personal-interview-retrospectives/
